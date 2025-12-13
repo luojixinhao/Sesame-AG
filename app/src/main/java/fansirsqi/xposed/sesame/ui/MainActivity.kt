@@ -35,7 +35,6 @@ import fansirsqi.xposed.sesame.entity.UserEntity
 import fansirsqi.xposed.sesame.model.SelectModelFieldFunc
 import fansirsqi.xposed.sesame.newui.DeviceInfoCard
 import fansirsqi.xposed.sesame.newui.DeviceInfoUtil
-import fansirsqi.xposed.sesame.newui.WatermarkView
 import fansirsqi.xposed.sesame.ui.widget.ListDialog
 import fansirsqi.xposed.sesame.util.AssetUtil
 import fansirsqi.xposed.sesame.util.Detector
@@ -52,16 +51,12 @@ import java.util.concurrent.TimeUnit
 
 //   欢迎自己打包 欢迎大佬pr
 //   项目开源且公益  维护都是自愿
-//   但是如果打包改个名拿去卖钱忽悠小白
-//   那我只能说你妈死了 就当开源项目给你妈烧纸钱了
 class MainActivity : BaseActivity() {
     private val TAG = "MainActivity"
     private var hasPermissions = false
     private var userNameArray = arrayOf<String>()
     private var userEntityArray = arrayOf<UserEntity?>(null)
     private lateinit var oneWord: TextView
-
-    private lateinit var v: WatermarkView
 
     @SuppressLint("SetTextI18n", "UnsafeDynamicallyLoadedCode")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,7 +73,6 @@ class MainActivity : BaseActivity() {
         setContentView(R.layout.activity_main)
         oneWord = findViewById(R.id.one_word)
         val deviceInfo: ComposeView = findViewById(R.id.device_info)
-        v = WatermarkView.install(this)
         deviceInfo.setContent {
             val customColorScheme = lightColorScheme(
                 primary = Color(0xFF3F51B5), onPrimary = Color.White, background = Color(0xFFF5F5F5), onBackground = Color.Black
@@ -150,13 +144,6 @@ class MainActivity : BaseActivity() {
         }
     }
 
-
-    // 比如在 Activity 的 onConfigurationChanged 中
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        v.refresh() // 主动刷新水印颜色
-    }
-
     /**
      * 处理按钮点击事件
      *
@@ -179,9 +166,7 @@ class MainActivity : BaseActivity() {
             }
 
             R.id.btn_view_error_log_file -> {
-                executeWithVerification {
-                    openLogFile(Files.getErrorLogFile())
-                }
+                openLogFile(Files.getErrorLogFile())
             }
 
             R.id.btn_view_all_log_file -> {
@@ -463,7 +448,7 @@ class MainActivity : BaseActivity() {
                 ListDialog.ListType.SHOW
             )
         } else {
-            ToastUtil.makeText(this, "😡 别他妈选默认！！！！！！！！", Toast.LENGTH_LONG).show()
+            ToastUtil.makeText(this, "请勿选择默认", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -496,102 +481,4 @@ class MainActivity : BaseActivity() {
         }
     }
 
-    /**
-    * 执行需要验证的操作（带开关控制）
-    *
-    * @param action 需要执行的操作
-    *
-    * @details 根据 BuildConfig 配置决定是否需要密码验证
-    */
-    private fun executeWithVerification(action: () -> Unit) {
-        if (BuildConfig.DEBUG) {
-            action()// 不需要验证时直接执行
-
-        } else {
-            // 需要验证时显示密码对话框
-            showPasswordDialog(action)
-        }
-    }
-    @SuppressLint("SetTextI18n")
-    private fun showPasswordDialog(onSuccess: () -> Unit) {
-        // 父布局
-        val container = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(50, 30, 50, 10)
-        }
-
-        // 上方提示文字
-        val label = TextView(this).apply {
-            text = "非必要情况无需查看异常日志\n（有困难联系闲鱼卖家帮你处理）"
-            textSize = 16f
-            setTextColor(android.graphics.Color.DKGRAY)
-            setPadding(0, 0, 0, 20)
-            textAlignment = View.TEXT_ALIGNMENT_CENTER
-        }
-
-        // 输入框
-        val editText = android.widget.EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            hint = "请输入密码"
-            setTextColor(android.graphics.Color.BLACK)
-            setHintTextColor(android.graphics.Color.GRAY)
-            setPadding(40, 30, 40, 30)
-            textAlignment = View.TEXT_ALIGNMENT_CENTER
-
-            // 输入框椭圆圆角背景
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(android.graphics.Color.WHITE)
-                cornerRadii = floatArrayOf(
-                    60f, 60f,  // 左上
-                    60f, 60f,  // 右上
-                    60f, 60f,  // 右下
-                    60f, 60f   // 左下
-                )
-                setStroke(3, android.graphics.Color.LTGRAY)
-            }
-        }
-
-        container.addView(label)
-        container.addView(editText)
-
-        // 创建 AlertDialog
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("🔐 防呆验证")
-            .setView(container)
-            .setCancelable(true)
-            .setPositiveButton("确定", null)
-            .setNegativeButton("取消") { d, _ -> d.dismiss() }
-            .create()
-
-        // 弹窗显示后设置外边框圆角
-        dialog.setOnShowListener {
-            // 设置外框圆角
-            dialog.window?.setBackgroundDrawable(
-                android.graphics.drawable.GradientDrawable().apply {
-                    setColor(android.graphics.Color.WHITE) // 背景色
-                    cornerRadius = 60f // 弹窗圆角
-                }
-            )
-
-            val positiveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-            positiveButton.setTextColor("#3F51B5".toColorInt())
-            positiveButton.setOnClickListener {
-                val password = editText.text.toString()
-                if (password == "Sesame-TK") {
-                    ToastUtil.showToast(this, "验证成功😊")
-                    onSuccess()
-                    dialog.dismiss()
-                } else {
-                    ToastUtil.showToast(this, "密码错误😡")
-                    editText.text.clear()
-                }
-            }
-
-            val negativeButton = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
-            negativeButton.setTextColor(android.graphics.Color.DKGRAY)
-        }
-
-        dialog.show()
-    }
 }

@@ -24,7 +24,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import fansirsqi.xposed.sesame.R
-import fansirsqi.xposed.sesame.newui.WatermarkView.Companion.install
 import fansirsqi.xposed.sesame.util.Files
 import fansirsqi.xposed.sesame.util.LanguageUtil
 import fansirsqi.xposed.sesame.util.Log
@@ -61,7 +60,6 @@ class HtmlViewerActivity : BaseActivity() {
         super.onCreate(savedInstanceState)
         LanguageUtil.setLocale(this)
         setContentView(R.layout.activity_html_viewer)
-        install(this)
         // 初始化 WebView 和进度条
         mWebView = findViewById(R.id.mwv_webview)
         progressBar = findViewById(R.id.pgb_webview)

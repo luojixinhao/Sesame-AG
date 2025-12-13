@@ -30,7 +30,6 @@ import fansirsqi.xposed.sesame.entity.AlipayUser;
 import fansirsqi.xposed.sesame.model.Model;
 import fansirsqi.xposed.sesame.model.ModelConfig;
 import fansirsqi.xposed.sesame.model.SelectModelFieldFunc;
-import fansirsqi.xposed.sesame.newui.WatermarkView;
 import fansirsqi.xposed.sesame.task.ModelTask;
 import fansirsqi.xposed.sesame.ui.widget.ContentPagerAdapter;
 import fansirsqi.xposed.sesame.ui.widget.ListDialog;
@@ -98,8 +97,7 @@ public class SettingActivity extends BaseActivity {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         PortUtil.handleExport(this, result.getData().getData(), userId);
                     }
-                }
-        );
+                });
         // 初始化导入逻辑
         importLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
@@ -107,19 +105,16 @@ public class SettingActivity extends BaseActivity {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         PortUtil.handleImport(this, result.getData().getData(), userId);
                     }
-                }
-        );
+                });
         // 设置副标题
         if (this.userName != null) {
             setBaseSubtitle(getString(R.string.settings) + ": " + this.userName);
         }
         initializeTabs();
-        WatermarkView watermarkView = WatermarkView.Companion.install(this);
         String tag = "用户: " + userName + "\n ID: " + userId;
         if (userName.equals("默认") || userId == null) {
             tag = "用户: " + "未登录" + "\n ID: " + "*************";
         }
-        watermarkView.setWatermarkText(tag);
     }
 
     private void initializeTabs() {
@@ -137,7 +132,8 @@ public class SettingActivity extends BaseActivity {
             });
             recyclerTabList.setAdapter(tabAdapter);
             ViewPager2 viewPager = findViewById(R.id.view_pager_content);
-            ContentPagerAdapter contentAdapter = new ContentPagerAdapter(getSupportFragmentManager(), getLifecycle(), modelConfigMap);
+            ContentPagerAdapter contentAdapter = new ContentPagerAdapter(getSupportFragmentManager(), getLifecycle(),
+                    modelConfigMap);
             viewPager.setAdapter(contentAdapter);
             viewPager.setUserInputEnabled(false);// 禁止用户手动滑动
             viewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
@@ -207,7 +203,8 @@ public class SettingActivity extends BaseActivity {
                         .show();
                 break;
             case 4: // 查看单向好友列表
-                ListDialog.show(this, "单向好友列表", AlipayUser.getList(user -> user.getFriendStatus() != 1), SelectModelFieldFunc.newMapInstance(), false, ListDialog.ListType.SHOW);
+                ListDialog.show(this, "单向好友列表", AlipayUser.getList(user -> user.getFriendStatus() != 1),
+                        SelectModelFieldFunc.newMapInstance(), false, ListDialog.ListType.SHOW);
                 break;
             case 5: // 切换到新 UI
                 UIConfig.INSTANCE.setUiOption(UI_OPTION_WEB);
@@ -225,8 +222,9 @@ public class SettingActivity extends BaseActivity {
                 save();
                 break;
             case 7:
-                //复制userId到剪切板
-                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                // 复制userId到剪切板
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(
+                        CLIPBOARD_SERVICE);
                 ClipData clipData = ClipData.newPlainText("userId", this.userId);
                 cm.setPrimaryClip(clipData);
                 ToastUtil.showToastWithDelay(this, "复制成功！", 100);
@@ -237,9 +235,9 @@ public class SettingActivity extends BaseActivity {
 
     private void save() {
         try {
-//            if (!ViewAppInfo.INSTANCE.getVeriftag()) {
-//                ToastUtil.showToastWithDelay(this, "非内测用户！", 100);
-//            }
+            // if (!ViewAppInfo.INSTANCE.getVeriftag()) {
+            // ToastUtil.showToastWithDelay(this, "非内测用户！", 100);
+            // }
             if (Config.isModify(this.userId) && Config.save(this.userId, false)) {
                 ToastUtil.showToastWithDelay(this, "保存成功！", 100);
                 if (!StringUtil.isEmpty(this.userId)) {

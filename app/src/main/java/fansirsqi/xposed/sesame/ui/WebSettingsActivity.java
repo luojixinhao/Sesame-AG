@@ -2,7 +2,6 @@ package fansirsqi.xposed.sesame.ui;
 
 import static fansirsqi.xposed.sesame.data.UIConfig.UI_OPTION_NEW;
 
-
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.content.ClipData;
@@ -49,7 +48,6 @@ import fansirsqi.xposed.sesame.model.ModelField;
 import fansirsqi.xposed.sesame.model.ModelFields;
 import fansirsqi.xposed.sesame.model.ModelGroup;
 import fansirsqi.xposed.sesame.model.SelectModelFieldFunc;
-import fansirsqi.xposed.sesame.newui.WatermarkView;
 import fansirsqi.xposed.sesame.task.ModelTask;
 import fansirsqi.xposed.sesame.ui.dto.ModelDto;
 import fansirsqi.xposed.sesame.ui.dto.ModelFieldInfoDto;
@@ -90,7 +88,7 @@ public class WebSettingsActivity extends BaseActivity {
         return getString(R.string.settings);
     }
 
-    @SuppressLint({"MissingInflatedId", "SetJavaScriptEnabled"})
+    @SuppressLint({ "MissingInflatedId", "SetJavaScriptEnabled" })
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -115,7 +113,7 @@ public class WebSettingsActivity extends BaseActivity {
         Config.load(userId);
         LanguageUtil.setLocale(this);
         setContentView(R.layout.activity_web_settings);
-        //处理返回键
+        // 处理返回键
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -137,8 +135,7 @@ public class WebSettingsActivity extends BaseActivity {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         PortUtil.handleExport(this, result.getData().getData(), userId);
                     }
-                }
-        );
+                });
         // 初始化导入逻辑
         importLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
@@ -146,8 +143,7 @@ public class WebSettingsActivity extends BaseActivity {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         PortUtil.handleImport(this, result.getData().getData(), userId);
                     }
-                }
-        );
+                });
         if (userName != null) {
             setBaseSubtitle(getString(R.string.settings) + ": " + userName);
         }
@@ -174,12 +170,10 @@ public class WebSettingsActivity extends BaseActivity {
                 Uri requestUrl = request.getUrl();
                 String scheme = requestUrl.getScheme();
                 assert scheme != null;
-                if (
-                        scheme.equalsIgnoreCase("http")
-                                || scheme.equalsIgnoreCase("https")
-                                || scheme.equalsIgnoreCase("ws")
-                                || scheme.equalsIgnoreCase("wss")
-                ) {
+                if (scheme.equalsIgnoreCase("http")
+                        || scheme.equalsIgnoreCase("https")
+                        || scheme.equalsIgnoreCase("ws")
+                        || scheme.equalsIgnoreCase("wss")) {
                     view.loadUrl(requestUrl.toString());
                     return true;
                 }
@@ -190,7 +184,7 @@ public class WebSettingsActivity extends BaseActivity {
         });
         if (BuildConfig.DEBUG) {
             WebView.setWebContentsDebuggingEnabled(true);
-//            webView.loadUrl("http://192.168.31.69:5500/app/src/main/assets/web/index.html");
+            // webView.loadUrl("http://192.168.31.69:5500/app/src/main/assets/web/index.html");
             webView.loadUrl("file:///android_asset/web/semi_index.html");
         } else {
             webView.loadUrl("file:///android_asset/web/semi_index.html");
@@ -201,19 +195,17 @@ public class WebSettingsActivity extends BaseActivity {
         Map<String, ModelConfig> modelConfigMap = ModelTask.getModelConfigMap();
         for (Map.Entry<String, ModelConfig> configEntry : modelConfigMap.entrySet()) {
             ModelConfig modelConfig = configEntry.getValue();
-            tabList.add(new ModelDto(configEntry.getKey(), modelConfig.getName(), modelConfig.getIcon(), modelConfig.getGroup().getCode(), null));
+            tabList.add(new ModelDto(configEntry.getKey(), modelConfig.getName(), modelConfig.getIcon(),
+                    modelConfig.getGroup().getCode(), null));
         }
         for (ModelGroup modelGroup : ModelGroup.values()) {
             groupList.add(new ModelGroupDto(modelGroup.getCode(), modelGroup.getName(), modelGroup.getIcon()));
         }
-        WatermarkView watermarkView = WatermarkView.Companion.install(this);
         String tag = "用户: " + userName + "\n ID: " + userId;
         if (userName.equals("默认") || userId == null) {
             tag = "用户: " + "未登录" + "\n ID: " + "*************";
         }
-        watermarkView.setWatermarkText(tag);
     }
-
 
     public class WebAppInterface {
         @JavascriptInterface
@@ -270,14 +262,16 @@ public class WebSettingsActivity extends BaseActivity {
 
         @JavascriptInterface
         public String getModelByGroup(String groupCode) {
-            Collection<ModelConfig> modelConfigCollection = ModelTask.getGroupModelConfig(ModelGroup.getByCode(groupCode)).values();
+            Collection<ModelConfig> modelConfigCollection = ModelTask
+                    .getGroupModelConfig(ModelGroup.getByCode(groupCode)).values();
             List<ModelDto> modelDtoList = new ArrayList<>();
             for (ModelConfig modelConfig : modelConfigCollection) {
                 List<ModelFieldShowDto> modelFields = new ArrayList<>();
                 for (ModelField<?> modelField : modelConfig.getFields().values()) {
                     modelFields.add(ModelFieldShowDto.toShowDto(modelField));
                 }
-                modelDtoList.add(new ModelDto(modelConfig.getCode(), modelConfig.getName(), modelConfig.getIcon(), groupCode, modelFields));
+                modelDtoList.add(new ModelDto(modelConfig.getCode(), modelConfig.getName(), modelConfig.getIcon(),
+                        groupCode, modelFields));
             }
             String result = JsonUtil.formatJson(modelDtoList, false);
             if (BuildConfig.DEBUG) {
@@ -376,7 +370,6 @@ public class WebSettingsActivity extends BaseActivity {
             return null;
         }
 
-
         @JavascriptInterface
         public String setField(String modelCode, String fieldCode, String fieldValue) {
             ModelConfig modelConfig = ModelTask.getModelConfigMap().get(modelCode);
@@ -469,7 +462,8 @@ public class WebSettingsActivity extends BaseActivity {
                         .show();
                 break;
             case 4:
-                ListDialog.show(this, "单向好友列表", AlipayUser.getList(user -> user.getFriendStatus() != 1), SelectModelFieldFunc.newMapInstance(), false,
+                ListDialog.show(this, "单向好友列表", AlipayUser.getList(user -> user.getFriendStatus() != 1),
+                        SelectModelFieldFunc.newMapInstance(), false,
                         ListDialog.ListType.SHOW);
                 break;
             case 5:
@@ -487,14 +481,17 @@ public class WebSettingsActivity extends BaseActivity {
             case 6:
                 // 在调用 save() 之前，先调用 JS 函数同步 WebView 中的数据到 Java 端
                 Log.runtime(TAG, "WebSettingsActivity.onOptionsItemSelected: Calling handleData() in WebView");
-                webView.evaluateJavascript("if(typeof handleData === 'function'){ handleData(); } else { console.error('handleData function not found'); }", null);
+                webView.evaluateJavascript(
+                        "if(typeof handleData === 'function'){ handleData(); } else { console.error('handleData function not found'); }",
+                        null);
                 // 使用 Handler 延迟执行 save()，给 JS 一点时间完成异步操作
                 // 200 毫秒是一个经验值，如果仍然有问题可以适当增加
                 new Handler(Looper.getMainLooper()).postDelayed(this::save, 200); // 延迟 200 毫秒
                 break;
             case 7:
-                //复制userId到剪切板
-                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                // 复制userId到剪切板
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(
+                        CLIPBOARD_SERVICE);
                 ClipData clipData = ClipData.newPlainText("userId", this.userId);
                 cm.setPrimaryClip(clipData);
                 ToastUtil.showToastWithDelay(this, "复制成功！", 100);
