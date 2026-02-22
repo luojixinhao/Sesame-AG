@@ -50,8 +50,6 @@ import fansirsqi.xposed.sesame.ui.dto.ModelDto;
 import fansirsqi.xposed.sesame.ui.dto.ModelFieldInfoDto;
 import fansirsqi.xposed.sesame.ui.dto.ModelFieldShowDto;
 import fansirsqi.xposed.sesame.ui.dto.ModelGroupDto;
-import fansirsqi.xposed.sesame.ui.model.UiMode;
-import fansirsqi.xposed.sesame.ui.repository.ConfigRepository;
 import fansirsqi.xposed.sesame.ui.widget.ListDialog;
 import fansirsqi.xposed.sesame.util.Files;
 import fansirsqi.xposed.sesame.util.JsonUtil;
@@ -189,7 +187,6 @@ public class WebSettingsActivity extends BaseActivity {
         });
         if (BuildConfig.DEBUG) {
             WebView.setWebContentsDebuggingEnabled(true);
-//            webView.loadUrl("http://192.168.31.69:5500/app/src/main/assets/web/index.html");
             webView.loadUrl("file:///android_asset/web/semi_index.html");
         } else {
             webView.loadUrl("file:///android_asset/web/semi_index.html");
@@ -416,7 +413,6 @@ public class WebSettingsActivity extends BaseActivity {
         menu.add(0, 2, 2, "导入配置");
         menu.add(0, 3, 3, "删除配置");
         menu.add(0, 4, 4, "单向好友");
-        menu.add(0, 5, 5, "切换UI");
         menu.add(0, 6, 6, "保存");
         menu.add(0, 7, 7, "复制ID");
         return super.onCreateOptionsMenu(menu);
@@ -464,14 +460,6 @@ public class WebSettingsActivity extends BaseActivity {
             case 4:
                 ListDialog.show(this, "单向好友列表", AlipayUser.getList(user -> user.getFriendStatus() != 1), SelectModelFieldFunc.newMapInstance(), false,
                         ListDialog.ListType.SHOW);
-                break;
-            case 5:
-                ConfigRepository.INSTANCE.setUiMode(UiMode.New);
-                Intent intent = new Intent(this, SettingActivity.class);
-                intent.putExtra("userId", userId);
-                intent.putExtra("userName", userName);
-                finish();
-                startActivity(intent);
                 break;
             case 6:
                 // 在调用 save() 之前，先调用 JS 函数同步 WebView 中的数据到 Java 端

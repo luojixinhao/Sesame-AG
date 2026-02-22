@@ -2,7 +2,6 @@ package fansirsqi.xposed.sesame
 
 import android.app.Application
 import android.content.Intent
-import fansirsqi.xposed.sesame.ui.repository.ConfigRepository
 import fansirsqi.xposed.sesame.service.CommandService
 import fansirsqi.xposed.sesame.ui.theme.ThemeManager
 import fansirsqi.xposed.sesame.util.Log
@@ -27,7 +26,6 @@ class SesameApplication : Application() {
         ToastUtil.init(this) // 初始化全局 Context
         Log.init(this)
         ThemeManager.init(this)
-        ConfigRepository.init(this, PREFERENCES_KEY)
         startCommandService()
     }
 
