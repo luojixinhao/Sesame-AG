@@ -147,7 +147,7 @@ public class AntFarmRpcCall {
     }
 
     public static String donation(String activityId, int donationAmount) {
-        String args1 = "[{\"activityId\":\"" + activityId + "\",\"donationAmount\":" + donationAmount +
+        String args1 = "[{\"activityId\":\"" + activityId + "\",\"bizCode\":\"undefined\",\"cele\":1,\"donationAmount\":" + donationAmount +
                 ",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\""
                 + VERSION + "\"}]";
         return RequestManager.requestString("com.alipay.antfarm.donation", args1);

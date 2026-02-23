@@ -23,6 +23,7 @@ import fansirsqi.xposed.sesame.model.ModelFields;
 import fansirsqi.xposed.sesame.model.ModelGroup;
 import fansirsqi.xposed.sesame.model.modelFieldExt.BooleanModelField;
 import fansirsqi.xposed.sesame.model.modelFieldExt.ChoiceModelField;
+import fansirsqi.xposed.sesame.model.modelFieldExt.IntegerModelField;
 import fansirsqi.xposed.sesame.model.modelFieldExt.SelectAndCountModelField;
 import fansirsqi.xposed.sesame.model.modelFieldExt.SelectModelField;
 import fansirsqi.xposed.sesame.util.DataStore;
@@ -92,6 +93,8 @@ public class AntOcean extends ModelTask {
     private SelectModelField cleanOceanList;
     private BooleanModelField exchangeProp;
     private BooleanModelField usePropByType;
+    private BooleanModelField protectOceanMinNum;
+    private IntegerModelField protectOceanMinNumCount;
     private SelectAndCountModelField protectOceanList;
     private BooleanModelField PDL_task;
     private static ChoiceModelField userprotectType;
@@ -115,6 +118,8 @@ public class AntOcean extends ModelTask {
         modelFields.addField(exchangeProp = new BooleanModelField("exchangeProp", "神奇海洋 | 制作万能拼图", false));
         modelFields.addField(usePropByType = new BooleanModelField("usePropByType", "神奇海洋 | 使用万能拼图", false));
         modelFields.addField(userprotectType = new ChoiceModelField("userprotectType", "保护 | 类型", protectType.DONT_PROTECT, protectType.nickNames));
+        modelFields.addField(protectOceanMinNum = new BooleanModelField("protectOceanMinNum", "保护 | 单个海滩保护下限", false));
+        modelFields.addField(protectOceanMinNumCount = new IntegerModelField("protectOceanMinNumCount", "单个海滩保护次数", 1));
         modelFields.addField(protectOceanList = new SelectAndCountModelField("protectOceanList", "保护 | 海洋列表", new LinkedHashMap<>(), AlipayBeach::getList));
         modelFields.addField(PDL_task = new BooleanModelField("PDL_task", "潘多拉任务", false));
         return modelFields;
@@ -135,6 +140,9 @@ public class AntOcean extends ModelTask {
             }
 
             if (!userprotectType.getValue().equals(protectType.DONT_PROTECT)) {
+                if (protectOceanMinNum.getValue()) {
+                    protectOceanMinNum(protectOceanMinNumCount.getValue());
+                }
                 protectOcean();
             }
 
@@ -153,6 +161,63 @@ public class AntOcean extends ModelTask {
             Log.printStackTrace(TAG,"start.run err:", t);
         } finally {
             Log.record(TAG, "执行结束-" + getName());
+        }
+    }
+
+    /**
+     * 保护海洋：为每个可申请的培育项补齐最低保护次数（避免部分海滩 certNum 太低）
+     * <p>
+     * 参考 Sesame-GR Dragon813：增加“单个海滩保护下限”开关与次数配置
+     */
+    private void protectOceanMinNum(int minProtectCount) {
+        if (minProtectCount <= 0) {
+            return;
+        }
+        try {
+            String s = AntOceanRpcCall.queryCultivationList();
+            JSONObject jo = new JSONObject(s);
+            if (!ResChecker.checkRes(TAG + "查询海洋培育列表失败:", jo)) {
+                Log.error(TAG, jo.optString("resultDesc"));
+                return;
+            }
+
+            JSONArray cultivationList = jo.optJSONArray("cultivationItemVOList");
+            if (cultivationList == null) {
+                return;
+            }
+
+            for (int i = 0; i < cultivationList.length(); i++) {
+                JSONObject item = cultivationList.getJSONObject(i);
+                if (!Objects.equals("AVAILABLE", item.optString("applyAction"))) {
+                    continue;
+                }
+
+                // 仅对能量消耗较低的项目补齐下限，避免消耗过大（参考 GR: energy > 1000 跳过）
+                int energy = item.optInt("energy", 0);
+                if (energy > 1000) {
+                    continue;
+                }
+
+                String cultivationCode = item.optString("cultivationCode", item.optString("templateCode"));
+                if (StringUtil.isEmpty(cultivationCode)) {
+                    continue;
+                }
+
+                JSONObject projectConfig = item.optJSONObject("projectConfigVO");
+                if (projectConfig == null) {
+                    continue;
+                }
+                String projectCode = projectConfig.optString("code");
+                if (StringUtil.isEmpty(projectCode)) {
+                    continue;
+                }
+
+                String cultivationName = item.optString("cultivationName", cultivationCode);
+                oceanExchangeTree(cultivationCode, projectCode, cultivationName, minProtectCount);
+                GlobalThreadPools.sleepCompat(300L);
+            }
+        } catch (Throwable t) {
+            Log.printStackTrace(TAG, "protectOceanMinNum err:", t);
         }
     }
 

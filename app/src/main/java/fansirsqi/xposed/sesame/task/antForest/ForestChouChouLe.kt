@@ -28,6 +28,7 @@ class ForestChouChouLe {
         private val BLOCKED_TYPES = setOf(
             "FOREST_NORMAL_DRAW_SHARE",
             "FOREST_ACTIVITY_DRAW_SHARE",
+            "FOREST_ACTIVITY_DRAW_SGBHSD",
             "FOREST_ACTIVITY_DRAW_XS" // 玩游戏得新机会
         )
 

@@ -802,7 +802,10 @@ class AntOrchard : ModelTask() {
 
     private fun querySubplotsActivity(taskRequire: Int) {
         try {
-            val response = AntOrchardRpcCall.querySubplotsActivity(treeLevel!!)
+            val level = treeLevel
+            if (level.isNullOrEmpty() || level == "0") return
+
+            val response = AntOrchardRpcCall.querySubplotsActivity(level)
             val jo = JSONObject(response)
 
             if (jo.getString("resultCode") == "100") {

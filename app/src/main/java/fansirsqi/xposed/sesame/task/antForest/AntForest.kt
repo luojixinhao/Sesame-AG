@@ -173,6 +173,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private var shieldCardConstant: BooleanModelField? = null // 限时保护永动机
     private var helpFriendCollectType: ChoiceModelField? = null
     private var helpFriendCollectList: SelectModelField? = null
+    private var helpFriendCollectListLimit: IntegerModelField? = null
 
     private var alternativeAccountList: SelectModelField? = null
 
@@ -599,6 +600,15 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             ) { AlipayUser.getList() }.also {
                 helpFriendCollectList = it
             })
+        modelFields.addField(
+            IntegerModelField(
+                "helpFriendCollectListLimit",
+                "复活好友能量下限(大于该值复活)",
+                0,
+                0,
+                100000
+            ).also { helpFriendCollectListLimit = it }
+        )
         modelFields.addField(
             SelectModelField(
                 "alternativeAccountList",
@@ -1137,9 +1147,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
     private fun collectWater(wateringBubble: JSONObject) {
         try {
+            val friendId = wateringBubble.optString("userId")
             val id = wateringBubble.getLong("id")
             val response = AntForestRpcCall.collectEnergy("jiaoshui", selfId, id)
-            processCollectResult(response, "收取金球🍯浇水")
+            val friendName = getAndCacheUserName(friendId)
+            val msg = if (!friendName.isNullOrEmpty()) "收取[$friendName]的金球🍯浇水" else "收取金球🍯浇水"
+            processCollectResult(response, msg)
         } catch (e: JSONException) {
             Log.record(TAG, "收取浇水JSON解析错误: " + e.message)
         }
@@ -1159,9 +1172,11 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             val friendId = wateringBubble.getString("userId")
             val id = wateringBubble.getLong("id")
             val response = AntForestRpcCall.collectEnergy("baohuhuizeng", selfId, id)
+            val friendName = getAndCacheUserName(friendId)
+            val displayName = friendName ?: UserMap.getMaskName(friendId) ?: friendId
             processCollectResult(
                 response,
-                "收取金球🍯[" + UserMap.getMaskName(friendId) + "]复活回赠"
+                "收取金球🍯[$displayName]复活回赠"
             )
         } catch (e: JSONException) {
             Log.record(TAG, "收取金球回赠JSON解析错误: " + e.message)
@@ -2632,6 +2647,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                         if (!wateringBubble.getBoolean("canProtect")) {
                             continue
                         }
+                        val fullEnergy = wateringBubble.optInt("fullEnergy", 0)
+                        if (fullEnergy < (helpFriendCollectListLimit?.value ?: 0)) {
+                            break
+                        }
                         val joProtect = JSONObject(AntForestRpcCall.protectBubble(userId))
                         if (!ResChecker.checkRes(TAG + "复活能量失败:", joProtect)) {
                             //Log.record(joProtect.getString("resultDesc"))
@@ -2639,7 +2658,6 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                             continue
                         }
                         val vitalityAmount = joProtect.optInt("vitalityAmount", 0)
-                        val fullEnergy = wateringBubble.optInt("fullEnergy", 0)
                         val str =
                             "复活能量🚑[" + UserMap.getMaskName(userId) + "-" + fullEnergy + "g]" + (if (vitalityAmount > 0) "#活力值+$vitalityAmount" else "")
                         Log.forest(str)

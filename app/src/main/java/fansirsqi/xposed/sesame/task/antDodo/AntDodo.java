@@ -437,6 +437,10 @@ public class AntDodo extends ModelTask {
     }
     private void sendCard(JSONObject animal, String targetUser) {
         try {
+            String currentUid = UserMap.INSTANCE.getCurrentUid();
+            if (currentUid != null && currentUid.equals(targetUser)) {
+                return;
+            }
             String animalId = animal.getString("animalId");
             String ecosystem = animal.getString("ecosystem");
             String name = animal.getString("name");
