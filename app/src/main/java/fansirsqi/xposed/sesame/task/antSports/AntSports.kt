@@ -291,7 +291,7 @@ class AntSports : ModelTask() {
 
             // 步数同步
             if (!Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE) &&
-                TimeUtil.isNowAfterOrCompareTimeStr(String.format("%02d00", earliestSyncStepTime.value.coerceIn(0, 23))) {
+                TimeUtil.isNowAfterOrCompareTimeStr(String.format("%02d00", earliestSyncStepTime.value.coerceIn(0, 23)))) {
                 syncStepTask()
             }
 
