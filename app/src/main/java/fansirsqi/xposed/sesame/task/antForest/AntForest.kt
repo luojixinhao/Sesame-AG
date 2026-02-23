@@ -1363,10 +1363,20 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      */
     private fun waterFriends() {
         try {
+            val taskUid = UserMap.currentUid
+            if (taskUid.isNullOrBlank()) {
+                Log.record(TAG, "waterFriends: 当前用户为空，跳过浇水")
+                return
+            }
             val friendMap = waterFriendList!!.value
             val notify = notifyFriend!!.value // 获取通知开关状态
 
             for (friendEntry in friendMap.entries) {
+                // 避免切号后仍继续为旧账号执行浇水与标记
+                if (taskUid != UserMap.currentUid) {
+                    Log.record(TAG, "waterFriends: 检测到切号，终止浇水流程")
+                    break
+                }
                 val uid = friendEntry.key
                 if (selfId == uid) {
                     continue
@@ -1377,7 +1387,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 }
                 waterCount = min(waterCount, 3)
 
-                if (Status.canWaterFriendToday(uid, waterCount)) {
+                if (Status.canWaterFriendToday(uid, waterCount, taskUid)) {
                     try {
                         val response = AntForestRpcCall.queryFriendHomePage(uid, null)
                         val jo = JSONObject(response)
@@ -1391,7 +1401,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
                             val actualWaterCount: Int = waterCountKVNode.key!!
                             if (actualWaterCount > 0) {
-                                Status.waterFriendToday(uid, actualWaterCount)
+                                Status.waterFriendToday(uid, actualWaterCount, taskUid)
                             }
                             if (java.lang.Boolean.FALSE == waterCountKVNode.value) {
                                 break

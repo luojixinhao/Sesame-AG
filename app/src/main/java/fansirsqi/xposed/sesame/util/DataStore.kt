@@ -163,14 +163,21 @@ object DataStore {
             if (!::storageFile.isInitialized || !storageFile.exists() || storageFile.length() == 0L) {
                 // 如果文件不存在或为空，我们假设内存是空的。
                 data.clear()
+                lastLoadedTime.set(0)
                 return
             }
-            // 不进行任何时间检查，直接读取文件
+
+            // 优化：如果文件没有变化，则不重复读取，避免高频 IO
+            val currentModTime = storageFile.lastModified()
+            if (currentModTime <= lastLoadedTime.get()) {
+                return
+            }
+
             val loaded: Map<String, Any> = mapper.readValue(storageFile)
             data.clear()
             data.putAll(loaded)
             // 更新加载时间戳，这样文件监控的 loadFromDisk 就不会因我们自己的写入而重复加载
-            lastLoadedTime.set(storageFile.lastModified())
+            lastLoadedTime.set(currentModTime)
         } catch (e: Exception) {
             // 如果文件正在被另一个进程写入，可能会导致解析异常，这里我们选择忽略，
             // 在下一个写入周期，数据会被同步。

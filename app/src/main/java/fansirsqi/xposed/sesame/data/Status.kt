@@ -140,9 +140,40 @@ class Status {
             return count < newCount
         }
 
+        /**
+         * 带 UID 保护的“浇水计数检查”。
+         *
+         * 用于规避：任务执行过程中切号导致 Status 标记写入到下一个账号的极少数情况。
+         */
+        @JvmStatic
+        fun canWaterFriendToday(id: String, newCount: Int, taskUid: String?): Boolean {
+            if (taskUid.isNullOrBlank()) return canWaterFriendToday(id, newCount)
+            if (taskUid != UserMap.currentUid) return false
+            val key = "$taskUid-$id"
+            val count = INSTANCE.waterFriendLogList[key] ?: return true
+            return count < newCount
+        }
+
         @JvmStatic
         fun waterFriendToday(id: String, count: Int) {
             val key = "${UserMap.currentUid}-$id"
+            INSTANCE.waterFriendLogList[key] = count
+            save()
+        }
+
+        /**
+         * 带 UID 保护的“浇水计数标记”。
+         *
+         * @param taskUid 任务启动时捕获的 UID（避免切号后写入到错误账号）
+         */
+        @JvmStatic
+        fun waterFriendToday(id: String, count: Int, taskUid: String?) {
+            if (taskUid.isNullOrBlank()) {
+                waterFriendToday(id, count)
+                return
+            }
+            if (taskUid != UserMap.currentUid) return
+            val key = "$taskUid-$id"
             INSTANCE.waterFriendLogList[key] = count
             save()
         }
@@ -564,6 +595,23 @@ class Status {
 
         @JvmStatic
         fun setFlagToday(flag: String) {
+            if (INSTANCE.flagList.add(flag)) {
+                save()
+            }
+        }
+
+        /**
+         * 带 UID 保护的“今日标记”。
+         *
+         * 用于规避：任务执行过程中切号导致 Status 标记写入到下一个账号的极少数情况。
+         */
+        @JvmStatic
+        fun setFlagToday(flag: String, taskUid: String?) {
+            if (taskUid.isNullOrBlank()) {
+                setFlagToday(flag)
+                return
+            }
+            if (taskUid != UserMap.currentUid) return
             if (INSTANCE.flagList.add(flag)) {
                 save()
             }
