@@ -34,6 +34,65 @@ object AntForestRpcCall {
         }
     }
 
+    /**
+     * 森林乐园 - 查询游戏中心列表（包含宝箱开箱权益信息）
+     *
+     */
+    @JvmStatic
+    fun queryGameList(): String {
+        return try {
+            val arg = JSONObject().apply {
+                put("bizType", "ANTFOREST")
+                put(
+                    "commonDegradeFilterRequest",
+                    JSONObject().apply {
+                        put("deviceLevel", "high")
+                        put("platform", "Android")
+                        put("unityDeviceLevel", "high")
+                    }
+                )
+                put("requestType", "RPC")
+                put("sceneCode", "ANTFOREST")
+                put("source", "chInfo_ch_appcenter__chsub_9patch")
+                put("version", VERSION)
+            }
+            RequestManager.requestString(
+                "com.alipay.charitygamecenter.queryGameList",
+                JSONArray().put(arg).toString()
+            )
+        } catch (e: Exception) {
+            Log.printStackTrace("AntForestRpcCall", "queryGameList 构建请求参数失败", e)
+            ""
+        }
+    }
+
+    /**
+     * 森林乐园 - 批量开宝箱
+     *
+     * @param batchDrawCount 批量领取次数（通常 1~10）
+     */
+    @JvmStatic
+    fun drawGameCenterAward(batchDrawCount: Int): String {
+        return try {
+            val count = batchDrawCount.coerceAtLeast(1)
+            val arg = JSONObject().apply {
+                put("batchDrawCount", count)
+                put("bizType", "ANTFOREST")
+                put("requestType", "RPC")
+                put("sceneCode", "ANTFOREST")
+                put("source", "leyuan")
+                put("version", VERSION)
+            }
+            RequestManager.requestString(
+                "com.alipay.charitygamecenter.drawGameCenterAward",
+                JSONArray().put(arg).toString()
+            )
+        } catch (e: Exception) {
+            Log.printStackTrace("AntForestRpcCall", "drawGameCenterAward 构建请求参数失败", e)
+            ""
+        }
+    }
+
     @JvmStatic
     fun queryFriendsEnergyRanking(): String {
         return try {

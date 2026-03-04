@@ -4783,18 +4783,20 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
     fun doforestgame() {
         try {
-            val response = AntFarmRpcCall.queryGameList()
+            val response = AntForestRpcCall.queryGameList()
             val jo = JSONObject(response)
+            val resData = jo.optJSONObject("resData") ?: jo
 
             // 验证请求是否成功
             if (!ResChecker.checkRes(TAG, jo)) {
-                Log.error(TAG, "queryGameList 失败: ${jo.optString("desc")}")
+                val msg = jo.optString("desc").ifBlank { jo.optString("resultDesc") }
+                Log.error(TAG, "queryGameList 失败: $msg")
                 return
             }
 
-            val drawRights = jo.optJSONObject("gameCenterDrawRights")
+            val drawRights = resData.optJSONObject("gameCenterDrawRights")
             if (drawRights != null) {
-                val perTime = drawRights.optInt("quotaPerTime", 100)
+                val perTime = drawRights.optInt("quotaPerTime", 100).takeIf { it > 0 } ?: 100
 
                 // 换算实际宝箱次数
                 val canUseCount = drawRights.optInt("quotaCanUse") / perTime
@@ -4805,20 +4807,24 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
                 // 1. 处理待开启奖励 (批量开启)
                 if (canUseCount > 0) {
-                    Log.record(TAG, "正在一次性开启 $canUseCount 个宝箱...")
-                    val drawResStr = AntFarmRpcCall.drawGameCenterAward(canUseCount)
-                    if(!ResChecker.checkRes(TAG, drawResStr)){
-                        //Log.error(TAG,"开启宝箱失败 Res:$drawResStr")
-                        return
-                    }
-                    val drawJo = JSONObject(drawResStr)
-                    val resData = drawJo.optJSONObject("resData") ?: drawJo
-                    if (resData.optString("desc") == "success") {
-                        val awardList = resData.optJSONArray("gameCenterDrawAwardList")
+                    Log.record(TAG, "正在批量开启 $canUseCount 个宝箱...")
 
-                        var totalEnergy = 0
-                        val otherAwards = mutableListOf<String>()
+                    var remain = canUseCount
+                    var totalEnergy = 0
+                    val otherAwards = mutableListOf<String>()
 
+                    // 保险：服务端常见单次上限为 10，分批开箱避免一次性请求过大
+                    while (remain > 0) {
+                        val batch = minOf(remain, 10)
+                        val drawResStr = AntForestRpcCall.drawGameCenterAward(batch)
+                        val drawJo = JSONObject(drawResStr)
+                        if (!ResChecker.checkRes(TAG, drawJo)) {
+                            Log.error(TAG, "开启宝箱失败: ${drawJo.optString("resultDesc").ifBlank { drawJo.optString("desc") }}")
+                            return
+                        }
+
+                        val drawResData = drawJo.optJSONObject("resData") ?: drawJo
+                        val awardList = drawResData.optJSONArray("gameCenterDrawAwardList")
                         if (awardList != null) {
                             for (i in 0 until awardList.length()) {
                                 val award = awardList.getJSONObject(i)
@@ -4834,17 +4840,16 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                             }
                         }
 
-                        // 输出统计结果
-                        val logMsg = StringBuilder("[开宝箱] ")
-                        if (totalEnergy > 0) logMsg.append("获得能量: ${totalEnergy}g")
-                        if (otherAwards.isNotEmpty()) {
-                            if (totalEnergy > 0) logMsg.append(", ")
-                            logMsg.append("其他: ${otherAwards.joinToString("/")}")
-                        }
-                        Log.forest(logMsg.toString())
-                    } else {
-                        //Log.error(TAG, "领奖请求失败: $drawResStr")
+                        remain -= batch
                     }
+
+                    val logMsg = StringBuilder("[开宝箱] ")
+                    if (totalEnergy > 0) logMsg.append("获得能量: ${totalEnergy}g")
+                    if (otherAwards.isNotEmpty()) {
+                        if (totalEnergy > 0) logMsg.append(", ")
+                        logMsg.append("其他: ${otherAwards.joinToString("/")}")
+                    }
+                    Log.forest(logMsg.toString())
                 }
 
                 // 2. 判断是否需要刷任务 (接你之前的逻辑)

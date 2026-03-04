@@ -253,22 +253,52 @@ class ApplicationHook {
                             }
 
                             // 访问被拒绝/需要滑块验证后，用户手动完成验证并回到首页时会触发 onResume。
-                            // 这里自动退出 auth_like 离线状态并恢复执行链路，避免长期卡在离线模式无法继续任务。
-                            if (ApplicationHookConstants.isOffline() &&
-                                ApplicationHookConstants.offlineReason == "auth_like"
-                            ) {
-                                record(TAG, "检测到 auth_like 离线状态，尝试在 onResume 退出离线并恢复任务执行")
-                                ApplicationHookConstants.setOffline(false)
-                                lastExecTime = 0
-                                updateStatusText("✅ 验证已解除，恢复执行")
-                                ApplicationHookCore.requestExecution(
-                                    ApplicationHookConstants.TriggerInfo(
-                                        type = ApplicationHookConstants.TriggerType.ON_RESUME,
-                                        priority = ApplicationHookConstants.TriggerPriority.HIGH,
-                                        reason = "auth_like_recovered",
-                                        dedupeKey = "auth_like_recovered"
+                            // 这里自动退出离线状态并恢复执行链路，避免长期卡在离线模式无法继续任务。
+                            // 注意：手动开启离线（reason=null 且 untilMs<=0）不应被自动退出。
+                            if (ApplicationHookConstants.isOffline()) {
+                                val reason = ApplicationHookConstants.offlineReason
+                                val untilMs = ApplicationHookConstants.offlineUntilMs
+                                val now = System.currentTimeMillis()
+                                val cooldownExpired = untilMs > 0L && now >= untilMs
+                                val shouldRecover = cooldownExpired || when (reason) {
+                                    "auth_like",
+                                    "system_busy",
+                                    "login_timeout",
+                                    "network_error_threshold",
+                                    "rpc_error_threshold" -> true
+                                    else -> false
+                                }
+
+                                if (shouldRecover) {
+                                    record(TAG, "检测到 ${reason ?: "unknown"} 离线状态，尝试在 onResume 退出离线并恢复任务执行")
+                                    ApplicationHookConstants.setOffline(false)
+                                    // 避免快速返回App被 2s 间隔保护挡住而无法立刻恢复
+                                    lastExecTime = 0
+
+                                    val statusMsg = when (reason) {
+                                        "auth_like" -> "✅ 验证已解除，恢复执行"
+                                        "system_busy" -> "✅ 已解除系统繁忙/验证态，恢复执行"
+                                        "login_timeout" -> "✅ 登录已恢复，继续执行"
+                                        else -> "✅ 离线已解除，恢复执行"
+                                    }
+                                    updateStatusText(statusMsg)
+
+                                    val triggerReason =
+                                        if (reason == "auth_like") "auth_like_recovered"
+                                        else "offline_recovered:${reason ?: "unknown"}"
+                                    val dedupeKey =
+                                        if (reason == "auth_like") "auth_like_recovered"
+                                        else "offline_recovered"
+
+                                    ApplicationHookCore.requestExecution(
+                                        ApplicationHookConstants.TriggerInfo(
+                                            type = ApplicationHookConstants.TriggerType.ON_RESUME,
+                                            priority = ApplicationHookConstants.TriggerPriority.HIGH,
+                                            reason = triggerReason,
+                                            dedupeKey = dedupeKey
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
@@ -585,9 +615,12 @@ class ApplicationHook {
                     record(TAG, "🎯 本次执行触发: ${trigger?.summary() ?: "<none>"}")
 
                     val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastExecTime < 2000) {
+                    val elapsedSinceLastExec = currentTime - lastExecTime
+                    if (elapsedSinceLastExec < 2000) {
                         record(TAG, "⚠️ 间隔过短，跳过")
-                        schedule((checkInterval.value ?: 0).toLong(), "间隔重试") {
+                        // 间隔保护仅用于防抖，重试应尽快（补足到 2s），而不是跟随执行间隔（如 50min）
+                        val retryDelayMs = (2000L - elapsedSinceLastExec).coerceAtLeast(200L)
+                        schedule(retryDelayMs, "间隔重试") {
                             ApplicationHookEntry.onIntervalRetry()
                         }
                         return@withContext

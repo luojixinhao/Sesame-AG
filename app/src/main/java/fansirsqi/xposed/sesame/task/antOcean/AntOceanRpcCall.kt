@@ -178,6 +178,17 @@ object AntOceanRpcCall {
             "[{\"source\":\"ANT_FOREST\",\"uniqueId\":\"${getUniqueId()}\"}]"
         )
     }
+
+    /**
+     * 补全好友可清理标记（用于翻页/扩展清理名单）
+     */
+    @JvmStatic
+    fun fillUserFlag(userIdList: JSONArray): String {
+        return RequestManager.requestString(
+            "alipay.antocean.ocean.h5.fillUserFlag",
+            "[{\"source\":\"ANT_FOREST\",\"uniqueId\":\"${getUniqueId()}\",\"userIdList\":$userIdList}]"
+        )
+    }
     
     // ==================== 保护海洋净滩行动 ====================
     

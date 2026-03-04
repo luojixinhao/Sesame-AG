@@ -1,6 +1,7 @@
 package fansirsqi.xposed.sesame.task.antOcean
 
 import com.fasterxml.jackson.core.type.TypeReference
+import fansirsqi.xposed.sesame.data.Status
 import fansirsqi.xposed.sesame.entity.AlipayBeach
 import fansirsqi.xposed.sesame.entity.AlipayUser
 import fansirsqi.xposed.sesame.hook.Toast
@@ -84,6 +85,7 @@ class AntOcean : ModelTask() {
 
     companion object {
         private const val TAG = "AntOcean"
+        private const val HELP_CLEAN_LIMIT_FLAG = "Ocean::HELP_CLEAN_ALL_FRIEND_LIMIT"
 
         /**
          * 保护类型字段（静态）
@@ -660,6 +662,9 @@ class AntOcean : ModelTask() {
         if (!fillFlag.optBoolean("canClean")) {
             return
         }
+        if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) {
+            return
+        }
         try {
             val userId = fillFlag.getString("userId")
             var isOceanClean = cleanOceanList?.value?.contains(userId) == true
@@ -674,15 +679,24 @@ class AntOcean : ModelTask() {
             if (ResChecker.checkRes(TAG, jo)) {
                 s = AntOceanRpcCall.cleanFriendOcean(userId)
                 jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
-                Log.forest("神奇海洋🌊[帮助:${UserMap.getMaskName(userId)}清理海域]")
                 if (ResChecker.checkRes(TAG, jo)) {
+                    val maskName = UserMap.getMaskName(userId) ?: userId
+                    Log.forest("神奇海洋🌊[帮助:${maskName}清理海域]")
                     val cleanRewardVOS = jo.getJSONArray("cleanRewardVOS")
                     checkReward(cleanRewardVOS)
                 } else {
-                    Log.runtime(TAG, jo.getString("resultDesc"))
+                    val desc = jo.optString("resultDesc").ifBlank {
+                        jo.optString("memo").ifBlank { jo.optString("desc") }
+                    }
+                    if (desc.contains("上限") || desc.contains("达到上限") || desc.contains("已达上限")) {
+                        Status.setFlagToday(HELP_CLEAN_LIMIT_FLAG)
+                        Log.record(TAG, "神奇海洋🌊帮助清理次数已达上限：$desc")
+                    } else {
+                        Log.runtime(TAG, desc)
+                    }
                 }
             } else {
-                Log.runtime(TAG, jo.getString("resultDesc"))
+                Log.runtime(TAG, jo.optString("resultDesc"))
             }
         } catch (t: Throwable) {
             Log.runtime(TAG, "queryMiscInfo err:")
@@ -690,23 +704,83 @@ class AntOcean : ModelTask() {
         }
     }
 
+    private suspend fun fillUserFlagAndClean(userIds: List<String>) {
+        if (userIds.isEmpty()) return
+        if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) return
+
+        val ja = JSONArray()
+        for (id in userIds) {
+            if (id.isNotBlank()) ja.put(id)
+        }
+        if (ja.length() == 0) return
+
+        val s = AntOceanRpcCall.fillUserFlag(ja)
+        val jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
+        if (!ResChecker.checkRes(TAG, jo)) {
+            Log.runtime(TAG, jo.optString("resultDesc"))
+            return
+        }
+
+        val fillFlagVOList = jo.optJSONArray("fillFlagVOList") ?: return
+        for (i in 0 until fillFlagVOList.length()) {
+            if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) return
+            cleanFriendOcean(fillFlagVOList.getJSONObject(i))
+        }
+    }
+
     private suspend fun queryUserRanking() {
         try {
+            if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) {
+                return
+            }
             val s = AntOceanRpcCall.queryUserRanking()
             val jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
-            if (ResChecker.checkRes(TAG, jo)) {
-                val fillFlagVOList = jo.getJSONArray("fillFlagVOList")
-                for (i in 0 until fillFlagVOList.length()) {
-                    val fillFlag = fillFlagVOList.getJSONObject(i)
-                    if (cleanOcean?.value == true) {
-                        cleanFriendOcean(fillFlag)
-                    }
+            if (!ResChecker.checkRes(TAG, jo)) {
+                Log.runtime(TAG, jo.optString("resultDesc"))
+                return
+            }
+
+            // 未开启清理功能时，无需额外请求 fillUserFlag
+            if (cleanOcean?.value != true) {
+                return
+            }
+
+            // 1) 先处理首屏 fillFlagVOList（通常为 20 个）
+            val firstFillFlags = jo.optJSONArray("fillFlagVOList")
+            if (firstFillFlags != null) {
+                for (i in 0 until firstFillFlags.length()) {
+                    cleanFriendOcean(firstFillFlags.getJSONObject(i))
+                    if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) return
                 }
-            } else {
-                Log.runtime(TAG, jo.getString("resultDesc"))
+            }
+
+            // 2) 扩展处理：若首屏无可清理，继续从 allRankingList 取后续用户并通过 fillUserFlag 补全 canClean
+            val allRankingList = jo.optJSONArray("allRankingList") ?: return
+            val pageSize = jo.optInt("pageSize", 20).takeIf { it in 1..50 } ?: 20
+
+            var pos = pageSize
+            val idList = ArrayList<String>(pageSize)
+            val currentUid = UserMap.currentUid
+
+            while (pos < allRankingList.length() && !Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) {
+                val friend = allRankingList.optJSONObject(pos)
+                val userId = friend?.optString("userId").orEmpty()
+                if (userId.isNotBlank() && userId != currentUid) {
+                    idList.add(userId)
+                }
+
+                pos++
+                if (idList.size >= pageSize) {
+                    fillUserFlagAndClean(idList)
+                    idList.clear()
+                }
+            }
+
+            if (idList.isNotEmpty() && !Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) {
+                fillUserFlagAndClean(idList)
             }
         } catch (t: Throwable) {
-            Log.runtime(TAG, "queryMiscInfo err:")
+            Log.runtime(TAG, "queryUserRanking err:")
             Log.printStackTrace(TAG, t)
         }
     }

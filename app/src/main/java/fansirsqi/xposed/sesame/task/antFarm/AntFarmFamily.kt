@@ -107,6 +107,10 @@ data object AntFarmFamily {
                     familyFeedFriendAnimal(familyAnimals)
                 }
 
+                if (familyOptions.value?.contains("sleepTogether") == true) {
+                    familySleepTogether(enterRes)
+                }
+
                 if (familyOptions.value?.contains("eatTogetherConfig") == true) {
                     familyEatTogether(eatTogetherConfig, familyInteractActions, familyUserIds)
                 }
@@ -218,9 +222,8 @@ data object AntFarmFamily {
                 val farmId = animal.getString("farmId")
                 val userId = animal.getString("userId")
 
-                // 非好友 → 跳过
-                if (!UserMap.getUserIdSet().contains(userId)) {
-                    Log.error(TAG, "$userId 不是你的好友！ 跳过家庭喂食")
+                // 自己 → 跳过
+                if (userId == UserMap.currentUid) {
                     continue
                 }
 
@@ -251,12 +254,82 @@ data object AntFarmFamily {
 
                 // 正常成功
                 val foodStock = jo.optInt("foodStock")
-                val maskName = UserMap.getMaskName(userId)
-                Log.farm("家庭任务🏠帮喂好友🥣[$maskName]的小鸡180g #剩余${foodStock}g")
+                val maskName = UserMap.getMaskName(userId) ?: userId
+                Log.farm("家庭任务🏠帮喂小鸡🥣[$maskName]180g #剩余${foodStock}g")
             }
 
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "familyFeedFriendAnimal err:",t)
+        }
+    }
+
+    /**
+     * 家庭任务：去睡觉（SLEEP_TOGETHER）
+     *
+     */
+    private fun familySleepTogether(enterRes: JSONObject) {
+        try {
+            if (groupId.isEmpty()) return
+            if (Status.hasFlagToday("antFarm::familySleepTogether")) return
+
+            // 远端任务状态校验：只在 SLEEP_TOGETHER=TODO 时触发，避免误刷
+            val taskTipsRes = JSONObject(AntFarmRpcCall.familyTaskTips(familyAnimals))
+            if (!ResChecker.checkRes(TAG, taskTipsRes)) {
+                Log.error(TAG, "家庭任务🏠去睡觉#familyTaskTips 调用失败，跳过")
+                return
+            }
+
+            val taskTips = taskTipsRes.optJSONArray("familyTaskTips")
+            if (taskTips == null || taskTips.length() == 0) {
+                Status.setFlagToday("antFarm::familySleepTogether")
+                return
+            }
+
+            var hasSleepTodo = false
+            for (i in 0 until taskTips.length()) {
+                val item = taskTips.getJSONObject(i)
+                val bizKey = item.optString("bizKey")
+                val taskId = item.optString("taskId")
+                val taskStatus = item.optString("taskStatus")
+                if ((bizKey == "SLEEP_TOGETHER" || taskId == "SLEEP_TOGETHER") && taskStatus == "TODO") {
+                    hasSleepTodo = true
+                    break
+                }
+            }
+
+            if (!hasSleepTodo) {
+                Status.setFlagToday("antFarm::familySleepTogether")
+                return
+            }
+
+            // 部分版本 enterFamily 可能缺少 sleepNotifyInfo，这里默认允许尝试（由服务端返回结果兜底）
+            val canSleep = enterRes.optJSONObject("sleepNotifyInfo")?.optBoolean("canSleep", true) ?: true
+            if (!canSleep) {
+                Log.record(TAG, "家庭任务🏠去睡觉#当前无需睡觉或不在可睡时间段，跳过")
+                return
+            }
+
+            val sleepRes = JSONObject(AntFarmRpcCall.sleep(groupId))
+            if (ResChecker.checkRes(TAG, sleepRes)) {
+                Log.farm("家庭任务🏠去睡觉🛌")
+                Status.animalSleep()
+                Status.setFlagToday("antFarm::familySleepTogether")
+                return
+            }
+
+            // 某些“已在睡觉”等状态属于静默失败，也视为完成，避免反复触发
+            val memo = sleepRes.optString("memo")
+            val resultDesc = sleepRes.optString("resultDesc")
+            if (memo.contains("睡觉") || resultDesc.contains("睡觉")) {
+                Log.record(TAG, "家庭任务🏠去睡觉#可能已在睡觉：${resultDesc.ifBlank { memo }}")
+                Status.animalSleep()
+                Status.setFlagToday("antFarm::familySleepTogether")
+                return
+            }
+
+            Log.error(TAG, "家庭任务🏠去睡觉失败: ${resultDesc.ifBlank { memo.ifBlank { sleepRes.toString() } }}")
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "familySleepTogether err:", t)
         }
     }
 

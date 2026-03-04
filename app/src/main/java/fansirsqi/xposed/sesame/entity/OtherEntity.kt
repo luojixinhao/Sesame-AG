@@ -28,6 +28,7 @@ object OtherEntityProvider {
         OtherEntity("assignRights", "使用顶梁柱特权👷‍♂️"),
         OtherEntity("familyClaimReward", "领取奖励🏆️"),
         OtherEntity("feedFamilyAnimal", "帮喂小鸡🐔"),
+        OtherEntity("sleepTogether", "去睡觉🛌"),
         OtherEntity("eatTogetherConfig", "请吃美食🍲"),
         OtherEntity("deliverMsgSend", "道早安🌞"),
         OtherEntity("ExchangeFamilyDecoration", "兑换装饰物品🧱"),
