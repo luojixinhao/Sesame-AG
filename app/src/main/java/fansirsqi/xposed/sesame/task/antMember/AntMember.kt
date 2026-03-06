@@ -1244,7 +1244,7 @@ class AntMember : ModelTask() {
      */
     private fun doSesameZmlCheckIn() {
         try {
-            val checkInRes = AntMemberRpcCall.Zmxy.Alchemy.alchemyQueryCheckIn("zml")
+            val checkInRes = AntMemberRpcCall.zmlCheckInQueryTaskLists()
             val checkInJo = JSONObject(checkInRes)
             if (!ResChecker.checkRes(TAG, checkInJo)) return
             val data = checkInJo.optJSONObject("data") ?: return
@@ -1265,9 +1265,9 @@ class AntMember : ModelTask() {
                         val prizeObj = prize.optJSONObject("prize")
                         prize.optInt("zmlNum", prizeObj?.optInt("num", 0) ?: 0)
                     }
-                    Log.other("芝麻炼金⚗️[每日签到成功]#获得" + num + "粒")
+                    Log.other("芝麻信用💳[芝麻粒福利签到成功]#获得" + num + "粒")
                 } else {
-                    Log.error("$TAG.doSesameAlchemy", "炼金签到失败:$completeRes")
+                    Log.error("$TAG.doSesameZmlCheckIn", "芝麻粒福利签到失败:$completeRes")
                 }
             }
         } catch (t: Throwable) {
@@ -1597,12 +1597,14 @@ class AntMember : ModelTask() {
             val assetInfo = result.optJSONObject("assetInfo") ?: return
 
             val availableAmount = assetInfo.optInt("availableAmount", 0)
+            val minExchangeAmount = assetInfo.optInt("minExchangeAmount", 100)
+            val exchangeAmountUnit = assetInfo.optInt("exchangeAmountUnit", minExchangeAmount).coerceAtLeast(1)
 
-            // 3. 计算提取数量 (整百提取逻辑)
-            val extractAmount = (availableAmount / 100) * 100
+            // 3. 按接口返回的门槛与步长计算提取数量
+            val extractAmount = (availableAmount / exchangeAmountUnit) * exchangeAmountUnit
 
-            if (extractAmount < 100) {
-                record("黄金票🎫[余额不足] 当前: $availableAmount，最低需100")
+            if (extractAmount < minExchangeAmount) {
+                record("黄金票🎫[余额不足] 当前: $availableAmount，最低需$minExchangeAmount")
                 return
             }
 
@@ -1616,6 +1618,8 @@ class AntMember : ModelTask() {
                 )?.length() ?: 0) > 0
             ) {
                 productId = result.optJSONArray("productList")?.optJSONObject(0)?.optString("productId") ?: ""
+            } else if (assetInfo.optJSONArray("mainExchangePrizeList")?.length() ?: 0 > 0) {
+                productId = assetInfo.optJSONArray("mainExchangePrizeList")?.optJSONObject(0)?.optString("bizNo") ?: ""
             }
 
             if (productId.isEmpty()) {

@@ -9,6 +9,13 @@ import org.json.JSONObject
 import java.util.UUID
 
 object AntMemberRpcCall {
+
+    private const val SESAME_CHECK_IN_VERSION = "2025-10-22"
+    private const val SESAME_TASK_VERSION = "new"
+    private const val SESAME_TASK_SCENE_CODE = "DAILY_MUST_DO_CARD"
+    private const val SESAME_TASK_SCENE_ZML = "zml"
+    private const val SESAME_TASK_CH_INFO = "ch_zmxy_zmlsy__chsub_zmsy_jingangwei"
+    private const val SESAME_TASK_JOIN_CH_INFO = "seasameList"
     
     private fun getUniqueId(): String {
         return System.currentTimeMillis().toString() + RandomUtil.nextLong()
@@ -310,7 +317,7 @@ object AntMemberRpcCall {
     fun queryAvailableSesameTask(): String {
         return RequestManager.requestString(
             "com.antgroup.zmxy.zmmemberop.biz.rpc.creditaccumulate.CreditAccumulateStrategyRpcManager.queryListV3",
-            "[{}]"
+            """[{"chInfo":"$SESAME_TASK_CH_INFO","deliverStatus":"","deliveryTemplateId":"","sceneCode":"$SESAME_TASK_SCENE_CODE","searchAddToHomeTask":true,"searchGuidePopFlag":true,"searchShareAssistTask":true,"searchSubscribeTask":true,"supportJumpAuth":true,"version":"$SESAME_TASK_VERSION"}]"""
         )
     }
 
@@ -321,7 +328,7 @@ object AntMemberRpcCall {
     fun joinSesameTask(taskTemplateId: String): String {
         return RequestManager.requestString(
             "com.antgroup.zmxy.zmmemberop.biz.rpc.promise.PromiseRpcManager.joinActivity",
-            """[{"chInfo":"seasameList","joinFromOuter":false,"templateId":"$taskTemplateId"}]"""
+            """[{"chInfo":"$SESAME_TASK_JOIN_CH_INFO","joinFromOuter":false,"sceneCode":"$SESAME_TASK_SCENE_ZML","templateId":"$taskTemplateId"}]"""
         )
     }
 
@@ -332,7 +339,7 @@ object AntMemberRpcCall {
     fun feedBackSesameTask(taskTemplateId: String): String {
         return RequestManager.requestString(
             "com.antgroup.zmxy.zmmemberop.biz.rpc.creditaccumulate.CreditAccumulateStrategyRpcManager.taskFeedback",
-            """[{"actionType":"TO_COMPLETE","templateId":"$taskTemplateId"}]""",
+            """[{"actionType":"TO_COMPLETE","bizType":"LIFE_RECORD","sceneCode":"$SESAME_TASK_SCENE_ZML","templateId":"$taskTemplateId","version":"$SESAME_TASK_VERSION"}]""",
             "zmmemberop", "taskFeedback", "CreditAccumulateStrategyRpcManager"
         )
     }
@@ -380,6 +387,39 @@ object AntMemberRpcCall {
         return RequestManager.requestString(
             "com.antgroup.zmxy.zmcustprod.biz.rpc.home.creditaccumulate.api.CreditAccumulateRpcManager.collectCreditFeedback",
             """[{"collectAll":false,"creditFeedbackId":"$creditFeedbackId","status":"UNCLAIMED"}]"""
+        )
+    }
+
+    /**
+     * 芝麻粒首页
+     */
+    @JvmStatic
+    fun queryPointHome(): String {
+        return RequestManager.requestString(
+            "com.antgroup.zmxy.zmmemberop.biz.rpc.PointHomeRpcManager.queryHome",
+            "[{}]"
+        )
+    }
+
+    /**
+     * 查询最近一次被操作的芝麻任务
+     */
+    @JvmStatic
+    fun queryLastOperateTask(): String {
+        return RequestManager.requestString(
+            "com.antgroup.zmxy.zmmemberop.biz.rpc.creditaccumulate.CreditAccumulateStrategyRpcManager.queryLastOperateTask",
+            """[{"version":"$SESAME_TASK_VERSION"}]"""
+        )
+    }
+
+    /**
+     * 芝麻粒福利签到列表
+     */
+    @JvmStatic
+    fun zmlCheckInQueryTaskLists(): String {
+        return RequestManager.requestString(
+            "com.antgroup.zmxy.zmmemberop.biz.rpc.pointtask.CheckInTaskRpcManager.queryTaskLists",
+            """[{"supportMakeUp":true,"version":"$SESAME_CHECK_IN_VERSION"}]"""
         )
     }
 
@@ -769,6 +809,37 @@ object AntMemberRpcCall {
     }
 
     @JvmStatic
+    fun taskQueryPush(taskId: String): String? {
+        return try {
+            val args = JSONObject().apply {
+                put("mode", 1)
+                put("taskId", taskId)
+            }
+            RequestManager.requestString(
+                "com.alipay.wealthgoldtwa.needle.taskQueryPush",
+                JSONArray().put(args).toString()
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    @JvmStatic
+    fun goldBillTaskTrigger(taskId: String): String? {
+        return try {
+            val args = JSONObject().apply {
+                put("taskId", taskId)
+            }
+            RequestManager.requestString(
+                "com.alipay.wealthgoldtwa.goldbill.v4.task.trigger",
+                JSONArray().put(args).toString()
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    @JvmStatic
     fun queryStickerCanReceive(year: String, month: String): String {
         val data =
             """[{"isFirstShow":"false","month":"$month","scene":"","year":"$year"}]"""
@@ -883,11 +954,9 @@ object AntMemberRpcCall {
         }
 
         object Alchemy {
-            private const val CHECK_IN_VERSION = "2025-10-22"
-
             @JvmStatic
             fun alchemyQueryCheckIn(sceneCode: String): String {
-                val requestData = """[{"sceneCode":"$sceneCode","version":"$CHECK_IN_VERSION"}]"""
+                val requestData = """[{"sceneCode":"$sceneCode","version":"$SESAME_CHECK_IN_VERSION"}]"""
                 return RequestManager.requestString(
                     "com.antgroup.zmxy.zmmemberop.biz.rpc.pointtask.CheckInTaskRpcManager.queryTaskLists",
                     requestData
