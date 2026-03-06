@@ -394,9 +394,29 @@ data object AntFarmFamily {
             val jo = JSONObject(AntFarmRpcCall.familyEatTogether(groupId, familyUserIds.toJSONArray(), array))
             if (ResChecker.checkRes(TAG, jo)) {
                 Log.farm("家庭任务🏠请客" + periodName + "#消耗美食" + familyUserIds.size + "份")
+                GlobalThreadPools.sleepCompat(500L)
+                syncFamilyStatusIntimacy(groupId)
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "familyEatTogether err:",t)
+        }
+    }
+
+    /**
+     * 同步家庭亲密度状态
+     */
+    private fun syncFamilyStatusIntimacy(groupId: String) {
+        try {
+            val currentUserId = UserMap.currentUid
+            if (currentUserId.isNullOrBlank()) {
+                return
+            }
+            val jo = JSONObject(AntFarmRpcCall.syncFamilyStatus(groupId, "INTIMACY_VALUE", currentUserId))
+            if (!ResChecker.checkRes(TAG, jo)) {
+                Log.record(TAG, "家庭任务🏠同步亲密度状态失败")
+            }
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "syncFamilyStatusIntimacy err:", t)
         }
     }
 
@@ -654,6 +674,7 @@ data object AntFarmFamily {
             if (ResChecker.checkRes(TAG, jo)) {
                 Log.farm("家庭任务🏠分享好友")
                 Status.setFlagToday("antFarm::familyShareToFriends")
+                syncFamilyStatusIntimacy(groupId)
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "familyShareToFriends err:", t)

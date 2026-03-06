@@ -3845,6 +3845,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      */
     private fun queryUserPatrol() {
         val waitTime = 300L //增大查询等待时间，减少异常
+        val patrolChanceLimitFlag = "AntForest::exchangePatrolChanceLimit"
         try {
             do {
                 // 查询当前巡护任务
@@ -3887,21 +3888,46 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     val leftChance = chance.getInt("leftChance")
                     val leftStep = chance.getInt("leftStep")
                     val usedStep = chance.getInt("usedStep")
+                    val chanceFromStepUpperLimit = jo.optInt("chanceFromStepUpperLimit", 5)
+                    val chanceStepUnit = jo.optInt("chanceStepUnit", 2000)
+                    val maxExchangeStep = if (chanceFromStepUpperLimit > 0 && chanceStepUnit > 0) {
+                        chanceFromStepUpperLimit * chanceStepUnit
+                    } else {
+                        10000
+                    }
+                    if (usedStep >= maxExchangeStep && !Status.hasFlagToday(patrolChanceLimitFlag)) {
+                        Status.setFlagToday(patrolChanceLimitFlag)
+                        Log.record(TAG, "今日保护地巡护兑换次数已达上限(${chanceFromStepUpperLimit}次)，后续不再重复尝试")
+                    }
                     if ("STANDING" == currentStatus) { // 当前巡护状态为"STANDING"
                         if (leftChance > 0) { // 如果还有剩余的巡护次数，则开始巡护
                             jo = JSONObject(AntForestRpcCall.patrolGo(currentNode, patrolId))
                             GlobalThreadPools.sleepCompat(waitTime)
                             patrolKeepGoing(jo.toString(), currentNode, patrolId) // 继续巡护
                             continue  // 跳过当前循环
-                        } else if (leftStep >= 2000 && usedStep < 10000) { // 如果没有剩余的巡护次数但步数足够，则兑换巡护次数
+                        } else if (!Status.hasFlagToday(patrolChanceLimitFlag) &&
+                            leftStep >= chanceStepUnit &&
+                            usedStep < maxExchangeStep
+                        ) { // 如果没有剩余的巡护次数但步数足够，则兑换巡护次数
                             jo = JSONObject(AntForestRpcCall.exchangePatrolChance(leftStep))
                             // GlobalThreadPools.sleepCompat(waitTime);
                             if (ResChecker.checkRes(TAG + "兑换巡护次数失败:", jo)) { // 兑换成功，增加巡护次数
                                 val addedChance = jo.optInt("addedChance", 0)
                                 Log.forest("步数兑换⚖️[巡护次数*$addedChance]")
+                                val consumedStep = if (addedChance > 0) addedChance * chanceStepUnit else chanceStepUnit
+                                if (usedStep + consumedStep >= maxExchangeStep) {
+                                    Status.setFlagToday(patrolChanceLimitFlag)
+                                    Log.record(TAG, "今日保护地巡护兑换次数已达上限(${chanceFromStepUpperLimit}次)，后续不再重复尝试")
+                                }
                                 continue  // 跳过当前循环
                             } else {
-                                Log.record(TAG, jo.getString("resultDesc"))
+                                val resultDesc = jo.optString("resultDesc")
+                                if (resultDesc.contains("上限") || resultDesc.contains("已达") || resultDesc.contains("最多")) {
+                                    Status.setFlagToday(patrolChanceLimitFlag)
+                                    Log.record(TAG, "今日保护地巡护兑换次数已达上限(${chanceFromStepUpperLimit}次)，后续不再重复尝试")
+                                } else {
+                                    Log.record(TAG, resultDesc)
+                                }
                             }
                         }
                     } else if ("GOING" == currentStatus) {
@@ -4192,6 +4218,99 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         return null
     }
 
+    private fun getPropType(propObject: JSONObject?): String {
+        if (propObject == null) {
+            return ""
+        }
+        val configType = propObject.optJSONObject("propConfigVO")?.optString("propType")
+        return configType?.takeIf { it.isNotBlank() } ?: propObject.optString("propType")
+    }
+
+    private fun getPropName(propObject: JSONObject?): String {
+        if (propObject == null) {
+            return ""
+        }
+        val configName = propObject.optJSONObject("propConfigVO")?.optString("propName")
+        return configName?.takeIf { it.isNotBlank() } ?: getPropType(propObject)
+    }
+
+    private fun hasPropStock(propObject: JSONObject?): Boolean {
+        if (propObject == null) {
+            return false
+        }
+        val holdsNum = propObject.optInt("holdsNum", 0)
+        val propIdCount = propObject.optJSONArray("propIdList")?.length() ?: 0
+        return holdsNum > 0 && propIdCount > 0
+    }
+
+    private fun collectAvailablePropsByGroup(bagObject: JSONObject?, propGroup: String): MutableList<JSONObject> {
+        val props: MutableList<JSONObject> = ArrayList()
+        val forestPropVOList = bagObject?.optJSONArray("forestPropVOList") ?: return props
+        for (i in 0..<forestPropVOList.length()) {
+            val prop = forestPropVOList.optJSONObject(i) ?: continue
+            if (prop.optString("propGroup") == propGroup && hasPropStock(prop)) {
+                props.add(prop)
+            }
+        }
+        return props
+    }
+
+    private fun selectPreferredBoostProp(bagObject: JSONObject?): JSONObject? {
+        val boostProps = collectAvailablePropsByGroup(bagObject, "boost")
+        if (boostProps.isEmpty()) {
+            return null
+        }
+        Collections.sort(
+            boostProps,
+            Comparator { p1: JSONObject?, p2: JSONObject? ->
+                val typePriority1 = when (getPropType(p1)) {
+                    "LIMIT_TIME_ENERGY_BUBBLE_BOOST" -> 0
+                    "BUBBLE_BOOST" -> 1
+                    else -> 2
+                }
+                val typePriority2 = when (getPropType(p2)) {
+                    "LIMIT_TIME_ENERGY_BUBBLE_BOOST" -> 0
+                    "BUBBLE_BOOST" -> 1
+                    else -> 2
+                }
+                if (typePriority1 != typePriority2) {
+                    typePriority1.compareTo(typePriority2)
+                } else {
+                    p1!!.optLong("recentExpireTime", Long.MAX_VALUE)
+                        .compareTo(p2!!.optLong("recentExpireTime", Long.MAX_VALUE))
+                }
+            }
+        )
+        return boostProps.firstOrNull()
+    }
+
+    private fun selectPreferredRobExpandProp(bagObject: JSONObject?): JSONObject? {
+        val robExpandProps = collectAvailablePropsByGroup(bagObject, "robExpandCard")
+        if (robExpandProps.isEmpty()) {
+            return null
+        }
+        val choice = robExpandCard?.value ?: ApplyPropType.CLOSE
+        val filteredProps = robExpandProps.filter { prop ->
+            if (choice != ApplyPropType.ONLY_LIMIT_TIME) {
+                true
+            } else {
+                val propType = getPropType(prop)
+                propType.contains("LIMIT_TIME") || propType.contains("DAY")
+            }
+        }.toMutableList()
+        if (filteredProps.isEmpty()) {
+            return null
+        }
+        Collections.sort(
+            filteredProps,
+            Comparator { p1: JSONObject?, p2: JSONObject? ->
+                p1!!.optLong("recentExpireTime", Long.MAX_VALUE)
+                    .compareTo(p2!!.optLong("recentExpireTime", Long.MAX_VALUE))
+            }
+        )
+        return filteredProps.firstOrNull()
+    }
+
     /**
      * 查找背包道具
      *
@@ -4206,10 +4325,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             val forestPropVOList = bagObject!!.getJSONArray("forestPropVOList")
             for (i in 0..<forestPropVOList.length()) {
                 val forestPropVO = forestPropVOList.getJSONObject(i)
-                val propConfigVO = forestPropVO.getJSONObject("propConfigVO")
-                val currentPropType = propConfigVO.getString("propType")
-                // String propName = propConfigVO.getString("propName");
-                if (propType == currentPropType) {
+                val currentPropType = getPropType(forestPropVO)
+                if (propType == currentPropType && hasPropStock(forestPropVO)) {
                     return forestPropVO // 找到后直接返回
                 }
             }
@@ -4270,6 +4387,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             return false
         }
         try {
+            if (!hasPropStock(propJsonObj)) {
+                Log.record(TAG, "道具[${getPropName(propJsonObj)}]数量不足，跳过使用")
+                return false
+            }
             val propId = propJsonObj.getJSONArray("propIdList").getString(0)
             val propConfigVO = propJsonObj.getJSONObject("propConfigVO")
             val propType = propConfigVO.getString("propType")
@@ -4404,7 +4525,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             val choice = doubleCard!!.value
             for (i in 0..<forestPropVOList.length()) {
                 val prop = forestPropVOList.optJSONObject(i)
-                if (prop != null && "doubleClick" == prop.optString("propGroup")) {
+                if (prop != null && "doubleClick" == prop.optString("propGroup") && hasPropStock(prop)) {
                     if (choice == ApplyPropType.ALL) {
                         // 设置为"所有道具": 添加所有双击卡
                         doubleClickProps.add(prop)
@@ -4515,6 +4636,9 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 val forestPropVOList = bag?.optJSONArray("forestPropVOList") ?: return
                 for (i in 0..<forestPropVOList.length()) {
                     val prop = forestPropVOList.optJSONObject(i) ?: continue
+                    if (!hasPropStock(prop)) {
+                        continue
+                    }
                     val propGroup = prop.optString("propGroup")
                     val propType = prop.optJSONObject("propConfigVO")?.optString("propType")
                         ?.takeIf { it.isNotBlank() }
@@ -4618,17 +4742,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 return
             }
 
-            // 在背包中查询限时加速器
-            var jo = findPropBag(bag, "LIMIT_TIME_ENERGY_BUBBLE_BOOST")
+            var jo = selectPreferredBoostProp(bag)
             if (jo == null) {
                 youthPrivilege()
-                jo = findPropBag(queryPropList(), "LIMIT_TIME_ENERGY_BUBBLE_BOOST")
-                if (jo == null) {
-                    jo = findPropBag(bag, "BUBBLE_BOOST")
-                }
+                jo = selectPreferredBoostProp(queryPropList(true))
             }
             if (jo != null) {
-                val propName = jo.getJSONObject("propConfigVO").getString("propName")
+                val propName = getPropName(jo)
                 // ⚡ 优化点：传入 needRefreshHome = false，避免重复请求和等待
                 // 因为紧接着调用的 collectSelfEnergyImmediately 会再次查询主页，那次查询会包含最新的道具状态和能量球状态
                 if (usePropBag(jo, needRefreshHome = false)) {
@@ -4681,13 +4801,11 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      */
     private fun userobExpandCard(bag: JSONObject? = queryPropList()) {
         try {
-            var jo = findPropBag(bag, "VITALITY_ROB_EXPAND_CARD_1.1_3DAYS")
+            val jo = selectPreferredRobExpandProp(bag)
             if (jo != null && usePropBag(jo)) {
                 robExpandCardEndTime = System.currentTimeMillis() + 1000 * 60 * 5
-            }
-            jo = findPropBag(bag, "SHAMO_ROB_EXPAND_CARD_1.5_1DAYS")
-            if (jo != null && usePropBag(jo)) {
-                robExpandCardEndTime = System.currentTimeMillis() + 1000 * 60 * 5
+            } else {
+                Log.record(TAG, "背包中无可用翻倍卡")
             }
         } catch (th: Throwable) {
             Log.printStackTrace(TAG, "useBubbleBoostCard err", th)

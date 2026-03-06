@@ -1234,15 +1234,20 @@ class AntFarm : ModelTask() {
                 if (usedCount >= 2) {
                     Log.record("今日加饭卡已使用${usedCount}/2，跳过使用")
                 } else {
-                    val result = useFarmTool(ownerFarmId, ToolType.BIG_EATER_TOOL)
-                    if (result) {
-                        Log.farm("使用道具🎭[加饭卡]！")
-                        DataStore.put(usedKey, usedCount + 1)
-                        delay(1000)
-                        // 刷新状态
-                        syncAnimalStatus(ownerFarmId)
+                    val bigEaterCount = getFarmToolCount(ToolType.BIG_EATER_TOOL, forceRefresh = true)
+                    if (bigEaterCount <= 0) {
+                        Log.record("背包中无加饭卡，跳过使用")
                     } else {
-                        Log.record("⚠️使用道具🎭[加饭卡]失败，可能卡片不足或状态异常~")
+                        val result = useFarmTool(ownerFarmId, ToolType.BIG_EATER_TOOL)
+                        if (result) {
+                            Log.farm("使用道具🎭[加饭卡]！")
+                            DataStore.put(usedKey, usedCount + 1)
+                            delay(1000)
+                            // 刷新状态
+                            syncAnimalStatus(ownerFarmId)
+                        } else {
+                            Log.record("⚠️使用道具🎭[加饭卡]失败，可能卡片不足或状态异常~")
+                        }
                     }
                 }
             }
@@ -2522,6 +2527,18 @@ class AntFarm : ModelTask() {
         }
         return null
     }
+
+    private fun findFarmTool(toolType: ToolType, forceRefresh: Boolean = false): FarmTool? {
+        if (forceRefresh || farmTools.isEmpty()) {
+            listFarmTool()
+        }
+        return farmTools.find { it.toolType == toolType }
+    }
+
+    private fun getFarmToolCount(toolType: ToolType, forceRefresh: Boolean = false): Int {
+        return findFarmTool(toolType, forceRefresh)?.toolCount ?: 0
+    }
+
     private val accelerateToolCount: Int
         get() = farmTools.find { it.toolType == ToolType.ACCELERATETOOL }?.toolCount ?: 0
 
@@ -2692,48 +2709,38 @@ class AntFarm : ModelTask() {
 
     private fun useFarmTool(targetFarmId: String?, toolType: ToolType): Boolean {
         try {
-            var s = AntFarmRpcCall.listFarmTool()
+            val tool = findFarmTool(toolType, forceRefresh = true)
+            if (tool == null) {
+                Log.record(TAG, "背包中未找到道具🎭[${toolType.nickName()}]，跳过使用")
+                return false
+            }
+            if (tool.toolCount <= 0) {
+                Log.record(TAG, "背包中道具🎭[${toolType.nickName()}]数量为0，跳过使用")
+                return false
+            }
+            if (toolType == ToolType.FENCETOOL && hasFence) {
+                Log.record(TAG, "🛡️ 篱笆效果尚在（剩余${fenceCountDown / 60}分钟），跳过重复使用")
+                return false
+            }
+
+            var s = AntFarmRpcCall.useFarmTool(targetFarmId, tool.toolId.orEmpty(), toolType.name)
             var jo = JSONObject(s)
-            var memo = jo.getString("memo")
+            val memo = jo.optString("memo")
             if (ResChecker.checkRes(TAG, jo)) {
-                val jaToolList = jo.getJSONArray("toolList")
-                for (i in 0..<jaToolList.length()) {
-                    jo = jaToolList.getJSONObject(i)
-                    if (toolType.name == jo.getString("toolType")) {
-                        val toolCount = jo.getInt("toolCount")
-                        if (toolCount > 0) {
-                            if (toolType == ToolType.FENCETOOL && hasFence) {
-                                Log.record(TAG, "🛡️ 篱笆效果尚在（剩余${fenceCountDown/60}分钟），跳过重复使用")
-                                return false
-                            }
-                            var toolId = ""
-                            if (jo.has("toolId")) toolId = jo.getString("toolId")
-                            s = AntFarmRpcCall.useFarmTool(targetFarmId, toolId, toolType.name)
-                            jo = JSONObject(s)
-                            memo = jo.getString("memo")
-                            if (ResChecker.checkRes(TAG, jo)) {
-                                Log.farm("使用了道具🎭[" + toolType.nickName() + "]#剩余" + (toolCount - 1) + "张")
-                                if (toolType == ToolType.FENCETOOL) {
-                                    hasFence = true
-                                    fenceCountDown = 86400
-                                }
-                                listFarmTool()
-                                return true
-                            } else {
-                                // 针对加速卡：当日达到上限(resultCode=3D16)后，设置当日标记，避免后续重复尝试
-                                val resultCode = jo.optString("resultCode")
-                                if (toolType == ToolType.ACCELERATETOOL && resultCode == "3D16") {
-                                    Status.setFlagToday("farm::accelerateLimit")
-                                }
-                                Log.record(memo)
-                            }
-                            Log.record(s)
-                        }
-                        break
-                    }
+                Log.farm("使用了道具🎭[" + toolType.nickName() + "]#剩余" + (tool.toolCount - 1) + "张")
+                if (toolType == ToolType.FENCETOOL) {
+                    hasFence = true
+                    fenceCountDown = 86400
                 }
+                listFarmTool()
+                return true
             } else {
-                Log.record(memo)
+                // 针对加速卡：当日达到上限(resultCode=3D16)后，设置当日标记，避免后续重复尝试
+                val resultCode = jo.optString("resultCode")
+                if (toolType == ToolType.ACCELERATETOOL && resultCode == "3D16") {
+                    Status.setFlagToday("farm::accelerateLimit")
+                }
+                Log.record(memo.ifBlank { "使用道具🎭[${toolType.nickName()}]失败" })
                 Log.record(s)
             }
         } catch (t: Throwable) {
@@ -3929,31 +3936,40 @@ class AntFarm : ModelTask() {
     private suspend fun drawGameCenterAward() {
         try {
             val response = AntFarmRpcCall.queryGameList()
-            val jo = JSONObject(response)
+            val responseJo = JSONObject(response)
+            val jo = responseJo.optJSONObject("resData") ?: responseJo
 
-            // 使用你的 ResChecker 工具类判断
-            if (!jo.optBoolean("success")) {
-                Log.record(TAG, "queryGameList 失败: $jo")
+            if (!jo.optBoolean("success", responseJo.optBoolean("success"))) {
+                Log.record(TAG, "queryGameList 失败: $responseJo")
                 return
             }
 
-            // 核心改动：从 gameCenterDrawRights 获取权限数据
             val drawRights = jo.optJSONObject("gameCenterDrawRights")
-            if (drawRights != null) {
+            val legacyDrawActivity = jo.optJSONObject("gameDrawAwardActivity")
+            if (drawRights != null || legacyDrawActivity != null) {
+                val currentRights = drawRights ?: legacyDrawActivity ?: return
 
                 // 1. 处理当前可开的宝箱 (对应你说的 canUse)
-                var quotaCanUse = drawRights.optInt("quotaCanUse") // 当前手头的机会
+                var quotaCanUse = currentRights.optInt(
+                    "quotaCanUse",
+                    currentRights.optInt("canUseTimes", currentRights.optInt("drawRightsTimes", 0))
+                )
                 if (quotaCanUse > 0) {
                     Log.record(TAG, "当前有 $quotaCanUse 个宝箱待开启...")
                     while (quotaCanUse > 0) {
-                        val drawRes = JSONObject(AntFarmRpcCall.drawGameCenterAward(1))
-                        if (drawRes.optBoolean("success")) {
+                        val drawResponse = JSONObject(AntFarmRpcCall.drawGameCenterAward(1))
+                        val drawRes = drawResponse.optJSONObject("resData") ?: drawResponse
+                        if (drawRes.optBoolean("success", drawResponse.optBoolean("success"))) {
                             // 领取成功后，更新剩余可领取的 quotaCanUse
-                            // 这里的返回 JSON 建议你再确认下，通常也是在 gameCenterDrawRights 里
                             val nextRights = drawRes.optJSONObject("gameCenterDrawRights")
-                            quotaCanUse = nextRights?.optInt("quotaCanUse") ?: (quotaCanUse - 1)
+                                ?: drawRes.optJSONObject("gameDrawAwardActivity")
+                            quotaCanUse = nextRights?.optInt(
+                                "quotaCanUse",
+                                nextRights.optInt("canUseTimes", drawRes.optInt("drawRightsTimes", quotaCanUse - 1))
+                            ) ?: (quotaCanUse - 1)
 
                             val awardList = drawRes.optJSONArray("gameCenterDrawAwardList")
+                                ?: drawRes.optJSONArray("drawAwardList")
                             val awardStrings = mutableListOf<String>()
                             if (awardList != null) {
                                 for (i in 0 until awardList.length()) {
@@ -3964,15 +3980,18 @@ class AntFarm : ModelTask() {
                             Log.farm("庄园小鸡🎁[获得奖品: ${awardStrings.joinToString(",")}]")
                             delay(3000)
                         } else {
-                            Log.record(TAG, "开启宝箱失败: ${drawRes.optString("desc")}")
+                            val desc = drawRes.optString("desc")
+                                .ifBlank { drawRes.optString("resultDesc") }
+                                .ifBlank { drawResponse.optString("desc") }
+                            Log.record(TAG, "开启宝箱失败: $desc")
                             break
                         }
                     }
                 }
 
                 // 2. 处理剩余任务 (判断是否需要去刷任务)
-                val limit = drawRights.optInt("quotaLimit") // 总上限，比如 10
-                val used = drawRights.optInt("usedQuota")   // 今日已获得的总数，比如 2
+                val limit = currentRights.optInt("quotaLimit", currentRights.optInt("limit")) // 总上限，比如 10
+                val used = currentRights.optInt("usedQuota", currentRights.optInt("usedTimes"))   // 今日已获得的总数，比如 2
 
                 // 计算逻辑：如果 已获得 < 总上限，且当前没机会了，就去刷
                 val remainToTask = limit - used

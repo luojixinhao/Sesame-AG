@@ -1,6 +1,7 @@
 package fansirsqi.xposed.sesame.task.antFarm
 
 
+import fansirsqi.xposed.sesame.data.Status
 import fansirsqi.xposed.sesame.util.GlobalThreadPools
 import fansirsqi.xposed.sesame.util.Log
 import fansirsqi.xposed.sesame.util.ResChecker
@@ -46,6 +47,10 @@ class ChouChouLe {
          */
         fun getRemainingTimes(): Int {
             return max(0, rightsTimesLimit - rightsTimes)
+        }
+
+        fun isLimitedTask(): Boolean {
+            return title.contains("【限时】")
         }
     }
 
@@ -112,6 +117,9 @@ class ChouChouLe {
                             doubleCheck = true
                         }
                     } else if (TaskStatus.TODO.name == task.taskStatus) {
+                        if (shouldSkipLimitedTaskToday(task)) {
+                            continue
+                        }
                         // 只要有剩余次数，且（不是捐赠任务 OR 开启了捐赠任务开关），就执行
                         if (task.getRemainingTimes() > 0 &&
                             (task.innerAction != "DONATION" || AntFarm.instance?.doChouChouLeDonationTask?.value == true)) {
@@ -155,6 +163,9 @@ class ChouChouLe {
                 if (TaskStatus.FINISHED.name == task.taskStatus) {
                     return false
                 } else if (TaskStatus.TODO.name == task.taskStatus) {
+                    if (shouldSkipLimitedTaskToday(task)) {
+                        continue
+                    }
                     // 还有剩余次数且满足执行条件
                     if (task.getRemainingTimes() > 0 &&
                         (task.innerAction != "DONATION" || AntFarm.instance?.doChouChouLeDonationTask?.value == true)) {
@@ -177,6 +188,48 @@ class ChouChouLe {
         } catch (_: Throwable) {
             false
         }
+    }
+
+    private fun limitedTaskFlag(taskId: String): String {
+        return "antFarm::chouchouleLimitedEnded::$taskId"
+    }
+
+    private fun shouldSkipLimitedTaskToday(task: TaskInfo): Boolean {
+        return task.isLimitedTask() && Status.hasFlagToday(limitedTaskFlag(task.taskId))
+    }
+
+    private fun markLimitedTaskEndedToday(task: TaskInfo, reason: String) {
+        if (!task.isLimitedTask()) {
+            return
+        }
+        Status.setFlagToday(limitedTaskFlag(task.taskId))
+        val detail = reason.ifBlank { "服务端返回活动已结束" }
+        Log.record(TAG, "限时抽抽乐任务[${task.title}]已结束，今日不再尝试：$detail")
+    }
+
+    private fun getResponseMessage(jo: JSONObject): String {
+        val resData = jo.optJSONObject("resData")
+        return listOf(
+            jo.optString("resultDesc"),
+            jo.optString("desc"),
+            jo.optString("memo"),
+            resData?.optString("resultDesc").orEmpty(),
+            resData?.optString("desc").orEmpty(),
+            resData?.optString("memo").orEmpty()
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
+    }
+
+    private fun isLimitedTaskEndedResponse(jo: JSONObject): Boolean {
+        val resultCode = jo.optString("resultCode")
+        if (resultCode == "DRAW_MACHINE07") {
+            return false
+        }
+        val message = getResponseMessage(jo)
+        if (message.isBlank()) {
+            return false
+        }
+        return listOf("活动已结束", "活动结束", "已下线", "已失效", "不存在", "未开始", "已结束")
+            .any { message.contains(it) }
     }
 
     /**
@@ -208,6 +261,9 @@ class ChouChouLe {
      */
     private fun doChouTask(drawType: String, task: TaskInfo): Boolean {
         try {
+            if (shouldSkipLimitedTaskToday(task)) {
+                return false
+            }
             val taskName = if (drawType == "ipDraw") "IP抽抽乐" else "抽抽乐"
 
             // 特殊任务：浏览广告
@@ -238,6 +294,10 @@ class ChouChouLe {
                     Log.record(TAG, "${taskName}任务[${task.title}]失败: 饲料不足，停止后续尝试")
                     return false
                 }
+                if (isLimitedTaskEndedResponse(jo)) {
+                    markLimitedTaskEndedToday(task, getResponseMessage(jo))
+                    return true
+                }
             }
             return false
         } catch (t: Throwable) {
@@ -251,6 +311,9 @@ class ChouChouLe {
      */
     private fun handleAdTask(drawType: String, task: TaskInfo): Boolean {
         try {
+            if (shouldSkipLimitedTaskToday(task)) {
+                return false
+            }
             val referToken = AntFarm.loadAntFarmReferToken()
             val taskSceneCode = if (drawType == "ipDraw") "ANTFARM_IP_DRAW_TASK" else "ANTFARM_DAILY_DRAW_TASK"
 
@@ -287,6 +350,10 @@ class ChouChouLe {
             if (jo.optBoolean("success", false)) {
                 Log.farm((if (drawType == "ipDraw") "IP抽抽乐" else "抽抽乐") + "🧾️[任务: ${task.title}]")
                 GlobalThreadPools.sleepCompat(3000L)
+                return true
+            }
+            if (isLimitedTaskEndedResponse(jo)) {
+                markLimitedTaskEndedToday(task, getResponseMessage(jo))
                 return true
             }
             return false

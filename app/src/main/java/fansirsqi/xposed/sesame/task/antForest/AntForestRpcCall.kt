@@ -633,7 +633,7 @@ object AntForestRpcCall {
     fun collectFriendGiftBox(targetId: String, targetUserId: String): String {
         return RequestManager.requestString(
             "alipay.antforest.forest.h5.collectFriendGiftBox",
-            "[{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"targetId\":\"$targetId\",\"targetUserId\":\"$targetUserId\"}]"
+            "[{\"source\":\"chInfo_ch_appid-60000002\",\"targetId\":\"$targetId\",\"targetUserId\":\"$targetUserId\"}]"
         )
     }
 
