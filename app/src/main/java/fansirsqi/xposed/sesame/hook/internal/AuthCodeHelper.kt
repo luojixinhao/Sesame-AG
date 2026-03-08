@@ -13,6 +13,18 @@ object AuthCodeHelper {
     private const val TAG = "Oauth2AuthCodeHelper"
     private var classLoader: ClassLoader? = null
 
+    private fun isServiceNotReadyError(throwable: Throwable): Boolean {
+        var current: Throwable? = throwable
+        while (current != null) {
+            val message = current.message.orEmpty()
+            if (message.contains("getAuthPreDecision") && message.contains("null object reference")) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
+    }
+
     /**
      * 初始化 Oauth2AuthCodeHelper
      * @param loader 应用类加载器
@@ -72,6 +84,10 @@ object AuthCodeHelper {
 
             return null
         } catch (e: Throwable) {
+            if (isServiceNotReadyError(e)) {
+                Log.record(TAG, "授权码服务尚未就绪，跳过本次获取[$appId]")
+                return null
+            }
             Log.printStackTrace(TAG, "主动调用获取授权码失败: ${e.message}", e)
             return null
         }

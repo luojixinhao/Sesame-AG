@@ -209,7 +209,6 @@ class ApplicationHook {
                         AlipayMiniMarkHelper.init(classLoader!!)
                         LocationHelper.init(classLoader!!)
                         AuthCodeHelper.init(classLoader!!)
-                        AuthCodeHelper.getAuthCode("2021005114632037" )
 
                         initVersionInfo(packageName)
                         // 特殊版本处理

@@ -1901,6 +1901,10 @@ class AntMember : ModelTask() {
             val applyResponse = AntMemberRpcCall.applyMemberTask(taskConfigId)
             delay(500)
             val applyObject = JSONObject(applyResponse)
+            if (isSkippableMemberTaskRejection(applyObject)) {
+                record(TAG, "会员任务🎖️[taskConfigId=$taskConfigId]#不满足营销规则，跳过执行")
+                return@run MemberTaskProcessResult.SKIPPED_UNSUPPORTED
+            }
             if (!ResChecker.checkRes(TAG + "领取会员任务失败:", applyObject)) {
                 Log.error(TAG, "领取会员任务失败:$applyResponse")
                 return@run MemberTaskProcessResult.FAILED
@@ -1930,6 +1934,10 @@ class AntMember : ModelTask() {
                 taskExecution.bizType
             )
             val executeObject = JSONObject(executeResponse)
+            if (isSkippableMemberTaskRejection(executeObject)) {
+                record(TAG, "会员任务🎖️[${taskExecution.title}]#不满足营销规则，跳过执行")
+                return@run MemberTaskProcessResult.SKIPPED_UNSUPPORTED
+            }
             if (!ResChecker.checkRes(TAG + "执行会员任务失败:", executeObject)) {
                 Log.error(TAG, "执行会员任务失败:$executeResponse")
                 val errorCode = executeObject.optString("resultCode").ifEmpty {
@@ -2062,6 +2070,17 @@ class AntMember : ModelTask() {
         return TaskBlacklist.isTaskInBlacklist(combinedTaskInfo)
             || TaskBlacklist.isTaskInBlacklist(taskTitle)
             || TaskBlacklist.isTaskInBlacklist(taskConfigId)
+    }
+
+    private fun isSkippableMemberTaskRejection(response: JSONObject): Boolean {
+        val resultCode = response.optString("resultCode").ifEmpty {
+            response.optString("errorCode")
+        }
+        val resultDesc = response.optString("resultDesc").ifEmpty {
+            response.optString("errorMsg")
+        }
+        return resultCode == "NOT_PROMO_RULE_QUALIFIED"
+            || resultDesc.contains("不满足任务的营销规则条件")
     }
 
     private fun buildCurrentMemberTaskExecution(
