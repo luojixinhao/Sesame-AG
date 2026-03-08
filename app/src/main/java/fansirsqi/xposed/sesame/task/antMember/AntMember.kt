@@ -2041,7 +2041,7 @@ class AntMember : ModelTask() {
             simpleTaskConfig?.optString("title").orEmpty()
         }
         val desc = taskObject.optString("description").ifEmpty {
-            simpleTaskConfig?.optString("desc").ifEmpty {
+            simpleTaskConfig?.optString("desc").orEmpty().ifEmpty {
                 simpleTaskConfig?.optString("description").orEmpty()
             }
         }

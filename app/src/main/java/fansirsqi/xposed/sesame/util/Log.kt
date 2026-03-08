@@ -248,6 +248,16 @@ object Log {
         return "$header\n${android.util.Log.getStackTraceString(th)}"
     }
 
+    private fun shouldTreatContextAsTag(context: String): Boolean {
+        if (context.isBlank()) {
+            return false
+        }
+        if (context.any { it.isWhitespace() || it > '\u007F' }) {
+            return false
+        }
+        return context.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '.' || it == '$' }
+    }
+
     @JvmStatic
     fun printStackTrace(th: Throwable) {
         if (shouldSkipDuplicateError(th)) return
@@ -255,43 +265,20 @@ object Log {
     }
 
     @JvmStatic
-    fun printStackTrace(msg: String, th: Throwable) {
+    fun printStackTrace(context: String, th: Throwable) {
         if (shouldSkipDuplicateError(th)) return
-        error(buildStackTraceMessage(msg = msg, th = th))
-    }
-
-    @JvmStatic
-    fun printStackTrace(tag: String, th: Throwable) {
-        if (shouldSkipDuplicateError(th)) return
-        error(buildStackTraceMessage(tag = tag, th = th))
+        val message = if (shouldTreatContextAsTag(context)) {
+            buildStackTraceMessage(tag = context, th = th)
+        } else {
+            buildStackTraceMessage(msg = context, th = th)
+        }
+        error(message)
     }
 
     @JvmStatic
     fun printStackTrace(tag: String, msg: String, th: Throwable) {
         if (shouldSkipDuplicateError(th)) return
         error(buildStackTraceMessage(tag = tag, msg = msg, th = th))
-    }
-
-    // 兼容 Exception 参数的重载 (Kotlin 中 Exception 是 Throwable 的子类，其实可以直接用上面的)
-    // 但为了保持原有 Java API 的签名习惯，这里保留
-    @JvmStatic
-    fun printStackTrace(e: Exception) {
-        printStackTrace(e as Throwable)
-    }
-
-    @JvmStatic
-    fun printStackTrace(msg: String, e: Exception) {
-        printStackTrace(msg, e as Throwable)
-    }
-
-    @JvmStatic
-    fun printStackTrace(tag: String, e: Exception) {
-        printStackTrace(tag, e as Throwable)
-    }
-
-    @JvmStatic
-    fun printStackTrace(tag: String, msg: String, e: Exception) {
-        printStackTrace(tag, msg, e as Throwable)
     }
 
     @JvmStatic
