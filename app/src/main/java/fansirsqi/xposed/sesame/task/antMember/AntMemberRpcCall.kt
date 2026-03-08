@@ -935,6 +935,25 @@ object AntMemberRpcCall {
     }
 
     @JvmStatic
+    fun goldTicketIndexCollect(
+        directModeDisableCollect: Boolean = true
+    ): String? {
+        return try {
+            val args = JSONObject().apply {
+                if (directModeDisableCollect) {
+                    put("directModeDisableCollect", 1)
+                }
+            }
+            RequestManager.requestString(
+                "com.alipay.wealthgoldtwa.needle.index.collect",
+                JSONArray().put(args).toString()
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    @JvmStatic
     fun queryWelfareHome(): String? {
         return try {
             val args = JSONObject().apply {

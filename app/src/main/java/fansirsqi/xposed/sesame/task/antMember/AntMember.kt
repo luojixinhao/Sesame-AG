@@ -1861,11 +1861,23 @@ class AntMember : ModelTask() {
         return homeUpsertData?.optJSONObject("assetInfo")?.optBoolean("canSign", false) == true
     }
 
+    private fun doGoldTicketIndexCollect(source: String): Int {
+        val needleResponse = AntMemberRpcCall.goldTicketIndexCollect()
+        if (!needleResponse.isNullOrBlank()) {
+            return logGoldTicketCollectResponse(needleResponse, source)
+        }
+        return logGoldTicketCollectResponse(
+            AntMemberRpcCall.goldBillCollect(),
+            "$source-旧版兼容"
+        )
+    }
+
     /**
      * 黄金票签到逻辑
      *
      * 真实首页日志来自 `com.alipay.wealthgoldtwa.needle.v2.index`，
-     * 因此先用首页 `canSign` 判定，再尝试黄金票收取接口；
+     * 抓包显示收取接口已切到 `com.alipay.wealthgoldtwa.needle.index.collect`，
+     * 因此先用首页 `canSign` 判定，再尝试新版首页收取；
      * 若仍未落库，再回退到已有的 welfareCenter 触发链路。
      */
     private fun doGoldTicketSignIn(homeUpsertData: JSONObject): Boolean {
@@ -1878,10 +1890,7 @@ class AntMember : ModelTask() {
             record("黄金票🎫[准备签到]")
 
             var signSuccess = false
-            val collectCount = logGoldTicketCollectResponse(
-                AntMemberRpcCall.goldBillCollect(),
-                "签到尝试"
-            )
+            val collectCount = doGoldTicketIndexCollect("签到尝试")
             var refreshedHome = queryGoldTicketHomeUpsert()
             if (refreshedHome != null && !isGoldTicketCanSign(refreshedHome)) {
                 Log.other(
@@ -1932,10 +1941,7 @@ class AntMember : ModelTask() {
                 return
             }
 
-            val collectCount = logGoldTicketCollectResponse(
-                AntMemberRpcCall.goldBillCollect(),
-                "场景收取"
-            )
+            val collectCount = doGoldTicketIndexCollect("场景收取")
             if (collectCount == 0) {
                 record("黄金票🎫[场景收取] 暂无可领取奖励")
             }
