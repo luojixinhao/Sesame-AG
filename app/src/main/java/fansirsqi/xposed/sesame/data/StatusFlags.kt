@@ -35,6 +35,12 @@ object StatusFlags {
     /** 今日是否已处理「会员签到」 */
     const val FLAG_ANTMEMBER_MEMBER_SIGN_DONE: String = "AntMember::memberSignDone"
 
+    /** 今日是否已处理「会员签到浮球/开宝箱奖励」 */
+    const val FLAG_ANTMEMBER_MEMBER_FLOATING_BALL_DONE: String = "AntMember::memberFloatingBallDone"
+
+    /** 今日会员任务已判定无需继续刷新（列表为空/仅剩黑名单/仅剩暂不支持任务） */
+    const val FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY: String = "AntMember::memberTaskEmptyToday"
+
     /** 是否已执行「领取所有可做芝麻任务」 */
     const val FLAG_ANTMEMBER_DO_ALL_SESAME_TASK: String = "AntMember::doAllAvailableSesameTask"
 

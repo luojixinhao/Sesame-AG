@@ -280,6 +280,18 @@ object AntMemberRpcCall {
     }
 
     @JvmStatic
+    fun queryPointSignInPageDelivery(): String {
+        val args = JSONObject().apply {
+            put("extInfo", JSONObject())
+            put("pageCode", "@alipay/h5-member-app2/point-sign-in")
+        }
+        return RequestManager.requestString(
+            "com.alipay.promofrontcenter.deliver.deliverByPageId",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
     fun applyTask(darwinName: String, taskConfigId: Long): String {
         return RequestManager.requestString(
             "alipay.antmember.biz.rpc.membertask.h5.applyTask",
@@ -297,10 +309,88 @@ object AntMemberRpcCall {
     }
 
     @JvmStatic
-    fun queryAllStatusTaskList(): String {
+    fun queryLegacyAllStatusTaskList(): String {
         return RequestManager.requestString(
             "alipay.antmember.biz.rpc.membertask.h5.queryAllStatusTaskList",
             """[{"sourceBusiness":"signInAd","sourcePassMap":{"innerSource":"","source":"myTab","unid":""}}]"""
+        )
+    }
+
+    @JvmStatic
+    fun querySignInAdTaskList(): String {
+        val args = JSONObject().apply {
+            put("source", "signInAd")
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.memtask.h5.MemTaskListQueryFacade.queryAllStatusTaskList",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun batchApplyMemberTask(taskConfigIdList: Collection<String>, pageMark: String = "adFeeds"): String {
+        val args = JSONObject().apply {
+            put("pageMark", pageMark)
+            put("sourcePassMap", buildMemberSourcePassMap())
+            put("taskConfigIdList", JSONArray().apply {
+                taskConfigIdList.forEach { put(it) }
+            })
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.memtask.h5.MemTaskManagerFacade.batchApplyTask",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun querySingleTaskProcessDetail(taskProcessId: String): String {
+        val args = JSONObject().apply {
+            put("sourcePassMap", buildMemberSourcePassMap())
+            put("taskProcessId", taskProcessId)
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.memtask.h5.MemTaskListQueryFacade.querySingleTaskProcessDetail",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun querySignFloatingBall(): String {
+        val args = JSONObject().apply {
+            put("extMap", JSONObject())
+            put("sourcePassMap", buildMemberSourcePassMap())
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.biz.rpc.signin.h5.querySignFloatingBall",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun triggerSignFloatingBall(bizNo: String, taskType: String): String {
+        val args = JSONObject().apply {
+            put("bizNo", bizNo)
+            put("extMap", JSONObject())
+            put("sourcePassMap", buildMemberSourcePassMap())
+            put("taskType", taskType)
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.biz.rpc.signin.h5.triggerSignFloatingBall",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun querySignFloatingBallAdTask(bizNo: String, adType: String = "AD_VIDEO_TASK"): String {
+        val args = JSONObject().apply {
+            put("adType", adType)
+            put("bizNo", bizNo)
+            put("extMap", JSONObject())
+            put("sourcePassMap", buildMemberSourcePassMap())
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.biz.rpc.signin.h5.querySignFloatingBallAdTask",
+            JSONArray().put(args).toString()
         )
     }
 
