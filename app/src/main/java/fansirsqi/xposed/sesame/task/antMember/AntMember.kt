@@ -140,6 +140,7 @@ class AntMember : ModelTask() {
 
     private val memberTaskTotalAttemptLimit = 24
     private val memberRepeatableTaskMaxPerRound = 10
+    private val sesameTaskRefreshRoundLimit = 8
 
     private data class SesameFeedbackItem(
         val title: String,
@@ -275,6 +276,8 @@ class AntMember : ModelTask() {
 
                 // 并行执行独立任务
                 val deferredTasks = mutableListOf<Deferred<Unit>>()
+                var needMemberPointClaimAfterTasks = false
+                var needSesameProgressCollectAfterTasks = false
 
                 if (memberSign?.value == true) {
                     val memberSignDone = hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_SIGN_DONE)
@@ -283,6 +286,7 @@ class AntMember : ModelTask() {
                     if (memberSignDone && memberFloatingBallDone) {
                         record(TAG, "⏭️ 今天已处理过会员签到，跳过执行")
                     } else {
+                        needMemberPointClaimAfterTasks = true
                         deferredTasks.add(async(Dispatchers.IO) { doMemberSign() })
                     }
                 }
@@ -291,6 +295,7 @@ class AntMember : ModelTask() {
                     if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY)) {
                         record(TAG, "⏭️ 今天会员任务已判定无需继续刷新，停止执行")
                     } else {
+                        needMemberPointClaimAfterTasks = true
                         deferredTasks.add(async(Dispatchers.IO) { doAllMemberAvailableTask() })
                     }
                 }
@@ -315,11 +320,11 @@ class AntMember : ModelTask() {
                             if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_DO_ALL_SESAME_TASK)) {
                                 record(TAG, "⏭️ 今天已完成过芝麻信用任务，跳过执行")
                             } else {
+                                needSesameProgressCollectAfterTasks = true
                                 record(TAG, "🎮 开始执行芝麻信用任务")
                                 doAllAvailableSesameTask()
                                 handleGrowthGuideTasks()
-                                queryAndCollect() //做完任务领取球
-                                record(TAG, "✅ 芝麻信用任务已完成，今天不再执行")
+                                record(TAG, "✅ 芝麻信用任务已执行，稍后统一领取涨分进度球")
                             }
                         }
                         if (collectSesame?.value == true) {
@@ -447,6 +452,15 @@ class AntMember : ModelTask() {
 
                 // 等待所有异步任务完成
                 deferredTasks.awaitAll()
+
+                if (needMemberPointClaimAfterTasks) {
+                    record(TAG, "🎯 会员流程执行完成，开始统一领取会员积分")
+                    queryPointCert(1, 20)
+                }
+                if (needSesameProgressCollectAfterTasks) {
+                    record(TAG, "🎯 芝麻信用流程执行完成，开始统一领取涨分进度球")
+                    queryAndCollect()
+                }
 
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, t)
@@ -1185,7 +1199,6 @@ class AntMember : ModelTask() {
             if (!floatingBallDoneToday) {
                 floatingBallDoneToday = processMemberFloatingBall()
             }
-            queryPointCert(1, 20)
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "doMemberSign err:", t)
         } finally {
@@ -1280,9 +1293,6 @@ class AntMember : ModelTask() {
                 )
             }
 
-            if (processedCount > 0 || memberSign?.value != true) {
-                queryPointCert(1, 20)
-            }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "doAllMemberAvailableTask err:", t)
         }
@@ -1472,71 +1482,121 @@ class AntMember : ModelTask() {
      */
     private suspend fun doAllAvailableSesameTask(): Unit = CoroutineUtils.run {
         try {
-            val s = AntMemberRpcCall.queryAvailableSesameTask()
-            delay(500)
-            var jo = JSONObject(s)
-            if (jo.has("resData")) {
-                jo = jo.getJSONObject("resData")
-            }
-            if (!ResChecker.checkRes(TAG, jo)) {
-                Log.error(
-                    "$TAG.doAllAvailableSesameTask.queryAvailableSesameTask", "芝麻信用💳[查询任务响应失败]#$s"
-                )
-                return
-            }
-
-            val taskObj = jo.getJSONObject("data")
-            var totalTasks = 0
-            var completedTasks = 0
-            var skippedTasks = 0
-
-            // 处理日常任务
-            if (taskObj.has("dailyTaskListVO")) {
-                val dailyTaskListVO = taskObj.getJSONObject("dailyTaskListVO")
-
-                if (dailyTaskListVO.has("waitCompleteTaskVOS")) {
-                    val waitCompleteTaskVOS = dailyTaskListVO.getJSONArray("waitCompleteTaskVOS")
-                    totalTasks += waitCompleteTaskVOS.length()
-                    record(
-                        TAG, "芝麻信用💳[待完成任务]#开始处理(" + waitCompleteTaskVOS.length() + "个)"
+            var round = 0
+            var overallCompletedTasks = 0
+            var overallSkippedTasks = 0
+            var finishedAllRounds = false
+            while (round < sesameTaskRefreshRoundLimit) {
+                round++
+                val s = AntMemberRpcCall.queryAvailableSesameTask()
+                delay(500)
+                var jo = JSONObject(s)
+                if (jo.has("resData")) {
+                    jo = jo.getJSONObject("resData")
+                }
+                if (!ResChecker.checkRes(TAG, jo)) {
+                    Log.error(
+                        "$TAG.doAllAvailableSesameTask.queryAvailableSesameTask",
+                        "芝麻信用💳[查询任务响应失败]#$s"
                     )
-                    val results: IntArray = joinAndFinishSesameTaskWithResult(waitCompleteTaskVOS)
-                    completedTasks += results[0]
-                    skippedTasks += results[1]
+                    return@run
                 }
 
-                if (dailyTaskListVO.has("waitJoinTaskVOS")) {
-                    val waitJoinTaskVOS = dailyTaskListVO.getJSONArray("waitJoinTaskVOS")
-                    totalTasks += waitJoinTaskVOS.length()
-                    record(
-                        TAG, "芝麻信用💳[待加入任务]#开始处理(" + waitJoinTaskVOS.length() + "个)"
-                    )
-                    val results: IntArray = joinAndFinishSesameTaskWithResult(waitJoinTaskVOS)
-                    completedTasks += results[0]
-                    skippedTasks += results[1]
+                val taskObj = jo.optJSONObject("data")
+                if (taskObj == null) {
+                    record(TAG, "芝麻信用💳[第${round}轮]#任务数据为空，停止刷新")
+                    finishedAllRounds = true
+                    break
                 }
-            }
 
-            // 处理toCompleteVOS任务
-            if (taskObj.has("toCompleteVOS")) {
-                val toCompleteVOS = taskObj.getJSONArray("toCompleteVOS")
-                totalTasks += toCompleteVOS.length()
+                var roundTotalTasks = 0
+                var roundCompletedTasks = 0
+                var roundSkippedTasks = 0
+
+                if (taskObj.has("dailyTaskListVO")) {
+                    val dailyTaskListVO = taskObj.getJSONObject("dailyTaskListVO")
+
+                    if (dailyTaskListVO.has("waitCompleteTaskVOS")) {
+                        val waitCompleteTaskVOS = dailyTaskListVO.getJSONArray("waitCompleteTaskVOS")
+                        roundTotalTasks += waitCompleteTaskVOS.length()
+                        record(
+                            TAG,
+                            "芝麻信用💳[第${round}轮待完成任务]#开始处理(" + waitCompleteTaskVOS.length() + "个)"
+                        )
+                        val results: IntArray = joinAndFinishSesameTaskWithResult(waitCompleteTaskVOS)
+                        roundCompletedTasks += results[0]
+                        roundSkippedTasks += results[1]
+                    }
+
+                    if (dailyTaskListVO.has("waitJoinTaskVOS")) {
+                        val waitJoinTaskVOS = dailyTaskListVO.getJSONArray("waitJoinTaskVOS")
+                        roundTotalTasks += waitJoinTaskVOS.length()
+                        record(
+                            TAG,
+                            "芝麻信用💳[第${round}轮待加入任务]#开始处理(" + waitJoinTaskVOS.length() + "个)"
+                        )
+                        val results: IntArray = joinAndFinishSesameTaskWithResult(waitJoinTaskVOS)
+                        roundCompletedTasks += results[0]
+                        roundSkippedTasks += results[1]
+                    }
+                }
+
+                if (taskObj.has("toCompleteVOS")) {
+                    val toCompleteVOS = taskObj.getJSONArray("toCompleteVOS")
+                    roundTotalTasks += toCompleteVOS.length()
+                    record(
+                        TAG,
+                        "芝麻信用💳[第${round}轮toCompleteVOS任务]#开始处理(" + toCompleteVOS.length() + "个)"
+                    )
+                    val results: IntArray = joinAndFinishSesameTaskWithResult(toCompleteVOS)
+                    roundCompletedTasks += results[0]
+                    roundSkippedTasks += results[1]
+                }
+
+                overallCompletedTasks += roundCompletedTasks
+                overallSkippedTasks += roundSkippedTasks
                 record(
-                    TAG, "芝麻信用💳[toCompleteVOS任务]#开始处理(" + toCompleteVOS.length() + "个)"
+                    TAG,
+                    "芝麻信用💳[第${round}轮处理完成]#总任务:${roundTotalTasks}个, 完成:${roundCompletedTasks}个, 跳过:${roundSkippedTasks}个"
                 )
-                val results: IntArray = joinAndFinishSesameTaskWithResult(toCompleteVOS)
-                completedTasks += results[0]
-                skippedTasks += results[1]
+
+                if (roundTotalTasks == 0) {
+                    finishedAllRounds = true
+                    record(TAG, "芝麻信用💳[当前轮无可做任务，今日停止刷新]")
+                    break
+                }
+
+                if (roundCompletedTasks <= 0) {
+                    finishedAllRounds = true
+                    record(TAG, "芝麻信用💳[当前轮无新增完成任务，今日停止刷新]")
+                    break
+                }
+
+                if (round < sesameTaskRefreshRoundLimit) {
+                    delay(800)
+                }
             }
 
-            // 统计结果并决定是否关闭开关
             record(
-                TAG, "芝麻信用💳[任务处理完成]#总任务:" + totalTasks + "个, 完成:" + completedTasks + "个, 跳过:" + skippedTasks + "个"
+                TAG,
+                "芝麻信用💳[任务总计]#轮次:$round, 完成:${overallCompletedTasks}个, 跳过:${overallSkippedTasks}个"
             )
 
-            if (totalTasks == 0 || (completedTasks + skippedTasks) >= totalTasks) {
+            if (finishedAllRounds) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_DO_ALL_SESAME_TASK)
-                record(TAG, if (totalTasks == 0) "芝麻信用💳[无可做任务，今日跳过]" else "芝麻信用💳[已全部完成任务，今日跳过]")
+                record(
+                    TAG,
+                    if (overallCompletedTasks > 0) {
+                        "芝麻信用💳[当前可执行任务已处理完成，今日跳过]"
+                    } else {
+                        "芝麻信用💳[无新增可执行任务，今日跳过]"
+                    }
+                )
+            } else {
+                record(
+                    TAG,
+                    "芝麻信用💳[达到最大刷新轮次]#$sesameTaskRefreshRoundLimit，保留后续重试机会"
+                )
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG + "doAllAvailableSesameTask err", t)
@@ -3816,7 +3876,9 @@ class AntMember : ModelTask() {
         @SuppressLint("DefaultLocale")
         fun queryAndCollect() {
             try {
-                for (attempt in 0..1) {
+                var collectedRounds = 0
+                var emptyRetryBeforeCollect = 0
+                for (attempt in 0..2) {
                     val queryResp = AntMemberRpcCall.Zmxy.queryScoreProgress()
                     if (queryResp.isEmpty()) {
                         return
@@ -3835,7 +3897,8 @@ class AntMember : ModelTask() {
                     val totalWait = json.optJSONObject("totalWaitProcessVO") ?: return
                     val idList = totalWait.optJSONArray("totalProgressIdList")
                     if (idList == null || idList.length() == 0) {
-                        if (attempt == 0) {
+                        if (collectedRounds == 0 && emptyRetryBeforeCollect == 0) {
+                            emptyRetryBeforeCollect++
                             Thread.sleep(1200)
                             continue
                         }
@@ -3861,7 +3924,8 @@ class AntMember : ModelTask() {
                             collectJson.optDouble("currentAccelerateValue", -1.0)
                         )
                     )
-                    return
+                    collectedRounds++
+                    Thread.sleep(1200)
                 }
             } catch (e: Exception) {
                 Log.printStackTrace(TAG + "queryAndCollect err", e)
