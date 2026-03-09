@@ -2663,18 +2663,6 @@ class AntMember : ModelTask() {
         }
         val title = task.optString("title", taskId)
         return try {
-            AntMemberRpcCall.taskQueryPush(taskId)?.let { pushRes ->
-                if (pushRes.isNotBlank()) {
-                    val pushJson = JSONObject(pushRes)
-                    if (!ResChecker.checkRes(TAG, pushJson)) {
-                        val pushDesc = pushJson.optString("resultDesc", pushJson.optString("memo"))
-                        if (pushDesc.isNotBlank()) {
-                            record("黄金票🎫[任务推送提示] $title#$pushDesc")
-                        }
-                    }
-                }
-            }
-
             val triggerRes = AntMemberRpcCall.goldBillTaskTrigger(taskId) ?: return false
             val triggerJson = JSONObject(triggerRes)
             if (!ResChecker.checkRes(TAG, triggerJson)) {
@@ -2683,6 +2671,28 @@ class AntMember : ModelTask() {
                     Log.error("黄金票🎫[任务领取失败] $title#$triggerDesc")
                 }
                 return false
+            }
+
+            CoroutineUtils.sleepCompat(12_000L)
+
+            AntMemberRpcCall.taskQueryPush(taskId)?.let { pushRes ->
+                if (pushRes.isNotBlank()) {
+                    val pushJson = JSONObject(pushRes)
+                    if (!ResChecker.checkRes(TAG, pushJson)) {
+                        val pushDesc = pushJson.optString("resultDesc", pushJson.optString("memo"))
+                        if (pushDesc.isNotBlank()) {
+                            record("黄金票🎫[任务推送提示] $title#$pushDesc")
+                        }
+                        return false
+                    }
+                    val pushDone = pushJson.optJSONObject("result")
+                        ?.optJSONObject("pushResult")
+                        ?.optBoolean("done", true)
+                    if (pushDone == false) {
+                        record("黄金票🎫[任务推送未完成] $title")
+                        return false
+                    }
+                }
             }
 
             val amount = task.optString("amount")

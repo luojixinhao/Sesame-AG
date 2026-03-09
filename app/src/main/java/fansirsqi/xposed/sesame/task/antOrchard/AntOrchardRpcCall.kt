@@ -249,13 +249,11 @@ object AntOrchardRpcCall {
         )
     }
 
-    fun completeYebExpGoldTask(
-        appletId: String,
-        taskId: String
-    ): String {
+    fun completeYebExpGoldTask(taskId: String): String {
+        val outBizNo = "$taskId-${System.currentTimeMillis()}-"
         return RequestManager.requestString(
-            "com.alipay.yebscenebff.promosdk.index.forward",
-            """[{"params":{"appletId":"$appletId","taskId":"$taskId","version":2},"path":"task.complete"}]"""
+            "com.alipay.yebpromobff.promosdk2024.task.complete",
+            """[{"appName":"yebpromobff","outBizNo":"$outBizNo","playActionCode":"TASK_COMPLETE","playEntrance":"HYQ_TASK_LIST_ENTRANCE_2","taskId":"$taskId"}]"""
         )
     }
 

@@ -443,8 +443,7 @@ class AntOrchard : ModelTask() {
             var handledTask = claimPendingYebExpGoldRewards(queryResponse, taskMap)
 
             for ((taskId, task) in taskMap) {
-                val appletId = task.optString("appletId")
-                if (taskId.isBlank() || appletId.isBlank()) {
+                if (taskId.isBlank()) {
                     continue
                 }
 
@@ -568,8 +567,7 @@ class AntOrchard : ModelTask() {
         taskMap: MutableMap<String, JSONObject>
     ): Boolean {
         val title = getYebExpGoldTaskTitle(task, taskId)
-        val appletId = task.optString("appletId")
-        if (taskId.isBlank() || appletId.isBlank()) {
+        if (taskId.isBlank()) {
             return false
         }
 
@@ -596,7 +594,7 @@ class AntOrchard : ModelTask() {
             return true
         }
 
-        val completeResponse = JSONObject(AntOrchardRpcCall.completeYebExpGoldTask(appletId, taskId))
+        val completeResponse = JSONObject(AntOrchardRpcCall.completeYebExpGoldTask(taskId))
         if (!isYebExpGoldSuccess(completeResponse)) {
             Log.record(
                 TAG,
@@ -634,13 +632,7 @@ class AntOrchard : ModelTask() {
             }
 
             val title = getYebExpGoldCompletedTitle(rewardItem, taskMap[taskId], taskId)
-            val appletId = getYebExpGoldCompleteAppletId(rewardItem, taskMap[taskId])
-            if (appletId.isBlank()) {
-                Log.record(TAG, "余额宝体验金任务领取缺少 appletId[$title]")
-                continue
-            }
-
-            val completeResponse = JSONObject(AntOrchardRpcCall.completeYebExpGoldTask(appletId, taskId))
+            val completeResponse = JSONObject(AntOrchardRpcCall.completeYebExpGoldTask(taskId))
             if (isYebExpGoldSuccess(completeResponse)) {
                 logYebExpGoldRewards(title, completeResponse)
                 Status.setFlagToday(successFlag)
@@ -686,19 +678,6 @@ class AntOrchard : ModelTask() {
             }
             .ifBlank { task?.let { getYebExpGoldTaskTitle(it, defaultTitle) }.orEmpty() }
             .ifBlank { defaultTitle }
-    }
-
-    private fun getYebExpGoldCompleteAppletId(
-        rewardItem: JSONObject,
-        task: JSONObject?
-    ): String {
-        val extInfo = rewardItem.optJSONArray("prizeSendOrderDTO")
-            ?.optJSONObject(0)
-            ?.optJSONObject("extInfo")
-        return task?.optString("appletId").orEmpty()
-            .ifBlank { rewardItem.optString("appletId") }
-            .ifBlank { extInfo?.optString("TASK_CENTER_ID").orEmpty() }
-            .ifBlank { extInfo?.optString("TASK_CEN_ID").orEmpty() }
     }
 
     private fun handleYebExpGoldExchange(queryResponse: JSONObject): Boolean {
@@ -823,8 +802,7 @@ class AntOrchard : ModelTask() {
         when (node) {
             is JSONObject -> {
                 val taskId = node.optString("taskId")
-                val appletId = node.optString("appletId")
-                if (taskId.isNotBlank() && appletId.isNotBlank() && node.has("simplifiedStatus")) {
+                if (taskId.isNotBlank() && node.has("simplifiedStatus")) {
                     taskMap.putIfAbsent(taskId, node)
                 }
                 val keys = node.keys()
@@ -860,6 +838,40 @@ class AntOrchard : ModelTask() {
         title: String,
         response: JSONObject
     ) {
+        val promoSdkResultList = response.optJSONArray("resultObj")
+        if (promoSdkResultList != null && promoSdkResultList.length() > 0) {
+            val rewardNames = ArrayList<String>()
+            for (resultIndex in 0 until promoSdkResultList.length()) {
+                val resultItem = promoSdkResultList.optJSONObject(resultIndex) ?: continue
+                val prizeSendDetails = resultItem.optJSONArray("prizeSendDetails") ?: continue
+                for (detailIndex in 0 until prizeSendDetails.length()) {
+                    val detail = prizeSendDetails.optJSONObject(detailIndex) ?: continue
+                    val prizeName = detail.optJSONObject("prizeBaseInfo")
+                        ?.optString("prizeName")
+                        .orEmpty()
+                        .ifBlank {
+                            detail.optJSONObject("extInfo")
+                                ?.optString("promoPrizeName")
+                                .orEmpty()
+                        }
+                        .ifBlank {
+                            detail.optJSONObject("extInfo")
+                                ?.optString("title")
+                                .orEmpty()
+                        }
+                    if (prizeName.isNotBlank()) {
+                        rewardNames.add(prizeName)
+                    }
+                }
+            }
+            if (rewardNames.isNotEmpty()) {
+                rewardNames.forEach { prizeName ->
+                    Log.farm("余额宝体验金💰[$title]#$prizeName")
+                }
+                return
+            }
+        }
+
         val prizeSendOrderList = response.optJSONObject("result")
             ?.optJSONArray("prizeSendOrderList")
         if (prizeSendOrderList != null && prizeSendOrderList.length() > 0) {
