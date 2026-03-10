@@ -205,7 +205,7 @@ object EnergyWaitingPersistence {
         tasks.forEach { task ->
             try {
                 // 重新查询用户主页以获取最新保护罩状态
-                val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, task.fromTag)
+                val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, null)
 
                 if (userHomeResponse.isNullOrEmpty()) {
                     Log.record(TAG, "  验证[${task.userName}]：无法获取主页信息，跳过恢复")

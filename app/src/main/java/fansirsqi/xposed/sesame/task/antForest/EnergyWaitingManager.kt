@@ -317,11 +317,10 @@ object EnergyWaitingManager {
                     bombEndTime = finalBombEndTime
                 )
 
-                // 移除旧任务（如果存在）
+                // 移除旧任务（如果存在），避免同一 taskId 同时存在多个协程流程
                 waitingTasks.remove(taskId)
-                EnergyWaitingPersistence.saveTasks(waitingTasks)
 
-                // 添加新任务
+                // 添加/覆盖任务
                 waitingTasks[taskId] = task
 
                 val actionText = if (existingTask != null) "更新" else "添加"
@@ -405,7 +404,7 @@ object EnergyWaitingManager {
                         // 倒计时2分钟验证：查询好友保护罩状态
                         Log.record(TAG, "🔍 倒计时2分钟验证[${task.getUserTypeTag()}${task.userName}]保护罩状态...")
                         try {
-                            val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, task.fromTag)
+                            val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, null)
                             if (!userHomeResponse.isNullOrEmpty()) {
                                 val userHomeObj = JSONObject(userHomeResponse)
                                 if (ForestUtil.shouldSkipWaitingDueToProtection(userHomeObj, task.produceTime)) {
@@ -923,7 +922,7 @@ object EnergyWaitingManager {
                         }
 
                         // 好友账号：重新查询用户主页以获取最新的保护罩状态
-                        val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, task.fromTag)
+                        val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, null)
 
                         if (userHomeResponse.isNullOrEmpty()) {
                              Log.record(TAG, "  验证[${task.getUserTypeTag()}${task.userName}]：无法获取主页信息，保留任务")
