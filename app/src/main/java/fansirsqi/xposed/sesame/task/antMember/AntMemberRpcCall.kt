@@ -1039,11 +1039,14 @@ object AntMemberRpcCall {
 
     @JvmStatic
     fun goldTicketIndexCollect(
-        directModeDisableCollect: Boolean = true
+        triggerCollect: Boolean = true,
+        directModeDisableCollect: Boolean = false
     ): String? {
         return try {
             val args = JSONObject().apply {
-                if (directModeDisableCollect) {
+                if (triggerCollect) {
+                    put("trigger", "Y")
+                } else if (directModeDisableCollect) {
                     put("directModeDisableCollect", 1)
                 }
             }

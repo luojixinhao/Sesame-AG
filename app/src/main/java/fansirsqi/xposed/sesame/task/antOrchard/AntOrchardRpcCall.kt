@@ -7,6 +7,7 @@ object AntOrchardRpcCall {
     private const val VERSION = "20260204.01"
     private const val DEFAULT_SOURCE = "ch_appcenter__chsub_9patch"
     private const val YEB_SOURCE = "yaoqianshu_qiehuan"
+    private const val YEB_EXP_GOLD_SIGN_IN_PLAY_ID = "PLAY102253251"
 
     fun orchardIndex(): String {
         return RequestManager.requestString(
@@ -246,6 +247,13 @@ object AntOrchardRpcCall {
         return RequestManager.requestString(
             "com.alipay.yebscenebff.needle.yebExpGold.queryMain",
             """[{"chInfo":"ch_url-https://render.alipay.com/p/yuyan/180020010001282160/index.html","signIn":{"daysOfQuerySignInData":21,"displaySignInTextList":[{"value":"持"},{"value":"续"},{"value":"签"},{"value":"到"},{"value":"可"},{"value":"领"},{"value":""}],"downgrade":false,"todayRedDotText":"戳这里","tomorrowRedDotText":""},"task":$taskPayload}]"""
+        )
+    }
+
+    fun signInYebExpGold(signInPlayId: String = YEB_EXP_GOLD_SIGN_IN_PLAY_ID): String {
+        return RequestManager.requestString(
+            "com.alipay.yebscenebff.needle.yebExpGold.signIn",
+            """[{"signInPlayId":"$signInPlayId"}]"""
         )
     }
 
