@@ -1093,7 +1093,9 @@ class AntOrchard : ModelTask() {
                     "未知任务"
                 }
 
-                if (TaskBlacklist.isTaskInBlacklist(groupId)) {
+                val groupIdInBlacklist = TaskBlacklist.isTaskInBlacklist(groupId)
+                val titleInBlacklist = TaskBlacklist.isTaskInBlacklist(title)
+                if (groupIdInBlacklist || titleInBlacklist) {
                     Log.record(TAG, "跳过黑名单任务[$title] groupId=$groupId")
                     continue
                 }

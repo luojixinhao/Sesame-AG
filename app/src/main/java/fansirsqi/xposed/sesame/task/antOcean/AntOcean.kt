@@ -24,6 +24,7 @@ import fansirsqi.xposed.sesame.util.maps.BeachMap
 import fansirsqi.xposed.sesame.util.maps.IdMapManager
 import fansirsqi.xposed.sesame.util.maps.UserMap
 import fansirsqi.xposed.sesame.util.ResChecker
+import fansirsqi.xposed.sesame.util.TaskBlacklist
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -86,7 +87,7 @@ class AntOcean : ModelTask() {
     companion object {
         private const val TAG = "AntOcean"
         private const val HELP_CLEAN_LIMIT_FLAG = "Ocean::HELP_CLEAN_ALL_FRIEND_LIMIT"
-
+        
         /**
          * 保护类型字段（静态）
          */
@@ -1056,7 +1057,7 @@ class AntOcean : ModelTask() {
                 badTaskSet.addAll(presetBad)
                 DataStore.put("badOceanTaskSet", badTaskSet)
             }
-            while (currentCoroutineContext().isActive) {
+                        while (currentCoroutineContext().isActive) {
                 var done = false
                 val s = AntOceanRpcCall.queryTaskList()
                 val jo = JsonUtil.parseJSONObjectOrNull(s) ?: break
@@ -1078,7 +1079,11 @@ class AntOcean : ModelTask() {
                     val taskType = task.getString("taskType")
                     val taskStatus = task.getString("taskStatus")
                     // 在处理任何任务前，先检查黑名单
-                    if (badTaskSet.contains(taskTitle) || badTaskSet.contains(taskType)) {
+                    if (badTaskSet.contains(taskTitle) ||
+                        badTaskSet.contains(taskType) ||
+                        TaskBlacklist.isTaskInBlacklist(taskTitle) ||
+                        TaskBlacklist.isTaskInBlacklist(taskType)
+                    ) {
                         Log.record(TAG, "海洋任务🌊[$taskTitle]已在黑名单中，跳过处理")
                         continue
                     }
