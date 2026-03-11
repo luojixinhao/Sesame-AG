@@ -128,7 +128,8 @@ class AntMember : ModelTask() {
         val taskConfigIdList: List<String>,
         val shouldStopToday: Boolean = false,
         val stopReason: String = "",
-        val riskLike: Boolean = false
+        val riskLike: Boolean = false,
+        val hasAnyTaskCandidate: Boolean = false
     )
 
     private data class MemberFloatingBallTask(
@@ -1250,6 +1251,7 @@ class AntMember : ModelTask() {
             var failedCount = 0
             var totalAttemptCount = 0
             var refreshRound = 0
+            var sawCurrentTaskCandidate = false
             val attemptedTaskConfigCountMap = LinkedHashMap<String, Int>()
             val taskRepeatLimitMap = LinkedHashMap<String, Int>()
             var stopRefreshToday = false
@@ -1262,6 +1264,7 @@ class AntMember : ModelTask() {
             ) {
                 refreshRound++
                 val queryResult = queryCurrentMemberTaskConfigIds()
+                sawCurrentTaskCandidate = sawCurrentTaskCandidate || queryResult.hasAnyTaskCandidate
                 if (queryResult.shouldStopToday) {
                     stopRefreshToday = true
                     stopRefreshReason = queryResult.stopReason
@@ -1277,7 +1280,14 @@ class AntMember : ModelTask() {
                 if (roundQueue.isEmpty()) {
                     stopRefreshToday = true
                     stopRefreshReason = if (queryResult.taskConfigIdList.isEmpty()) {
-                        if (processedCount > 0) "LIST_EMPTY_AFTER_PROCESS" else "LIST_EMPTY"
+                        when {
+                            queryResult.hasAnyTaskCandidate && processedCount > 0 ->
+                                "NO_EXPLICIT_RPC_TASK_REMAIN"
+
+                            queryResult.hasAnyTaskCandidate -> "NO_EXPLICIT_RPC_TASK"
+                            processedCount > 0 -> "LIST_EMPTY_AFTER_PROCESS"
+                            else -> "LIST_EMPTY"
+                        }
                     } else if (processedCount > 0) {
                         "ONLY_BLACKLIST_OR_UNSUPPORTED_REMAIN"
                     } else {
@@ -1345,7 +1355,12 @@ class AntMember : ModelTask() {
                 record(TAG, "会员任务🎖️[达到最大刷新轮次]#$memberTaskRefreshRoundLimit，停止继续刷新")
             }
 
-            if (!stopDueToRisk && processedCount == 0 && !attemptedCurrentTask) {
+            if (
+                !stopDueToRisk &&
+                processedCount == 0 &&
+                !attemptedCurrentTask &&
+                !sawCurrentTaskCandidate
+            ) {
                 val legacyTaskResponse = AntMemberRpcCall.queryLegacyAllStatusTaskList()
                 delay(500)
                 val legacyTaskObject = JSONObject(legacyTaskResponse)
@@ -1375,6 +1390,8 @@ class AntMember : ModelTask() {
                 val stopMessage = when (stopRefreshReason) {
                     "LIST_EMPTY_AFTER_PROCESS" -> "会员任务🎖️[当前轮列表已清空，今日停止继续刷新]"
                     "LIST_EMPTY" -> "会员任务🎖️[任务列表数量为0，今日停止继续刷新]"
+                    "NO_EXPLICIT_RPC_TASK_REMAIN" -> "会员任务🎖️[剩余任务缺少已验证的通用RPC闭环，今日停止继续刷新]"
+                    "NO_EXPLICIT_RPC_TASK" -> "会员任务🎖️[当前任务缺少已验证的通用RPC闭环，今日停止继续刷新]"
                     "ONLY_BLACKLIST_OR_UNSUPPORTED_REMAIN" -> "会员任务🎖️[剩余任务均为黑名单或暂不支持任务，今日停止继续刷新]"
                     "ONLY_BLACKLIST_OR_UNSUPPORTED" -> "会员任务🎖️[列表仅含黑名单或暂不支持任务，今日停止继续刷新]"
                     "AUTH_LIKE" -> "会员任务🎖️[检测到验证/服务器繁忙风控，今日停止继续刷新]"
@@ -1476,37 +1493,47 @@ class AntMember : ModelTask() {
 
     private suspend fun queryCurrentMemberTaskConfigIds(): MemberTaskConfigQueryResult {
         val taskConfigIdSet = LinkedHashSet<String>()
+        var hasAnyTaskCandidate = false
+        val primaryResponse = AntMemberRpcCall.queryMemberTaskList()
+        hasAnyTaskCandidate = hasAnyTaskCandidate || responseContainsMemberTaskCandidate(primaryResponse)
         val primaryStopResult = collectTaskConfigIdsFromResponse(
             sourceTag = "queryMemberTaskList",
-            response = AntMemberRpcCall.queryMemberTaskList(),
+            response = primaryResponse,
             taskConfigIdSet = taskConfigIdSet
         )
         if (primaryStopResult != null) {
-            return primaryStopResult
+            return primaryStopResult.copy(hasAnyTaskCandidate = hasAnyTaskCandidate)
         }
         if (taskConfigIdSet.isEmpty()) {
             delay(400)
+            val signPageResponse = AntMemberRpcCall.signPageTaskList()
+            hasAnyTaskCandidate = hasAnyTaskCandidate || responseContainsMemberTaskCandidate(signPageResponse)
             val signPageStopResult = collectTaskConfigIdsFromResponse(
                 sourceTag = "signPageTaskList",
-                response = AntMemberRpcCall.signPageTaskList(),
+                response = signPageResponse,
                 taskConfigIdSet = taskConfigIdSet
             )
             if (signPageStopResult != null) {
-                return signPageStopResult
+                return signPageStopResult.copy(hasAnyTaskCandidate = hasAnyTaskCandidate)
             }
         }
         if (taskConfigIdSet.isEmpty()) {
             delay(400)
+            val deliveryResponse = AntMemberRpcCall.queryPointSignInPageDelivery()
+            hasAnyTaskCandidate = hasAnyTaskCandidate || responseContainsMemberTaskCandidate(deliveryResponse)
             val deliveryStopResult = collectTaskConfigIdsFromResponse(
                 sourceTag = "pointSignInDelivery",
-                response = AntMemberRpcCall.queryPointSignInPageDelivery(),
+                response = deliveryResponse,
                 taskConfigIdSet = taskConfigIdSet
             )
             if (deliveryStopResult != null) {
-                return deliveryStopResult
+                return deliveryStopResult.copy(hasAnyTaskCandidate = hasAnyTaskCandidate)
             }
         }
-        return MemberTaskConfigQueryResult(taskConfigIdSet.toList())
+        return MemberTaskConfigQueryResult(
+            taskConfigIdSet.toList(),
+            hasAnyTaskCandidate = hasAnyTaskCandidate
+        )
     }
 
     private fun collectTaskConfigIdsFromResponse(
@@ -1561,15 +1588,7 @@ class AntMember : ModelTask() {
             }
             collectMemberTaskConfigIds(jsonObject, taskConfigIdSet)
         } catch (_: JSONException) {
-            Pattern.compile("\"configId\":\"(\\d{12,})\"").matcher(response).let { matcher ->
-                while (matcher.find()) {
-                    matcher.group(1)?.let { configId ->
-                        if (shouldKeepMemberTaskConfigId(configId)) {
-                            taskConfigIdSet.add(configId)
-                        }
-                    }
-                }
-            }
+            record(TAG, "会员任务🎖️[$sourceTag]#响应结构无法安全解析，跳过本轮自动收集")
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "collectTaskConfigIdsFromResponse[$sourceTag] err:", t)
         }
@@ -2069,16 +2088,18 @@ class AntMember : ModelTask() {
         val name = taskConfigInfo.getString("name")
         val id = taskConfigInfo.getLong("id")
         val awardParamPoint = taskConfigInfo.getJSONObject("awardParam").getString("awardParamPoint")
-        val targetBusiness = taskConfigInfo.getJSONArray("targetBusiness").getString(0)
-        val targetBusinessArray = targetBusiness.split("#".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-        if (targetBusinessArray.size < 3) {
-            Log.error(TAG, "processTask target param err:" + targetBusinessArray.contentToString())
+        val targetBusiness = resolveSupportedMemberTaskTargetBusiness(
+            taskConfigInfo.optJSONArray("targetBusiness"),
+            taskConfigInfo
+        )
+        if (targetBusiness.isEmpty()) {
             return@run false
         }
+        val targetBusinessArray = targetBusiness.split("#".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
         val bizType = targetBusinessArray[0]
         val bizSubType = targetBusinessArray[1]
         val bizParam = targetBusinessArray[2]
-        delay(16000)
+        delay(calcMemberTaskWaitMillis(taskConfigInfo, bizSubType))
         val str = AntMemberRpcCall.executeTask(bizParam, bizSubType, bizType, id)
         val jo = JSONObject(str)
         if (!ResChecker.checkRes(TAG + "执行会员任务失败:", jo)) {
@@ -2195,7 +2216,7 @@ class AntMember : ModelTask() {
                     }
                     record(
                         TAG,
-                        "会员任务🎖️[${taskExecution.title}]#暂不支持RPC自动执行(targetBusiness=${taskExecution.targetBusiness})"
+                        "会员任务🎖️[${taskExecution.title}]#未命中已验证的通用RPC闭环，跳过执行(targetBusiness=${taskExecution.targetBusiness})"
                     )
                     return@run MemberTaskProcessOutcome(MemberTaskProcessResult.SKIPPED_UNSUPPORTED)
                 }
@@ -2328,8 +2349,107 @@ class AntMember : ModelTask() {
         return if (id > 0) id.toString() else null
     }
 
+    private fun responseContainsMemberTaskCandidate(response: String): Boolean {
+        if (response.isBlank()) {
+            return false
+        }
+        return try {
+            containsMemberTaskCandidate(JSONObject(response))
+        } catch (_: JSONException) {
+            false
+        }
+    }
+
+    private fun containsMemberTaskCandidate(payload: Any?): Boolean {
+        when (payload) {
+            is JSONObject -> {
+                val taskConfigId = resolveMemberTaskConfigId(payload)
+                if (!taskConfigId.isNullOrEmpty()) {
+                    val simpleTaskConfig = payload.optJSONObject("simpleTaskConfig")
+                        ?: payload.optJSONObject("taskConfig")
+                        ?: payload.optJSONObject("taskConfigInfo")
+                        ?: payload.optJSONObject("taskProcessVO")?.optJSONObject("simpleTaskConfig")
+                        ?: payload.optJSONObject("resultData")?.optJSONObject("taskProcessVO")
+                            ?.optJSONObject("simpleTaskConfig")
+                    val taskStyle = payload.optString("taskStyle").ifEmpty {
+                        simpleTaskConfig?.optString("taskStyle").orEmpty()
+                    }
+                    if (
+                        !"MOTIVATED_TASK".equals(taskStyle, true) &&
+                        !isMemberTaskProcessFinished(payload)
+                    ) {
+                        return true
+                    }
+                }
+                val keys = payload.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (containsMemberTaskCandidate(payload.opt(key))) {
+                        return true
+                    }
+                }
+            }
+
+            is JSONArray -> {
+                for (i in 0 until payload.length()) {
+                    if (containsMemberTaskCandidate(payload.opt(i))) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private fun resolveSupportedMemberTaskTargetBusiness(
+        targetBusinessArray: JSONArray?,
+        simpleTaskConfig: JSONObject? = null
+    ): String {
+        if (targetBusinessArray == null || targetBusinessArray.length() <= 0) {
+            return ""
+        }
+        for (i in 0 until targetBusinessArray.length()) {
+            val targetBusiness = targetBusinessArray.optString(i)
+            if (isSupportedMemberTaskTargetBusiness(targetBusiness, simpleTaskConfig)) {
+                return targetBusiness
+            }
+        }
+        return ""
+    }
+
+    private fun isSupportedMemberTaskTargetBusiness(
+        targetBusiness: String,
+        simpleTaskConfig: JSONObject? = null
+    ): Boolean {
+        if (targetBusiness.isBlank()) {
+            return false
+        }
+        val targetParts = targetBusiness.split("#")
+        if (targetParts.size < 3) {
+            return false
+        }
+        val bizType = targetParts[0]
+        val bizSubType = targetParts[1]
+        val bizParam = targetParts[2]
+        if (!bizType.equals("BROWSE", true) || bizSubType.isBlank() || bizParam.isBlank()) {
+            return false
+        }
+        if ((simpleTaskConfig?.optLong("browseSeconds", 0L) ?: 0L) > 0L) {
+            return true
+        }
+        if (bizSubType.equals("UNLIMITED", true)) {
+            return true
+        }
+        return Pattern.compile("(\\d+)S", Pattern.CASE_INSENSITIVE)
+            .matcher(bizSubType)
+            .find()
+    }
+
     private fun shouldCollectMemberTask(taskObject: JSONObject, taskConfigId: String): Boolean {
         if (!shouldKeepMemberTaskConfigId(taskConfigId)) {
+            return false
+        }
+        if (isMemberTaskProcessFinished(taskObject)) {
             return false
         }
         val simpleTaskConfig = taskObject.optJSONObject("simpleTaskConfig")
@@ -2341,32 +2461,11 @@ class AntMember : ModelTask() {
         if ("MOTIVATED_TASK".equals(taskStyle, true)) {
             return false
         }
-        val sourceBusiness = taskObject.optString("sourceBusiness").ifEmpty {
-            simpleTaskConfig?.optString("sourceBusiness").orEmpty()
-        }
-        if (sourceBusiness.contains("signInAd", true)) {
-            return false
-        }
         val targetBusiness = taskObject.optJSONArray("targetBusiness")
             ?: taskObject.optJSONObject("taskProcessVO")?.optJSONArray("targetBusiness")
             ?: simpleTaskConfig?.optJSONArray("targetBusiness")
-        if (targetBusiness != null && targetBusiness.length() > 0) {
-            return true
-        }
-        val title = taskObject.optString("title").ifEmpty {
-            simpleTaskConfig?.optString("title").orEmpty()
-        }
-        val desc = taskObject.optString("description").ifEmpty {
-            simpleTaskConfig?.optString("desc").orEmpty().ifEmpty {
-                simpleTaskConfig?.optString("description").orEmpty()
-            }
-        }
-        return taskObject.has("taskProcessVO")
-            || taskObject.has("simpleTaskConfig")
-            || title.contains("逛")
-            || title.contains("浏览")
-            || title.contains("查看")
-            || desc.contains("领取任务后")
+        return resolveSupportedMemberTaskTargetBusiness(targetBusiness, simpleTaskConfig)
+            .isNotEmpty()
     }
 
     private fun shouldKeepMemberTaskConfigId(taskConfigId: String): Boolean {
@@ -2412,63 +2511,14 @@ class AntMember : ModelTask() {
         val awardPoint = extractMemberTaskAwardPoint(simpleTaskConfig)
         val targetBusinessArray = taskProcess?.optJSONArray("targetBusiness")
             ?: simpleTaskConfig.optJSONArray("targetBusiness")
-        val targetBusiness = targetBusinessArray?.optString(0).orEmpty()
+        val targetBusiness = resolveSupportedMemberTaskTargetBusiness(
+            targetBusinessArray,
+            simpleTaskConfig
+        )
         if (targetBusiness.isEmpty()) {
-            val finishBizId = resolveMemberTaskFinishBizId(simpleTaskConfig)
-            if (finishBizId.isNotEmpty()) {
-                return MemberTaskExecution(
-                    taskConfigId = taskConfigId,
-                    taskProcessId = taskProcessId,
-                    title = title,
-                    awardPoint = awardPoint,
-                    bizType = "",
-                    bizSubType = "",
-                    bizParam = "",
-                    waitMillis = calcMemberTaskWaitMillis(simpleTaskConfig, ""),
-                    executionMethod = MemberTaskExecutionMethod.ADTASK_FINISH,
-                    targetBusiness = "FINISH_ACTION",
-                    maxExecutionsPerRound = 1,
-                    finishBizId = finishBizId
-                )
-            }
-            Log.error(TAG, "会员任务[$title]未返回targetBusiness")
             return null
         }
         val targetParts = targetBusiness.split("#")
-        if (targetParts.size < 3) {
-            val bizType = targetParts.getOrNull(0).orEmpty()
-            val bizSubType = targetParts.getOrNull(1).orEmpty()
-            val twoPartRpcSupported = targetParts.size == 2 &&
-                shouldExecuteMemberTaskByTwoPartTargetBusiness(title, bizType, bizSubType)
-            if (twoPartRpcSupported) {
-                return MemberTaskExecution(
-                    taskConfigId = taskConfigId,
-                    taskProcessId = taskProcessId,
-                    title = title,
-                    awardPoint = awardPoint,
-                    bizType = bizType,
-                    bizSubType = bizSubType,
-                    bizParam = "",
-                    waitMillis = calcMemberTaskWaitMillis(simpleTaskConfig, bizSubType),
-                    executionMethod = MemberTaskExecutionMethod.MEMTASK_EXECUTE,
-                    targetBusiness = targetBusiness,
-                    maxExecutionsPerRound = 1
-                )
-            }
-            return MemberTaskExecution(
-                taskConfigId = taskConfigId,
-                taskProcessId = taskProcessId,
-                title = title,
-                awardPoint = awardPoint,
-                bizType = "",
-                bizSubType = "",
-                bizParam = "",
-                waitMillis = 2500L,
-                executionMethod = MemberTaskExecutionMethod.UNSUPPORTED,
-                targetBusiness = targetBusiness,
-                maxExecutionsPerRound = 1
-            )
-        }
         val bizType = targetParts[0]
         val bizSubType = targetParts[1]
         val bizParam = targetParts[2]
@@ -2491,42 +2541,6 @@ class AntMember : ModelTask() {
             targetBusiness = targetBusiness,
             maxExecutionsPerRound = maxExecutionsPerRound
         )
-    }
-
-    private fun resolveMemberTaskFinishBizId(simpleTaskConfig: JSONObject): String {
-        val finishAction = simpleTaskConfig.optJSONObject("finishAction") ?: return ""
-        val finishActionType = finishAction.optString("finishActionType")
-        if (!finishActionType.equals("com.alipay.adtask.biz.mobilegw.service.task.finish", true)) {
-            return ""
-        }
-        return finishAction.optJSONObject("finishActionParam")?.optString("bizId").orEmpty()
-    }
-
-    private fun shouldExecuteMemberTaskByTwoPartTargetBusiness(
-        title: String,
-        bizType: String,
-        bizSubType: String
-    ): Boolean {
-        if (bizType.isBlank() || bizSubType.isBlank()) {
-            return false
-        }
-        if (bizType.equals("CALL_APP", true) || bizType.equals("C2C", true)) {
-            return false
-        }
-        val browseLikeTitle = title.contains("逛") || title.contains("浏览") || title.contains("查看")
-        if (!browseLikeTitle) {
-            return false
-        }
-        if (title.contains("玩")) {
-            return false
-        }
-        if (bizType.startsWith("ngfe_tag__", true) && bizSubType.equals("Y", true)) {
-            return true
-        }
-        if (bizType.equals("YILIAO", true)) {
-            return true
-        }
-        return false
     }
 
     private fun isMemberTaskProcessFinished(taskProcessObject: JSONObject?): Boolean {
