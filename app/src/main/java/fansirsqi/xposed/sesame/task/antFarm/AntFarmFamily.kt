@@ -56,6 +56,27 @@ data object AntFarmFamily {
         return optionKeys.any { values.contains(it) }
     }
 
+    private fun extractGreetingContent(response: JSONObject?): String {
+        if (response == null) {
+            return ""
+        }
+        val directKeys = listOf("content", "expandContent", "deliverContent", "msgContent", "text")
+        directKeys.forEach { key ->
+            val value = response.optString(key).trim()
+            if (value.isNotEmpty()) {
+                return value
+            }
+        }
+        val data = response.optJSONObject("data")
+        directKeys.forEach { key ->
+            val value = data?.optString(key).orEmpty().trim()
+            if (value.isNotEmpty()) {
+                return value
+            }
+        }
+        return ""
+    }
+
     private fun buildFamilyUserIds(memberList: JSONArray?): MutableList<String> {
         if (memberList == null) {
             return mutableListOf()
@@ -820,12 +841,21 @@ data object AntFarmFamily {
 
             // 7. 使用 deliverId 再次确认扩展内容，得到最终的早安文案
             val resp3 = JSONObject(AntFarmRpcCall.QueryExpandContent(deliverId))
-            if (!ResChecker.checkRes(TAG, resp3)) {
-                Log.error(TAG, "家庭任务🏠道早安#QueryExpandContent 调用失败")
+            val content = if (ResChecker.checkRes(TAG, resp3)) {
+                extractGreetingContent(resp3)
+            } else {
+                val fallbackContent = extractGreetingContent(resp2)
+                if (fallbackContent.isBlank()) {
+                    Log.error(TAG, "家庭任务🏠道早安#QueryExpandContent 调用失败")
+                    return
+                }
+                Log.record(TAG, "家庭任务🏠道早安#QueryExpandContent 调用失败，已回退到 DeliverContentExpand 文案")
+                fallbackContent
+            }
+            if (content.isBlank()) {
+                Log.error(TAG, "家庭任务🏠道早安#未获取到可发送文案，跳过")
                 return
             }
-
-            val content = resp3.getString("content")
 
             // 8. 最终发送早安消息：DeliverMsgSend
             val resp4 = JSONObject(AntFarmRpcCall.deliverMsgSend(groupId, userIds, content, deliverId))

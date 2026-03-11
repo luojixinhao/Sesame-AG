@@ -3260,8 +3260,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                                 extInfoObj.optString("overLimitToday", "false").equals("true", true)
                             val robExpandLimit = (robExpandCardLimt?.value ?: 0).coerceAtLeast(1).toDouble()
                             val shouldCollectRobExpand = collectableEnergy >= 1 ||
-                                leftEnergy >= robExpandLimit ||
-                                (overLimitToday && leftEnergy > 0.0)
+                                leftEnergy >= robExpandLimit
                             if (shouldCollectRobExpand) {
                                 val propId = userUsingProp.optString("propId")
                                 val propType = userUsingProp.optString("propType")
@@ -3283,7 +3282,14 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                                     val remainEnergy = jo.optString("leftEnergy")
                                     val remainSuffix = if (remainEnergy.isNotEmpty()) "#剩余${remainEnergy}g" else ""
                                     Log.forest("翻倍能量🌳[" + collectEnergy + "g][$propName]$remainSuffix")
+                                } else if (jo.optString("resultCode") == "COLLECT_EXPAND_ENERGY_NOT_ENOUGH") {
+                                    Log.record(
+                                        TAG,
+                                        "$propName 剩余${jo.optString("leftEnergy", leftEnergy.toString())}g，整数部分不足1g，跳过翻倍能量领取"
+                                    )
                                 }
+                            } else if (leftEnergy > 0.0 || overLimitToday) {
+                                Log.record(TAG, "$propName 剩余${leftEnergy}g，整数部分不足1g，跳过翻倍能量领取")
                             }
                         }
                     }

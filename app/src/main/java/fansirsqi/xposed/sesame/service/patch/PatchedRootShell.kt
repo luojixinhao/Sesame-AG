@@ -6,6 +6,7 @@ import fansirsqi.xposed.sesame.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.io.File
 
 class SafeRootShell : Shell {
     companion object {
@@ -54,15 +55,45 @@ class SafeRootShell : Shell {
      * 这样 Java 就不会因为空格或引号而错误地切分命令了
      */
     private fun executeSu(command: String): ShellResult {
-        // 直接构建参数数组，su 会把第三个参数作为一个完整的字符串执行
-        val cmdArray = arrayOf("su", "-c", command)
+        val failures = ArrayList<String>()
+        for (suPath in resolveSuCandidates()) {
+            try {
+                val process = Runtime.getRuntime().exec(arrayOf(suPath, "-c", command))
+                val stdout = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                val stderr = process.errorStream.bufferedReader().use { it.readText() }.trim()
+                val exitCode = process.waitFor()
+                return ShellResult(stdout, stderr, exitCode)
+            } catch (t: Throwable) {
+                failures.add("$suPath -> ${t.message}")
+            }
+        }
+        throw IllegalStateException(
+            failures.joinToString(" | ").ifBlank { "未找到可用的 su 可执行文件" }
+        )
+    }
 
-        val process = Runtime.getRuntime().exec(cmdArray)
+    private fun resolveSuCandidates(): List<String> {
+        val pathCandidates = System.getenv("PATH")
+            .orEmpty()
+            .split(":")
+            .mapNotNull { dir ->
+                val path = dir.trim()
+                if (path.isEmpty()) null else path.trimEnd('/') + "/su"
+            }
 
-        val stdout = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        val stderr = process.errorStream.bufferedReader().use { it.readText() }.trim()
-        val exitCode = process.waitFor()
-
-        return ShellResult(stdout, stderr, exitCode)
+        return (
+            listOf(
+                "/system/bin/su",
+                "/system/xbin/su",
+                "/sbin/su",
+                "/vendor/bin/su",
+                "/su/bin/su",
+                "/magisk/.core/bin/su",
+                "/debug_ramdisk/su",
+                "su"
+            ) + pathCandidates
+            ).distinct().filter { candidate ->
+            !candidate.contains("/") || File(candidate).exists()
+        }
     }
 }

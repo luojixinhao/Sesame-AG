@@ -1256,7 +1256,7 @@ object AntFarmRpcCall {
         args.put("sceneCode", "ANTFARM")
         args.put("source", "H5")
         args.put("deliverId", deliverId)
-        val params = "[{" + args + "}]"
+        val params = "[" + args + "]"
         return requestString("com.alipay.antfarm.QueryExpandContent", params)
     }
 
@@ -1278,7 +1278,7 @@ object AntFarmRpcCall {
         args.put("sceneCode", "ANTFARM")
         args.put("source", "H5")
         args.put("spaceType", "ChickFamily")
-        val params = "[{" + args + "}]"
+        val params = "[" + args + "]"
         return requestString("com.alipay.antfarm.DeliverMsgSend", params)
     }
 

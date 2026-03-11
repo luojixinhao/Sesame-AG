@@ -90,6 +90,8 @@ class AntFarm : ModelTask() {
 
     // 当前食槽上限（从 subFarmVO.foodInTroughLimit 解析，默认 180；使用加饭卡后为 360）
     private var foodInTroughLimitCurrent: Int = 180
+    private val invalidToolTypesThisRound: MutableSet<ToolType> = linkedSetOf()
+    private var manurePotCollectionBlockedThisRound: Boolean = false
 
     /**
      * 标记农场是否已满（用于雇佣小鸡逻辑）
@@ -651,6 +653,8 @@ class AntFarm : ModelTask() {
             val tc = TimeCounter(TAG)
             val userId = UserMap.currentUid
             Log.record(TAG, "执行开始-${getName()}")
+            invalidToolTypesThisRound.clear()
+            manurePotCollectionBlockedThisRound = false
 
             if (enterFarm() == null) {
                 return
@@ -2731,6 +2735,10 @@ class AntFarm : ModelTask() {
 
     private fun useFarmTool(targetFarmId: String?, toolType: ToolType): Boolean {
         try {
+            if (invalidToolTypesThisRound.contains(toolType)) {
+                Log.record(TAG, "道具🎭[${toolType.nickName()}]本轮已被判定为无效，跳过继续尝试")
+                return false
+            }
             val tool = findFarmTool(toolType, forceRefresh = true)
             if (tool == null) {
                 Log.record(TAG, "背包中未找到道具🎭[${toolType.nickName()}]，跳过使用")
@@ -2759,6 +2767,10 @@ class AntFarm : ModelTask() {
             } else {
                 // 针对加速卡：当日达到上限(resultCode=3D16)后，设置当日标记，避免后续重复尝试
                 val resultCode = jo.optString("resultCode")
+                if (resultCode == "348" || memo.contains("道具使用无效")) {
+                    invalidToolTypesThisRound.add(toolType)
+                    Log.record(TAG, "道具🎭[${toolType.nickName()}]返回“道具使用无效”，已在本轮停止继续尝试")
+                }
                 if (toolType == ToolType.ACCELERATETOOL && resultCode == "3D16") {
                     Status.setFlagToday("farm::accelerateLimit")
                 }
@@ -3005,6 +3017,9 @@ class AntFarm : ModelTask() {
                 val manurePotList =
                     subFarmVO.getJSONObject("manureVO").getJSONArray("manurePotList")
                 for (i in 0..<manurePotList.length()) {
+                    if (manurePotCollectionBlockedThisRound) {
+                        break
+                    }
                     val manurePot = manurePotList.getJSONObject(i)
                     // 兼容：manurePotNum 既可能是整数(直接为数量)，也可能是 0~1 的比例值
                     val manurePotNumRaw = manurePot.optDouble("manurePotNum", 0.0)
@@ -3015,7 +3030,7 @@ class AntFarm : ModelTask() {
                         else -> manurePotNumRaw
                     }
 
-                    if (manurePotNum >= 100.0) { //粪肥数量（按旧逻辑阈值 100g）
+                    if (manurePotNum > 1.0) {
                         val manurePotNO = manurePot.optString("manurePotNO")
                         if (manurePotNO.isBlank()) {
                             continue
@@ -3026,8 +3041,20 @@ class AntFarm : ModelTask() {
                             val collectManurePotNum = joManurePot.optInt("collectManurePotNum", 0)
                             Log.farm("打扫鸡屎🧹[" + collectManurePotNum + "g]" + (i + 1) + "次")
                         } else {
+                            val resultCode = joManurePot.optString("resultCode")
+                            val memo = joManurePot.optString("memo")
+                            if (resultCode == "G03" || memo.contains("肥料太少啦，等一会再收吧")) {
+                                manurePotCollectionBlockedThisRound = true
+                                Log.record(TAG, "打扫鸡屎🧹失败：肥料太少啦，等一会再收吧；本轮不再继续尝试")
+                                break
+                            }
                             Log.record(TAG, "打扫鸡屎失败: 第" + (i + 1) + "次" + joManurePot)
                         }
+                    } else if (manurePotNum > 0.0) {
+                        Log.record(
+                            TAG,
+                            String.format(Locale.US, "打扫鸡屎🧹池[%d]当前%.2fg，未达到>1g门槛，跳过", i + 1, manurePotNum)
+                        )
                     }
                 }
             }
@@ -5000,6 +5027,15 @@ class AntFarm : ModelTask() {
                             add2FoodStock(-feedFood)
                         }
                         Log.farm("庄园家庭🏠帮喂好友🥣[" + UserMap.getMaskName(userId) + "]的小鸡[" + feedFood + "g]#剩余" + foodStock + "g")
+                    } else {
+                        val resultCode = jo.optString("resultCode")
+                        val memo = jo.optString("memo")
+                        if ("391" == resultCode || memo.contains("今日帮喂次数已达上限")) {
+                            Status.setFlagToday("farm::feedFriendLimit")
+                            Log.record(TAG, "庄园家庭🏠帮喂好友🥣今日次数已达上限，已记录为当日限制")
+                            return
+                        }
+                        Log.record(TAG, "庄园家庭🏠帮喂好友失败: $jo")
                     }
                 }
             }

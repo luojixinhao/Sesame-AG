@@ -59,6 +59,9 @@ class AntSports : ModelTask() {
 
     /** @brief 临时步数缓存（-1 表示未初始化） */
     private var tmpStepCount: Int = -1
+    private var cachedOriginDailyStep: Int = -1
+    private var cachedTargetDailyStep: Int = -1
+    private var syncStepHookLogged: Boolean = false
 
     // 配置字段
     private lateinit var walk: BooleanModelField
@@ -260,9 +263,19 @@ class AntSports : ModelTask() {
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val originStep = param.result as Int
-                        val step = tmpStepCount()
-                        if (shouldOverrideDailyStep(originStep, step)) {
-                            param.result = step
+                        rememberCurrentDailyStep(originStep)
+                        val targetStep = resolveTargetDailyStep(originStep)
+                        if (shouldOverrideDailyStep(originStep, targetStep)) {
+                            param.result = targetStep
+                            if (!Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE)) {
+                                Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE)
+                                if (!syncStepHookLogged) {
+                                    syncStepHookLogged = true
+                                    Log.other(
+                                        "同步步数🏃🏻‍♂️[Hook][原始${originStep}步 + 自定义${targetStep - originStep}步 = ${targetStep}步]"
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -372,9 +385,9 @@ class AntSports : ModelTask() {
             ChildModelTask(
                 "syncStep",
                 Runnable {
-                    val step = tmpStepCount()
                     try {
-                        if (step <= 0) {
+                        val customStep = tmpStepCount()
+                        if (customStep <= 0) {
                             Log.record(TAG, "同步步数已关闭，跳过主动同步")
                             Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE)
                             return@Runnable
@@ -386,11 +399,27 @@ class AntSports : ModelTask() {
                             return@Runnable
                         }
 
-                        if (syncStepByRpcManager(loader, step)) {
-                            Log.other("同步步数🏃🏻‍♂️[$step 步]")
+                        val originStep = queryCurrentWalkStepCount()
+                            ?: cachedOriginDailyStep.takeIf { it >= 0 }
+                            ?: 0
+                        val targetStep = resolveTargetDailyStep(originStep)
+                        if (targetStep <= originStep) {
+                            Log.record(
+                                TAG,
+                                "同步步数无需处理[原始=${originStep}步, 自定义=${customStep}步, 目标=${targetStep}步]"
+                            )
+                            Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE)
+                            return@Runnable
+                        }
+
+                        if (syncStepByRpcManager(loader, targetStep)) {
+                            Log.other("同步步数🏃🏻‍♂️[原始${originStep}步 + 自定义${targetStep - originStep}步 = ${targetStep}步]")
                             Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE)
                         } else {
-                            Log.record(TAG, "主动同步入口未匹配，保留 readDailyStep Hook 等待运动页读取")
+                            Log.record(
+                                TAG,
+                                "主动同步入口未匹配，保留 readDailyStep Hook 等待运动页读取[原始=${originStep}步, 目标=${targetStep}步]"
+                            )
                         }
                     } catch (t: Throwable) {
                         Log.printStackTrace(TAG, t)
@@ -419,8 +448,36 @@ class AntSports : ModelTask() {
         return tmpStepCount
     }
 
-    private fun shouldOverrideDailyStep(originStep: Int, customStep: Int): Boolean {
-        if (customStep <= 0 || originStep >= customStep) {
+    private fun rememberCurrentDailyStep(originStep: Int) {
+        if (originStep < 0 || Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE)) {
+            return
+        }
+        if (originStep > cachedOriginDailyStep) {
+            cachedOriginDailyStep = originStep
+            cachedTargetDailyStep = -1
+        }
+    }
+
+    private fun resolveTargetDailyStep(originStep: Int): Int {
+        val customStep = tmpStepCount()
+        if (customStep <= 0) {
+            return originStep.coerceAtLeast(0)
+        }
+        if (cachedOriginDailyStep < 0 || originStep > cachedOriginDailyStep) {
+            cachedOriginDailyStep = originStep.coerceAtLeast(0)
+            cachedTargetDailyStep = -1
+        }
+        if (cachedTargetDailyStep < 0) {
+            cachedTargetDailyStep = (cachedOriginDailyStep + customStep).coerceAtMost(100_000)
+        }
+        return cachedTargetDailyStep
+    }
+
+    private fun shouldOverrideDailyStep(originStep: Int, targetStep: Int): Boolean {
+        if (Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE) ||
+            targetStep <= 0 ||
+            originStep >= targetStep
+        ) {
             return false
         }
 
@@ -430,6 +487,23 @@ class AntSports : ModelTask() {
             8
         }
         return TimeUtil.isNowAfterOrCompareTimeStr(String.format("%02d00", earliestHour))
+    }
+
+    private fun queryCurrentWalkStepCount(): Int? {
+        return try {
+            val response = JSONObject(AntSportsRpcCall.queryWalkStep())
+            if (!ResChecker.checkRes(TAG, response)) {
+                Log.record(TAG, "查询当前步数失败，回退到 Hook 实时步数")
+                null
+            } else {
+                val currentStep = AntSportsRpcCall.extractWalkStepCount(response).coerceAtLeast(0)
+                rememberCurrentDailyStep(currentStep)
+                currentStep
+            }
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "queryCurrentWalkStepCount err:", t)
+            null
+        }
     }
 
     private fun syncStepByRpcManager(loader: ClassLoader, step: Int): Boolean {

@@ -252,11 +252,11 @@ object EnergyWaitingManager {
                 if (existingTask != null) {
                     // 如果已存在且时间相同，跳过添加
                     if (existingTask.produceTime == produceTime) {
-                         Log.record(TAG, "蹲点任务[$taskId]已存在且时间相同，跳过重复添加")
+                         Log.record(TAG, "蹲点任务[$taskId][userId=$userId,bubbleId=$bubbleId,from=$fromTag]已存在且时间相同，跳过重复添加")
                         return@withLock
                     }
                     // 如果时间不同，记录更新信息
-                     Log.record(TAG, "更新蹲点任务[$taskId]：时间从[${TimeUtil.getCommonDate(existingTask.produceTime)}]更新为[${TimeUtil.getCommonDate(produceTime)}]")
+                     Log.record(TAG, "更新蹲点任务[$taskId][userId=$userId,bubbleId=$bubbleId,from=$fromTag]：时间从[${TimeUtil.getCommonDate(existingTask.produceTime)}]更新为[${TimeUtil.getCommonDate(produceTime)}]")
                 }
 
                 // 检查是否是自己的账号
@@ -278,7 +278,7 @@ object EnergyWaitingManager {
                         val formattedTimeDifference = formatTime(timeDifference)
                         Log.record(
                             TAG,
-                            "智能跳过蹲点：[好友|$userName]的保护罩比能量球晚到期${formattedTimeDifference}，无法收取，已跳过。"
+                            "智能跳过蹲点：[好友|$userName]球[$bubbleId][taskId=$taskId]的保护罩比能量球晚到期${formattedTimeDifference}，无法收取，已跳过。"
                         )
                         // 移除无效的蹲点任务
                         waitingTasks.remove(taskId)
@@ -299,7 +299,7 @@ object EnergyWaitingManager {
                 // 检查等待时间是否过长
                 val waitTime = produceTime - currentTime
                 if (waitTime > MAX_WAIT_TIME_MS) {
-                     Log.record(TAG, "能量球[$bubbleId]等待时间过长(${waitTime/1000/60}分钟)，跳过蹲点")
+                     Log.record(TAG, "能量球[$bubbleId][taskId=$taskId][user=$userName]等待时间过长(${waitTime/1000/60}分钟)，跳过蹲点")
                     // 移除过长的任务
                     waitingTasks.remove(taskId)
                     EnergyWaitingPersistence.saveTasks(waitingTasks)
@@ -341,7 +341,7 @@ object EnergyWaitingManager {
 
                 Log.record(
                     TAG,
-                    "${actionText}蹲点：[${task.getUserTypeTag()}${fromTag}|${userName}]球[${bubbleId}]在[${TimeUtil.getCommonDate(produceTime)}]成熟(等待${waitTimeMinutes}分钟)${protectionStatus}"
+                    "${actionText}蹲点：[${task.getUserTypeTag()}${fromTag}|${userName}]球[${bubbleId}]#任务[$taskId]在[${TimeUtil.getCommonDate(produceTime)}]成熟(等待${waitTimeMinutes}分钟)${protectionStatus}"
                 )
 
                 // 保存到持久化存储
@@ -762,7 +762,9 @@ object EnergyWaitingManager {
 
                 // 重新触发已成熟任务（尝试唤醒僵尸任务）
                 if (matureTasks.isNotEmpty()) {
-                    val taskNames = matureTasks.values.map { it.userName }.take(3).joinToString(",")
+                    val taskNames = matureTasks.values
+                        .take(3)
+                        .joinToString(",") { "${it.userName}/球[${it.bubbleId}]/任务[${it.taskId}]" }
                     val moreText = if (matureTasks.size > 3) "等${matureTasks.size}个" else ""
                     Log.record(TAG, "🔄 重新触发蹲点：[${taskNames}${moreText}]已成熟但未执行")
 
@@ -886,7 +888,7 @@ object EnergyWaitingManager {
                 ""
             }
 
-            statusBuilder.append("  - [${task.userName}] 球[${task.bubbleId}] $status$protectionInfo → $executeTime\n")
+            statusBuilder.append("  - [${task.userName}] 球[${task.bubbleId}] 来源[${task.fromTag}] 任务[${task.taskId}] $status$protectionInfo → $executeTime\n")
         }
 
         if (sortedTasks.size > displayCount) {

@@ -398,7 +398,7 @@ class AntOcean : ModelTask() {
             return
         }
         Status.setFlagToday(HELP_CLEAN_LIMIT_FLAG)
-        Log.record(TAG, "神奇海洋🌊帮助清理次数已达上限：${extractOceanResultDesc(jo)}")
+        Log.record(TAG, "神奇海洋🌊帮助清理次数已达上限：${extractOceanResultDesc(jo)}，已记录为当日限制，本轮剩余好友清理全部跳过")
     }
 
     private fun isSelfCleanTask(taskType: String, taskTitle: String): Boolean {
@@ -919,6 +919,9 @@ class AntOcean : ModelTask() {
             var s = AntOceanRpcCall.queryFriendPage(userId)
             var jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
             if (ResChecker.checkRes(TAG, jo)) {
+                if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) {
+                    return
+                }
                 s = AntOceanRpcCall.cleanFriendOcean(userId)
                 jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
                 if (ResChecker.checkRes(TAG, jo)) {
@@ -1077,6 +1080,12 @@ class AntOcean : ModelTask() {
                     // 在处理任何任务前，先检查黑名单
                     if (badTaskSet.contains(taskTitle) || badTaskSet.contains(taskType)) {
                         Log.record(TAG, "海洋任务🌊[$taskTitle]已在黑名单中，跳过处理")
+                        continue
+                    }
+                    if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG) &&
+                        (taskTitle.contains("帮好友清理") || taskType.contains("HELP_CLEAN"))
+                    ) {
+                        Log.record(TAG, "海洋任务🌊[$taskTitle]帮助清理次数已达上限，跳过处理")
                         continue
                     }
 
@@ -1619,4 +1628,3 @@ class AntOcean : ModelTask() {
         }
     }
 }
-

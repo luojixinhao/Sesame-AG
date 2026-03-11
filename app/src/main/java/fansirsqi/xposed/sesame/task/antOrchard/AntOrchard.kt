@@ -39,6 +39,7 @@ class AntOrchard : ModelTask() {
     private var treeLevel: String? = null
     private var currentPlantScene: String = "main"
     private var executeIntervalInt: Int = 0
+    private var skipManurePotCollectThisRound: Boolean = false
 
     private lateinit var executeInterval: IntegerModelField
     private lateinit var receiveSevenDayGift: BooleanModelField
@@ -99,6 +100,7 @@ class AntOrchard : ModelTask() {
     override suspend fun runSuspend() {
         try {
             Log.record(TAG, "执行开始-${getName()}")
+            skipManurePotCollectThisRound = false
             executeIntervalInt = maxOf(executeInterval.value ?: 0, 500)
 
             val indexResponse = AntOrchardRpcCall.orchardIndex()
@@ -1137,6 +1139,10 @@ class AntOrchard : ModelTask() {
 
     private fun collectOrchardManurePotIfNeeded(listTaskJson: JSONObject) {
         try {
+            if (skipManurePotCollectThisRound) {
+                Log.record(TAG, "庄园鸡屎💩任务：本轮已触发“肥料太少”保护，跳过重复收取")
+                return
+            }
             val manureFactory = listTaskJson.optJSONObject("manureFactory") ?: run {
                 Log.record(TAG, "庄园鸡屎💩任务：缺少 manureFactory 字段，跳过")
                 return
@@ -1148,40 +1154,25 @@ class AntOrchard : ModelTask() {
 
             val manure = manureFactory.optJSONObject("manure")
             val potList = manure?.optJSONArray("manurePotList")
-            val potNos = buildString {
-                if (potList != null) {
-                    val candidateNos = ArrayList<String>()
-                    for (i in 0 until potList.length()) {
-                        val pot = potList.optJSONObject(i) ?: continue
-                        val potNo = pot.optString("manurePotNO").trim()
-                        if (potNo.isEmpty()) continue
-                        val potNum = pot.optDouble("manurePotNum", 0.0)
-                        if (potNum > 0) {
-                            candidateNos.add(potNo)
-                        }
-                    }
-                    if (candidateNos.isNotEmpty()) {
-                        append(candidateNos.joinToString(","))
-                    } else {
-                        // 兜底：有 potList 但数值结构异常时，直接收取全部 pot
-                        val allNos = ArrayList<String>()
-                        for (i in 0 until potList.length()) {
-                            val pot = potList.optJSONObject(i) ?: continue
-                            val potNo = pot.optString("manurePotNO").trim()
-                            if (potNo.isNotEmpty()) allNos.add(potNo)
-                        }
-                        if (allNos.isNotEmpty()) {
-                            append(allNos.joinToString(","))
-                        }
+            val candidateNos = ArrayList<String>()
+            if (potList != null) {
+                for (i in 0 until potList.length()) {
+                    val pot = potList.optJSONObject(i) ?: continue
+                    val potNo = pot.optString("manurePotNO").trim()
+                    if (potNo.isEmpty()) continue
+                    val potNum = pot.optDouble("manurePotNum", 0.0)
+                    if (potNum > 1.0) {
+                        candidateNos.add(potNo)
                     }
                 }
-            }.ifEmpty {
-                // 抓包常见 1,2,3
-                "1,2,3"
+            }
+            if (candidateNos.isEmpty()) {
+                Log.record(TAG, "庄园鸡屎💩任务：当前各肥料池未达到>1g门槛，跳过收取")
+                return
             }
 
             val source = getSceneSource()
-            val collectResp = JSONObject(AntOrchardRpcCall.collectManurePot(potNos, source))
+            val collectResp = JSONObject(AntOrchardRpcCall.collectManurePot(candidateNos.joinToString(","), source))
             if (ResChecker.checkRes(TAG, collectResp)) {
                 val collected = collectResp.optInt("collectManurePotNum", 0)
                 if (collected > 0) {
@@ -1190,6 +1181,14 @@ class AntOrchard : ModelTask() {
                     Log.record(TAG, "庄园鸡屎💩任务：已触发收取，但本次为0g")
                 }
             } else {
+                val resultCode = collectResp.optString("resultCode").ifBlank { collectResp.optString("code") }
+                val desc = collectResp.optString("memo")
+                    .ifBlank { collectResp.optString("desc", collectResp.optString("resultDesc")) }
+                if (resultCode == "G03" || desc.contains("肥料太少")) {
+                    skipManurePotCollectThisRound = true
+                    Log.record(TAG, "庄园鸡屎💩任务：肥料太少啦，等一会再收吧；本轮不再重试")
+                    return
+                }
                 Log.record(TAG, "庄园鸡屎💩任务收取失败: ${collectResp.toString()}")
             }
         } catch (t: Throwable) {
@@ -1641,6 +1640,10 @@ class AntOrchard : ModelTask() {
 
             val friendSet = assistFriendList.value ?: emptySet()
             for (uid in friendSet) {
+                if (Status.hasFlagToday("orchard::assistRelationInvalid::$uid")) {
+                    Log.record(TAG, "农场助力⏭️[${UserMap.getMaskName(uid)}]今日关系已判定无效，跳过")
+                    continue
+                }
                 val shareId = Base64.encodeToString(
                     ("$uid-${RandomUtil.getRandomInt(5)}ANTFARM_ORCHARD_SHARE_P2P").toByteArray(),
                     Base64.NO_WRAP
@@ -1661,6 +1664,11 @@ class AntOrchard : ModelTask() {
                         Log.record(TAG, "农场助力💪邀请过于频繁，停止今日助力以避免风控")
                         Status.antOrchardAssistFriendToday()
                         return
+                    }
+                    if (code == "600000010") {
+                        Status.setFlagToday("orchard::assistRelationInvalid::$uid")
+                        Log.record(TAG, "农场助力⏭️[$name]人传人邀请关系不存在，已记录为今日跳过")
+                        continue
                     }
                     Log.error(TAG, "农场助力😔失败[$name]${jsonObject.optString("desc")}")
                     continue
