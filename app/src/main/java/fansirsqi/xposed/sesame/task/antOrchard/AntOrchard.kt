@@ -30,6 +30,7 @@ class AntOrchard : ModelTask() {
         private const val STATUS_MONEY_TREE_COLLECTED = "ANTORCHARD_MONEY_TREE_COLLECTED"
         private const val STATUS_YEB_EXP_GOLD_TASK_PREFIX = "ANTORCHARD_YEB_EXP_GOLD_TASK"
         private const val STATUS_YEB_EXP_GOLD_SIGN_DONE = "ANTORCHARD_YEB_EXP_GOLD_SIGN_DONE"
+        private const val STATUS_YEB_EXP_GOLD_EXCHANGE_DONE = "ANTORCHARD_YEB_EXP_GOLD_EXCHANGE_DONE"
         private const val ORCHARD_SOURCE = "ch_appcenter__chsub_9patch"
         private const val YEB_SOURCE = "yaoqianshu_qiehuan"
         private const val XLIGHT_PAGE_FROM = "ch_url-https://render.alipay.com/p/yuyan/180020010001263018/game.html"
@@ -453,8 +454,7 @@ class AntOrchard : ModelTask() {
                 }
             }
 
-            val taskMap = LinkedHashMap<String, JSONObject>()
-            collectYebExpGoldTasks(queryResponse, taskMap)
+            val taskMap = queryYebExpGoldTaskMap(queryResponse)
             collectYebExpGoldManualTasks(taskMap, manualTaskTitles)
             handledTask = claimPendingYebExpGoldRewards(queryResponse, taskMap) || handledTask
 
@@ -464,6 +464,10 @@ class AntOrchard : ModelTask() {
                 }
 
                 val title = getYebExpGoldTaskTitle(task, taskId)
+                if (isYebExpGoldTaskBlacklisted(title, taskId)) {
+                    Log.record(TAG, "跳过黑名单任务[$title]")
+                    continue
+                }
                 val successFlag = "$STATUS_YEB_EXP_GOLD_TASK_PREFIX::$taskId"
                 if (Status.hasFlagToday(successFlag)) {
                     continue
@@ -526,10 +530,14 @@ class AntOrchard : ModelTask() {
             if (Status.hasFlagToday("$STATUS_YEB_EXP_GOLD_TASK_PREFIX::$taskId")) {
                 continue
             }
+            val title = getYebExpGoldTaskTitle(task, taskId)
+            if (isYebExpGoldTaskBlacklisted(title, taskId)) {
+                continue
+            }
             if (task.optString("simplifiedStatus").lowercase() == "not_sign" &&
                 !shouldAutoReceiveYebExpGoldTask(task)
             ) {
-                manualTaskTitles.add(getYebExpGoldTaskTitle(task, taskId))
+                manualTaskTitles.add(title)
             }
         }
     }
@@ -557,6 +565,11 @@ class AntOrchard : ModelTask() {
             ?.toString()
             .orEmpty()
         val title = if (amount.isBlank()) "余额宝体验金签到" else "余额宝体验金签到(${amount}元)"
+        if (TaskBlacklist.isTaskInBlacklist(title)) {
+            Log.record(TAG, "跳过黑名单任务[$title]")
+            Status.setFlagToday(STATUS_YEB_EXP_GOLD_SIGN_DONE)
+            return false
+        }
 
         val signResponse = JSONObject(AntOrchardRpcCall.signInYebExpGold())
         if (!isYebExpGoldSuccess(signResponse)) {
@@ -664,6 +677,13 @@ class AntOrchard : ModelTask() {
 
         val completeResponse = JSONObject(AntOrchardRpcCall.completeYebExpGoldTask(taskId))
         if (!isYebExpGoldSuccess(completeResponse)) {
+            queryYebExpGoldTaskById(taskId)?.let { verifiedTask ->
+                taskMap[taskId] = verifiedTask
+                if (isYebExpGoldTaskReceived(verifiedTask)) {
+                    Status.setFlagToday("$STATUS_YEB_EXP_GOLD_TASK_PREFIX::$taskId")
+                    return true
+                }
+            }
             Log.record(
                 TAG,
                 "余额宝体验金任务领取失败[$title]: ${
@@ -673,12 +693,14 @@ class AntOrchard : ModelTask() {
                     )
                 }"
             )
-            Status.setFlagToday("$STATUS_YEB_EXP_GOLD_TASK_PREFIX::$taskId")
             return false
         }
 
         logYebExpGoldRewards(title, completeResponse)
         Status.setFlagToday("$STATUS_YEB_EXP_GOLD_TASK_PREFIX::$taskId")
+        queryYebExpGoldTaskById(taskId)?.let { verifiedTask ->
+            taskMap[taskId] = verifiedTask
+        }
         return true
     }
 
@@ -700,12 +722,22 @@ class AntOrchard : ModelTask() {
             }
 
             val title = getYebExpGoldCompletedTitle(rewardItem, taskMap[taskId], taskId)
+            if (isYebExpGoldTaskBlacklisted(title, taskId)) {
+                Log.record(TAG, "跳过黑名单任务[$title]")
+                continue
+            }
             val completeResponse = JSONObject(AntOrchardRpcCall.completeYebExpGoldTask(taskId))
             if (isYebExpGoldSuccess(completeResponse)) {
                 logYebExpGoldRewards(title, completeResponse)
                 Status.setFlagToday(successFlag)
                 claimed = true
             } else {
+                val verifiedTask = queryYebExpGoldTaskById(taskId)
+                if (verifiedTask != null && isYebExpGoldTaskReceived(verifiedTask)) {
+                    Status.setFlagToday(successFlag)
+                    claimed = true
+                    continue
+                }
                 Log.record(
                     TAG,
                     "余额宝体验金任务领取失败[$title]: ${
@@ -715,7 +747,6 @@ class AntOrchard : ModelTask() {
                         )
                     }"
                 )
-                Status.setFlagToday(successFlag)
             }
             CoroutineUtils.sleepCompat(executeIntervalInt.toLong())
         }
@@ -749,6 +780,10 @@ class AntOrchard : ModelTask() {
     }
 
     private fun handleYebExpGoldExchange(queryResponse: JSONObject): Boolean {
+        if (Status.hasFlagToday(STATUS_YEB_EXP_GOLD_EXCHANGE_DONE)) {
+            return false
+        }
+
         val resultData = queryResponse.optJSONObject("resultData") ?: return false
         val balanceText = resultData.optString("balance")
         val balance = balanceText.toDoubleOrNull() ?: return false
@@ -757,8 +792,19 @@ class AntOrchard : ModelTask() {
             is String -> thresholdValue.toDoubleOrNull() ?: 0.0
             else -> 0.0
         }
+        val thresholdText = resultData.opt("subThreshold")?.toString().orEmpty()
 
-        if (balance <= 0.0 || (threshold > 0.0 && balance < threshold)) {
+        if (balance <= 0.0) {
+            Status.setFlagToday(STATUS_YEB_EXP_GOLD_EXCHANGE_DONE)
+            return false
+        }
+
+        if (threshold > 0.0 && balance < threshold) {
+            Log.record(
+                TAG,
+                "余额宝体验金未达兑换门槛: 当前$balanceText，最低需${thresholdText.ifBlank { threshold.toString() }}"
+            )
+            Status.setFlagToday(STATUS_YEB_EXP_GOLD_EXCHANGE_DONE)
             return false
         }
 
@@ -847,6 +893,7 @@ class AntOrchard : ModelTask() {
             }
         }
         Log.farm("余额宝体验金💰[兑换激活]#${amountText}元$extraInfo")
+        Status.setFlagToday(STATUS_YEB_EXP_GOLD_EXCHANGE_DONE)
         return true
     }
 
@@ -861,6 +908,64 @@ class AntOrchard : ModelTask() {
             }
         }
         return null
+    }
+
+    private fun queryYebExpGoldTaskMap(
+        fallbackQueryResponse: JSONObject
+    ): LinkedHashMap<String, JSONObject> {
+        val taskMap = LinkedHashMap<String, JSONObject>()
+        val taskListResponse = JSONObject(AntOrchardRpcCall.queryYebExpGoldTaskList())
+        if (isYebExpGoldSuccess(taskListResponse)) {
+            val taskDetailList = taskListResponse.optJSONObject("result")
+                ?.optJSONArray("taskDetailList")
+            if (taskDetailList != null) {
+                for (index in 0 until taskDetailList.length()) {
+                    val task = taskDetailList.optJSONObject(index) ?: continue
+                    val taskId = task.optString("taskId")
+                    if (taskId.isBlank() || !task.has("simplifiedStatus")) {
+                        continue
+                    }
+                    taskMap[taskId] = task
+                }
+            }
+        } else {
+            Log.record(
+                TAG,
+                "余额宝体验金任务列表查询失败: ${getYebExpGoldErrorDesc(taskListResponse)}"
+            )
+        }
+
+        if (taskMap.isEmpty()) {
+            collectYebExpGoldTasks(fallbackQueryResponse, taskMap)
+        }
+        return taskMap
+    }
+
+    private fun queryYebExpGoldTaskById(taskId: String): JSONObject? {
+        if (taskId.isBlank()) {
+            return null
+        }
+
+        return try {
+            val queryResponse = JSONObject(AntOrchardRpcCall.queryYebExpGoldTaskById(taskId))
+            if (!isYebExpGoldSuccess(queryResponse)) {
+                return null
+            }
+
+            val taskDetailList = queryResponse.optJSONObject("result")
+                ?.optJSONArray("taskDetailList")
+                ?: return null
+            for (index in 0 until taskDetailList.length()) {
+                val task = taskDetailList.optJSONObject(index) ?: continue
+                if (taskId == task.optString("taskId")) {
+                    return task
+                }
+            }
+            null
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "queryYebExpGoldTaskById err:", t)
+            null
+        }
     }
 
     private fun collectYebExpGoldTasks(
@@ -890,6 +995,20 @@ class AntOrchard : ModelTask() {
 
     private fun isYebExpGoldSuccess(jo: JSONObject): Boolean {
         return jo.optBoolean("success") || jo.optString("resultCode") == "100"
+    }
+
+    private fun isYebExpGoldTaskReceived(task: JSONObject): Boolean {
+        val simplifiedStatus = task.optString("simplifiedStatus").lowercase()
+        val taskProcessStatus = task.optString("taskProcessStatus").uppercase()
+        return simplifiedStatus == "complete" || taskProcessStatus == "RECEIVE_SUCCESS"
+    }
+
+    private fun isYebExpGoldTaskBlacklisted(
+        title: String,
+        taskId: String
+    ): Boolean {
+        return TaskBlacklist.isTaskInBlacklist(title) ||
+            (taskId.isNotBlank() && TaskBlacklist.isTaskInBlacklist(taskId))
     }
 
     private fun getYebExpGoldTaskTitle(

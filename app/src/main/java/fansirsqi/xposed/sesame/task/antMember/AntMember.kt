@@ -3003,12 +3003,26 @@ class AntMember : ModelTask() {
         }
     }
 
+    private fun shouldAutoReceiveGoldTicketTask(task: JSONObject): Boolean {
+        if (task.optString("taskProcessStatus") != "NONE_SIGNUP") {
+            return false
+        }
+
+        val taskType = task.optString("taskType").uppercase(Locale.ROOT)
+        val browseDuration = when (val browseValue = task.opt("browseDuration")) {
+            is Number -> browseValue.toInt()
+            is String -> browseValue.toIntOrNull() ?: 0
+            else -> 0
+        }
+        return taskType == "BROWSE" || browseDuration > 0
+    }
+
     /**
      * 黄金票任务扫描
      *
-     * 当前日志样本中的待办任务均为财富侧深链跳转任务。
-     * 为避免自动触发金融类外链，仅自动处理 `TO_RECEIVE` 奖励领取，
-     * 其余记录为手动任务，等待用户在客户端自行完成。
+     * 已抓到的黄金票日志显示，`NONE_SIGNUP` 的浏览任务会直接走
+     * `goldbill.v4.task.trigger -> needle.taskQueryPush` 闭环完成，
+     * 因此这类任务可自动处理；其余类型仍保守记录为手动任务。
      */
     private fun handleGoldTicketTasks(homeUpsertData: JSONObject) {
         try {
@@ -3032,7 +3046,23 @@ class AntMember : ModelTask() {
                         }
                     }
 
-                    "NONE_SIGNUP", "SIGNUP_COMPLETE", "SIGNUP_EXPIRED" -> {
+                    "NONE_SIGNUP" -> {
+                        if (shouldAutoReceiveGoldTicketTask(task)) {
+                            if (tryReceiveGoldTicketTask(task)) {
+                                autoReceivedCount++
+                            } else {
+                                manualCount++
+                            }
+                            continue
+                        }
+                        val link = task.optString("link")
+                        val canAccess = task.optBoolean("canAccess", false)
+                        if (link.isNotBlank() || canAccess) {
+                            manualCount++
+                        }
+                    }
+
+                    "SIGNUP_COMPLETE", "SIGNUP_EXPIRED" -> {
                         val link = task.optString("link")
                         val canAccess = task.optBoolean("canAccess", false)
                         if (link.isNotBlank() || canAccess) {
@@ -3132,6 +3162,7 @@ class AntMember : ModelTask() {
 
             if (extractAmount < minExchangeAmount) {
                 record("黄金票🎫[余额不足] 当前: $availableAmount，最低需$minExchangeAmount")
+                consumeDone = true
                 return
             }
 

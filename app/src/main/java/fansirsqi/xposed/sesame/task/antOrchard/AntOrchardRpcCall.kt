@@ -270,6 +270,20 @@ object AntOrchardRpcCall {
         )
     }
 
+    fun queryYebExpGoldTaskList(): String {
+        return RequestManager.requestString(
+            "com.alipay.yebpromobff.promosdk2024.task.query",
+            """[{"needTriggerPrize":false,"playActionCode":"TASK_LIST_CONSULT","playEntrance":"HYQ_TASK_LIST_ENTRANCE_2"}]"""
+        )
+    }
+
+    fun queryYebExpGoldTaskById(taskId: String): String {
+        return RequestManager.requestString(
+            "com.alipay.yebpromobff.promosdk2024.task.queryTaskByTaskId",
+            """[{"appName":"yebpromobff","playActionCode":"TASK_STATUS_QUERY","playEntrance":"HYQ_TASK_LIST_ENTRANCE_2","taskId":"$taskId"}]"""
+        )
+    }
+
     fun completeYebExpGoldTask(taskId: String): String {
         val outBizNo = "$taskId-${System.currentTimeMillis()}-"
         return RequestManager.requestString(
