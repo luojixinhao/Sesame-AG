@@ -56,22 +56,48 @@ class SelectModelField : ModelField<MutableSet<String?>>, SelectModelFieldFunc {
     override fun getExpandValue(): List<MapperEntity>? {
         return selectListFunc?.getList() ?: expandValueList
     }
+
+    private fun normalizeId(rawId: Any?): String? {
+        return rawId?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun sanitizeSelection(rawSelection: Any?): MutableSet<String?> {
+        val result = LinkedHashSet<String?>()
+        when (rawSelection) {
+            is Iterable<*> -> rawSelection.forEach { item ->
+                normalizeId(item)?.let { result.add(it) }
+            }
+            is Array<*> -> rawSelection.forEach { item ->
+                normalizeId(item)?.let { result.add(it) }
+            }
+            else -> normalizeId(rawSelection)?.let { result.add(it) }
+        }
+        return result
+    }
+
+    override fun setObjectValue(objectValue: Any?) {
+        if (objectValue == null) {
+            reset()
+            return
+        }
+        value = sanitizeSelection(objectValue)
+    }
     
     /**
      * 设置配置值
      * 直接解析Set类型，避免父类的类型推断错误
      */
     override fun setConfigValue(configValue: String?) {
-        value = when {
-            configValue.isNullOrBlank() -> defaultValue
-            else -> {
-                try {
-                    JsonUtil.parseObject(configValue, object : TypeReference<LinkedHashSet<String?>>() {})
-                } catch (e: Exception) {
-                    defaultValue ?: LinkedHashSet()
-                }
-            }
+        if (configValue.isNullOrBlank()) {
+            reset()
+            return
         }
+        val parsedValue = try {
+            JsonUtil.parseObject(configValue, object : TypeReference<LinkedHashSet<String?>>() {})
+        } catch (e: Exception) {
+            defaultValue ?: LinkedHashSet()
+        }
+        setObjectValue(parsedValue)
     }
 
     override fun getView(context: Context): View {
@@ -106,15 +132,15 @@ class SelectModelField : ModelField<MutableSet<String?>>, SelectModelFieldFunc {
     override fun get(id: String?): Int? = 0
 
     override fun add(id: String?, count: Int?) {
-        id?.let { value?.add(it) }
+        normalizeId(id)?.let { value?.add(it) }
     }
 
     override fun remove(id: String?) {
-        value?.remove(id)
+        normalizeId(id)?.let { value?.remove(it) }
     }
 
     override fun contains(id: String?): Boolean {
-        return value?.contains(id) == true
+        return normalizeId(id)?.let { value?.contains(it) } == true
     }
 
     fun interface SelectListFunc {

@@ -470,7 +470,7 @@ class AntSports : ModelTask() {
         if (tmpStepCount >= 0) {
             return tmpStepCount
         }
-        tmpStepCount = syncStepCount.value ?: 0
+        tmpStepCount = (syncStepCount.value ?: 0).coerceIn(0, 100_000)
         if (tmpStepCount > 0) {
             tmpStepCount = RandomUtil.nextInt(tmpStepCount, tmpStepCount + 2000)
             if (tmpStepCount > 100_000) {
@@ -1255,7 +1255,7 @@ class AntSports : ModelTask() {
      */
     private fun queryJoinPath(themeId: String?): String? {
         if (walkCustomPath.value == true) {
-            return walkCustomPathId.value
+            walkCustomPathId.value?.takeIf { it.isNotBlank() }?.let { return it }
         }
         var pathId: String? = null
         try {
@@ -1551,7 +1551,7 @@ class AntSports : ModelTask() {
         try {
             var jo = JSONObject(AntSportsRpcCall.queryProjectList(0))
             if (ResChecker.checkRes(TAG, jo)) {
-                val donateAmount = donateCharityCoinAmount.value ?: return
+                val donateAmount = (donateCharityCoinAmount.value ?: return).coerceAtLeast(1)
                 if (donateAmount <= 0) return
                 var charityCoinCount = jo.getInt("charityCoinCount")
                 if (charityCoinCount < donateAmount) return
@@ -1604,7 +1604,7 @@ class AntSports : ModelTask() {
                 val hour = TimeUtil.getFormatTime().split(":").first().toInt()
 
                 val minExchange = minExchangeCount.value ?: 0
-                val latestHour = latestExchangeTime.value ?: 24
+                val latestHour = (latestExchangeTime.value ?: 24).coerceIn(0, 24)
                 if (produceQuantity <= 0) {
                     Log.record(TAG, "当前暂无可捐步数")
                     return
@@ -2742,7 +2742,7 @@ class AntSports : ModelTask() {
          */
         private fun checkDailyStepLimit(): Int {
             var stepCount = Status.getIntFlagToday(StatusFlags.FLAG_NEVERLAND_STEP_COUNT) ?: 0
-            val maxStepLimit = neverlandGridStepCount.value ?: 0
+            val maxStepLimit = (neverlandGridStepCount.value ?: 0).coerceAtLeast(0)
             val remainSteps = maxStepLimit - stepCount
 
             Log.record(
@@ -2769,7 +2769,7 @@ class AntSports : ModelTask() {
             var currentSteps = Status.getIntFlagToday(StatusFlags.FLAG_NEVERLAND_STEP_COUNT) ?: 0
             val newSteps = currentSteps + addedSteps
             Status.setIntFlagToday(StatusFlags.FLAG_NEVERLAND_STEP_COUNT, newSteps)
-            val maxLimit = neverlandGridStepCount.value
+            val maxLimit = (neverlandGridStepCount.value ?: 0).coerceAtLeast(0)
             Log.record(
                 TAG,
                 String.format(

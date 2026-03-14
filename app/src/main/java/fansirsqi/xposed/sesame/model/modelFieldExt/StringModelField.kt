@@ -21,8 +21,16 @@ class StringModelField(code: String, name: String, value: String) : ModelField<S
 
     override fun getConfigValue(): String? = value
 
+    override fun setObjectValue(objectValue: Any?) {
+        if (objectValue == null) {
+            reset()
+            return
+        }
+        value = objectValue.toString().trim()
+    }
+
     override fun setConfigValue(configValue: String?) {
-        value = configValue
+        setObjectValue(configValue)
     }
 
     override fun getView(context: Context): View {

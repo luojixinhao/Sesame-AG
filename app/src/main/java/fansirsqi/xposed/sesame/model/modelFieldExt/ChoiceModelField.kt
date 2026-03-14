@@ -40,22 +40,34 @@ class ChoiceModelField : ModelField<Int> {
     override fun getType(): String = "CHOICE"
 
     override fun getExpandKey(): Array<out String?>? = choiceArray
+
+    private fun parseChoiceValue(objectValue: Any?): Int? {
+        return when (objectValue) {
+            null -> null
+            is Number -> objectValue.toInt()
+            is Boolean -> if (objectValue) 1 else 0
+            is String -> objectValue.trim().toIntOrNull()
+            else -> objectValue.toString().trim().toIntOrNull()
+        }
+    }
+
+    private fun normalizeChoiceValue(rawValue: Int?): Int {
+        val fallback = defaultValue ?: 0
+        val parsedValue = rawValue ?: fallback
+        val lastIndex = (choiceArray?.size ?: 0) - 1
+        return if (lastIndex >= 0) parsedValue.coerceIn(0, lastIndex) else parsedValue
+    }
+
+    override fun setObjectValue(objectValue: Any?) {
+        value = normalizeChoiceValue(parseChoiceValue(objectValue))
+    }
     
     /**
      * 设置配置值
      * 直接解析整数值，避免父类的类型推断错误
      */
     override fun setConfigValue(configValue: String?) {
-        value = when {
-            configValue.isNullOrBlank() -> defaultValue
-            else -> {
-                try {
-                    configValue.toInt()
-                } catch (e: Exception) {
-                    defaultValue ?: 0
-                }
-            }
-        }
+        value = normalizeChoiceValue(parseChoiceValue(configValue))
     }
     
     /**

@@ -2868,8 +2868,11 @@ class AntFarm : ModelTask() {
         try {
             val feedFriendAnimalMap: Map<String?, Int?> = feedFriendAnimalList?.value ?: emptyMap()
             for (entry in feedFriendAnimalMap.entries) {
-                val userId: String = entry.key!!
-                val maxDailyCount: Int = entry.value!!
+                val userId = entry.key?.trim().orEmpty()
+                val maxDailyCount = entry.value ?: 0
+                if (userId.isBlank() || maxDailyCount <= 0) {
+                    continue
+                }
 
                 // 智能冲突避免：如果是自己的账号
                 if (userId == UserMap.currentUid) {

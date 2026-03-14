@@ -251,6 +251,7 @@ class AntOcean : ModelTask() {
 
             if (dailyOceanTask?.value == true) {
                 receiveTaskAward() // 日常任务
+                querySeaAreaDetailList() // 任务奖励可能改变碎片和推进条件，刷新后确保同轮生效
             }
 
             if (userprotectType?.value != ProtectType.DONT_PROTECT) {

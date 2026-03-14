@@ -7,6 +7,8 @@ import fansirsqi.xposed.sesame.hook.CustomRpcScheduler
 import fansirsqi.xposed.sesame.model.BaseModel
 import fansirsqi.xposed.sesame.model.CustomSettings
 import fansirsqi.xposed.sesame.model.Model
+import fansirsqi.xposed.sesame.task.antFarm.AntFarm
+import fansirsqi.xposed.sesame.task.antOrchard.AntOrchard
 import fansirsqi.xposed.sesame.task.customTasks.ManualTask
 import fansirsqi.xposed.sesame.util.Log
 import fansirsqi.xposed.sesame.util.TimeUtil
@@ -121,19 +123,40 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         val excludedCount = taskList.count { it.isEnable() } - tasksToRun.size
         if (excludedCount > 0) skippedCount.addAndGet(excludedCount)
 
-        Log.record(TAG, "🔄 [第 $round/$totalRounds 轮] 开始，共 ${tasksToRun.size} 个任务")
+        val taskBatches = buildExecutionBatches(tasksToRun)
+        Log.record(TAG, "🔄 [第 $round/$totalRounds 轮] 开始，共 ${tasksToRun.size} 个任务，分 ${taskBatches.size} 个批次")
 
-        // 2. 并发执行
-        // 使用 Semaphore 限制并发数量
+        // 2. 分批执行，每批内部保留并发能力
+        taskBatches.forEachIndexed { batchIndex, batchTasks ->
+            executeTaskBatch(round, totalRounds, batchIndex + 1, taskBatches.size, batchTasks)
+        }
+
+        val roundTime = System.currentTimeMillis() - roundStartTime
+        Log.record(TAG, "✅ [第 $round/$totalRounds 轮] 结束，耗时: ${roundTime}ms")
+    }
+
+    private suspend fun executeTaskBatch(
+        round: Int,
+        totalRounds: Int,
+        batchIndex: Int,
+        totalBatches: Int,
+        tasks: List<ModelTask>
+    ) = coroutineScope {
+        if (tasks.isEmpty()) {
+            return@coroutineScope
+        }
+
+        Log.record(
+            TAG,
+            "🧩 [第 $round/$totalRounds 轮][批次 $batchIndex/$totalBatches] ${tasks.joinToString("、") { it.getName().orEmpty() }}"
+        )
+
         val semaphore = Semaphore(MAX_CONCURRENCY)
-
-        // 创建所有任务的 Deferred 对象
-        val deferreds = tasksToRun.map { task ->
+        val deferreds = tasks.map { task ->
             async {
-                // 【互斥检查】再次检查手动任务，防止并发启动
                 if (ManualTask.isManualRunning) {
-                     Log.record(TAG, "⏸ 任务 ${task.getName()} 因手动模式启动而中止")
-                     return@async
+                    Log.record(TAG, "⏸ 任务 ${task.getName()} 因手动模式启动而中止")
+                    return@async
                 }
                 semaphore.withPermit {
                     executeSingleTask(task, round)
@@ -141,11 +164,27 @@ class CoroutineTaskRunner(allModels: List<Model>) {
             }
         }
 
-        // 3. 等待本轮所有任务完成
         deferreds.awaitAll()
+    }
 
-        val roundTime = System.currentTimeMillis() - roundStartTime
-        Log.record(TAG, "✅ [第 $round/$totalRounds 轮] 结束，耗时: ${roundTime}ms")
+    private fun buildExecutionBatches(tasks: List<ModelTask>): List<List<ModelTask>> {
+        val hasOrchardTask = tasks.any { it is AntOrchard }
+        val hasFarmTask = tasks.any { it is AntFarm }
+        if (!hasOrchardTask || !hasFarmTask) {
+            return listOf(tasks)
+        }
+
+        // 已知跨模块依赖：芭芭农场施肥可能产出庄园厨房食材，需要在庄园前先完成农场。
+        val orchardTasks = tasks.filterIsInstance<AntOrchard>()
+        val remainingTasks = tasks.filterNot { it is AntOrchard }
+        return buildList {
+            if (orchardTasks.isNotEmpty()) {
+                add(orchardTasks)
+            }
+            if (remainingTasks.isNotEmpty()) {
+                add(remainingTasks)
+            }
+        }
     }
 
     /**

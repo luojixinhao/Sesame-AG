@@ -52,6 +52,23 @@ open class IntegerModelField : ModelField<Int> {
         valueType = Int::class.java
     }
 
+    protected open fun parseIntValue(objectValue: Any?): Int? {
+        return when (objectValue) {
+            null -> null
+            is Number -> objectValue.toInt()
+            is Boolean -> if (objectValue) 1 else 0
+            is String -> objectValue.trim().toIntOrNull()
+            else -> objectValue.toString().trim().toIntOrNull()
+        }
+    }
+
+    protected open fun clampValue(rawValue: Int): Int {
+        var newValue = rawValue
+        minLimit?.let { newValue = maxOf(it, newValue) }
+        maxLimit?.let { newValue = minOf(it, newValue) }
+        return newValue
+    }
+
     /**
      * 获取字段类型
      *
@@ -66,31 +83,21 @@ open class IntegerModelField : ModelField<Int> {
      */
     override fun getConfigValue(): String? = value?.toString()
 
+    override fun setObjectValue(objectValue: Any?) {
+        value = clampValue(parseIntValue(objectValue) ?: defaultValue ?: 0)
+    }
+
     /**
      * 设置字段的配置值（根据配置值设置新的值，并且在有最小/最大值限制的情况下进行限制）
      *
      * @param configValue 字段的配置值
      */
     override fun setConfigValue(configValue: String?) {
-        var newValue: Int = if (configValue.isNullOrBlank()) {
-            defaultValue ?: 0
-        } else {
-            try {
-                configValue.toInt()
-            } catch (e: Exception) {
-                Log.printStackTrace(e)
-                defaultValue ?: 0
-            }
+        if (configValue.isNullOrBlank()) {
+            value = clampValue(defaultValue ?: 0)
+            return
         }
-
-        // 根据最小值限制调整新值
-        minLimit?.let { newValue = maxOf(it, newValue) }
-        
-        // 根据最大值限制调整新值
-        maxLimit?.let { newValue = minOf(it, newValue) }
-
-        // 设置字段值
-        this.value = newValue
+        setObjectValue(configValue)
     }
 
     /**
@@ -160,6 +167,13 @@ open class IntegerModelField : ModelField<Int> {
                 Log.printStackTrace(e)
             }
             reset()
+        }
+
+        override fun setObjectValue(objectValue: Any?) {
+            var newValue = parseIntValue(objectValue) ?: defaultValue ?: 0
+            minLimit?.let { newValue = maxOf(it * multiple, newValue) }
+            maxLimit?.let { newValue = minOf(it * multiple, newValue) }
+            value = newValue
         }
 
         /**

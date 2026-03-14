@@ -15,13 +15,13 @@ import okhttp3.Response
 
 class CustomService(apiKey: String?, baseUrl: String?) : AnswerAIInterface {
     
-    private val apiKey: String = if (!apiKey.isNullOrEmpty()) apiKey else ""
-    private val baseUrl: String = if (!baseUrl.isNullOrEmpty()) baseUrl else "https://api.openai.com/v1"
+    private val apiKey: String = apiKey.orEmpty().trim()
+    private val baseUrl: String = baseUrl.orEmpty().trim().removeSuffix("/").ifEmpty { "https://api.openai.com/v1" }
     private var modelNameInternal: String = "gpt-3.5-turbo"
     
     override fun getModelName(): String = modelNameInternal
     override fun setModelName(modelName: String) {
-        this.modelNameInternal = modelName
+        this.modelNameInternal = modelName.trim().ifEmpty { "gpt-3.5-turbo" }
     }
 
     @Throws(JSONException::class)
@@ -53,7 +53,7 @@ class CustomService(apiKey: String?, baseUrl: String?) : AnswerAIInterface {
             .readTimeout(TIME_OUT_SECONDS.toLong(), TimeUnit.SECONDS)
             .build()
 
-        val url = "$baseUrl/chat/completions"
+        val url = "${baseUrl.removeSuffix("/")}/chat/completions"
         val mediaType = CONTENT_TYPE.toMediaType()
         val body = requestJson.toString().toRequestBody(mediaType)
         val request = Request.Builder()

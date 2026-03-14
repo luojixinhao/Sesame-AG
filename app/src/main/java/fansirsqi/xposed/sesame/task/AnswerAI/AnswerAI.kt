@@ -102,7 +102,7 @@ class AnswerAI : Model() {
     override fun boot(classLoader: ClassLoader?) {
         try {
             enable = enableField.value == true
-            val selectedType = aiType.value ?: AIType.TONGYI
+            val selectedType = getSafeAiType()
             Log.runtime(String.format("初始化AI服务：已选择[%s]", AIType.nickNames[selectedType]))
             initializeAIService(selectedType)
         } catch (e: Exception) {
@@ -117,7 +117,8 @@ class AnswerAI : Model() {
     }
 
     private fun initializeAIService(selectedType: Int) {
-        val nextService = when (selectedType) {
+        val safeType = selectedType.coerceIn(0, AIType.nickNames.lastIndex)
+        val nextService = when (safeType) {
             AIType.TONGYI -> TongyiAI(tongYiToken.value)
             AIType.GEMINI -> GeminiAI(GeminiToken.value)
             AIType.DEEPSEEK -> DeepSeek(DeepSeekToken.value)
@@ -166,6 +167,10 @@ class AnswerAI : Model() {
             "选择当前用于自动答题的 AI 服务；关闭模块总开关后会退回普通答题逻辑。"
         )
 
+        private fun getSafeAiType(): Int {
+            return (aiType.value ?: AIType.TONGYI).coerceIn(0, AIType.nickNames.lastIndex)
+        }
+
         @JvmStatic
         fun getAnswer(text: String?, answerList: List<String>?, flag: String): String {
             if (text == null || answerList == null) {
@@ -192,7 +197,7 @@ class AnswerAI : Model() {
                         val logMsg = String.format(
                             AI_ANSWER_LOG_FORMAT,
                             answerStr,
-                            AIType.nickNames[aiType.value ?: AIType.TONGYI],
+                            AIType.nickNames[getSafeAiType()],
                             answerAIInterface?.getModelName() ?: ""
                         )
                         when (flag) {
