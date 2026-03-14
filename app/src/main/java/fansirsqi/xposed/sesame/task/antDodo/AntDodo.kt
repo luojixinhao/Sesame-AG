@@ -7,6 +7,7 @@ import fansirsqi.xposed.sesame.entity.AlipayUser
 import fansirsqi.xposed.sesame.model.BaseModel
 import fansirsqi.xposed.sesame.model.ModelFields
 import fansirsqi.xposed.sesame.model.ModelGroup
+import fansirsqi.xposed.sesame.model.withDesc
 import fansirsqi.xposed.sesame.model.modelFieldExt.BooleanModelField
 import fansirsqi.xposed.sesame.model.modelFieldExt.ChoiceModelField
 import fansirsqi.xposed.sesame.model.modelFieldExt.SelectModelField
@@ -40,15 +41,64 @@ class AntDodo : ModelTask() {
 
     override fun getFields(): ModelFields {
         val modelFields = ModelFields()
-        modelFields.addField(BooleanModelField("collectToFriend", "帮抽卡 | 开启", false).also { collectToFriend = it })
-        modelFields.addField(ChoiceModelField("collectToFriendType", "帮抽卡 | 动作", CollectToFriendType.COLLECT, CollectToFriendType.nickNames).also { collectToFriendType = it })
-        modelFields.addField(SelectModelField("collectToFriendList", "帮抽卡 | 好友列表", LinkedHashSet<String?>(), AlipayUser::getListAsMapperEntity).also { collectToFriendList = it })
-        modelFields.addField(SelectModelField("sendFriendCard", "送卡片好友列表(当前图鉴所有卡片)", LinkedHashSet<String?>(), AlipayUser::getListAsMapperEntity).also { sendFriendCard = it })
-        modelFields.addField(BooleanModelField("useProp", "使用道具 | 所有", false).also { useProp = it })
-        modelFields.addField(BooleanModelField("usePropCollectTimes7Days", "使用道具 | 抽卡道具", false).also { usePropCollectTimes7Days = it })
-        modelFields.addField(BooleanModelField("usePropCollectHistoryAnimal7Days", "使用道具 | 抽历史卡道具", false).also { usePropCollectHistoryAnimal7Days = it })
-        modelFields.addField(BooleanModelField("usePropCollectToFriendTimes7Days", "使用道具 | 抽好友卡道具", false).also { usePropCollectToFriendTimes7Days = it })
-        modelFields.addField(BooleanModelField("autoGenerateBook", "自动合成图鉴", false).also { autoGenerateBook = it })
+        modelFields.addField(
+            BooleanModelField("collectToFriend", "帮抽卡 | 开启", false).withDesc(
+                "开启后按下面的名单规则帮好友抽神奇物种卡片。"
+            ).also { collectToFriend = it }
+        )
+        modelFields.addField(
+            ChoiceModelField(
+                "collectToFriendType",
+                "帮抽卡 | 动作",
+                CollectToFriendType.COLLECT,
+                CollectToFriendType.nickNames
+            ).withDesc("选择名单解释方式：仅帮选中好友抽卡，或跳过选中好友。需开启“帮抽卡 | 开启”。").also {
+                collectToFriendType = it
+            }
+        )
+        modelFields.addField(
+            SelectModelField(
+                "collectToFriendList",
+                "帮抽卡 | 好友列表",
+                LinkedHashSet<String?>(),
+                AlipayUser::getListAsMapperEntity
+            ).withDesc("设置帮抽卡规则作用的好友名单。").also { collectToFriendList = it }
+        )
+        modelFields.addField(
+            SelectModelField(
+                "sendFriendCard",
+                "送卡片好友列表(当前图鉴所有卡片)",
+                LinkedHashSet<String?>(),
+                AlipayUser::getListAsMapperEntity
+            ).withDesc("列表不为空时，会把当前图鉴可赠送的卡片和新抽到的三星卡送给列表中的首个有效好友。").also {
+                sendFriendCard = it
+            }
+        )
+        modelFields.addField(
+            BooleanModelField("useProp", "使用道具 | 所有", false).withDesc(
+                "自动使用当前可消费的神奇物种道具，对所有支持的道具类型生效。"
+            ).also { useProp = it }
+        )
+        modelFields.addField(
+            BooleanModelField("usePropCollectTimes7Days", "使用道具 | 抽卡道具", false).withDesc(
+                "单独开启后仅使用抽卡类道具；开启“使用道具 | 所有”时也会一起生效。"
+            ).also { usePropCollectTimes7Days = it }
+        )
+        modelFields.addField(
+            BooleanModelField("usePropCollectHistoryAnimal7Days", "使用道具 | 抽历史卡道具", false).withDesc(
+                "单独开启后仅使用历史卡抽卡道具；开启“使用道具 | 所有”时也会一起生效。"
+            ).also { usePropCollectHistoryAnimal7Days = it }
+        )
+        modelFields.addField(
+            BooleanModelField("usePropCollectToFriendTimes7Days", "使用道具 | 抽好友卡道具", false).withDesc(
+                "单独开启后仅使用好友卡抽卡道具；开启“使用道具 | 所有”时也会一起生效。"
+            ).also { usePropCollectToFriendTimes7Days = it }
+        )
+        modelFields.addField(
+            BooleanModelField("autoGenerateBook", "自动合成图鉴", false).withDesc(
+                "图鉴显示“已集齐”时自动合成对应勋章。"
+            ).also { autoGenerateBook = it }
+        )
         return modelFields
     }
 

@@ -6,6 +6,7 @@ import fansirsqi.xposed.sesame.entity.CooperateEntity.Companion.getList
 import fansirsqi.xposed.sesame.model.BaseModel
 import fansirsqi.xposed.sesame.model.ModelFields
 import fansirsqi.xposed.sesame.model.ModelGroup
+import fansirsqi.xposed.sesame.model.withDesc
 import fansirsqi.xposed.sesame.model.modelFieldExt.BooleanModelField
 import fansirsqi.xposed.sesame.model.modelFieldExt.IntegerModelField
 import fansirsqi.xposed.sesame.model.modelFieldExt.SelectAndCountModelField
@@ -46,25 +47,36 @@ class AntCooperate : ModelTask() {
         return "AntCooperate.png"
     }
 
-    private val cooperateWater = BooleanModelField("cooperateWater", "合种浇水|开启", false)
+    private val cooperateWater = BooleanModelField("cooperateWater", "合种浇水|开启", false).withDesc(
+        "按下面的合种列表自动浇水；未配置浇水克数的合种会跳过。"
+    )
     private val cooperateWaterList = SelectAndCountModelField(
         "cooperateWaterList",
         "合种浇水列表",
         LinkedHashMap<String?, Int?>(),
         { getList() },
-        "打开上面的开关后执行一次后再重新回来应该能加载出来"
+        "设置每个合种单次最多浇多少克；首次开启并执行一次后，返回设置页可刷新出合种列表。"
     )
     private val cooperateWaterTotalLimitList = SelectAndCountModelField(
         "cooperateWaterTotalLimitList",
         "浇水总量限制列表",
         LinkedHashMap<String?, Int?>(),
         { getList() },
-        "当浇满后理论不会再浇了"
+        "限制每个合种的累计总浇水量；达到后即使当天还有额度也不再浇。"
     )
-    private val cooperateSendCooperateBeckon = BooleanModelField("cooperateSendCooperateBeckon", "合种 | 召唤队友浇水| 仅队长 ", false)
-    private val loveCooperateWater = BooleanModelField("loveCooperateWater", "真爱合种 | 浇水", false)
-    private val loveCooperateWaterNum = IntegerModelField("loveCooperateWaterNum", "真爱合种 | 浇水克数(默认20g)", 20)
-    private val teamCooperateWaterNum = IntegerModelField("teamCooperateWaterNum", "组队合种 | 浇水克数(0为关闭，10-5000)", 0)
+    private val cooperateSendCooperateBeckon =
+        BooleanModelField("cooperateSendCooperateBeckon", "合种 | 召唤队友浇水| 仅队长 ", false).withDesc(
+            "仅队长可用，18:00 后自动召唤还能浇水的队友；可单独开启，不依赖“合种浇水|开启”。"
+        )
+    private val loveCooperateWater = BooleanModelField("loveCooperateWater", "真爱合种 | 浇水", false).withDesc(
+        "自动给真爱合种浇水一次。"
+    )
+    private val loveCooperateWaterNum = IntegerModelField("loveCooperateWaterNum", "真爱合种 | 浇水克数(默认20g)", 20).withDesc(
+        "真爱合种每次浇水克数，需开启“真爱合种 | 浇水”。"
+    )
+    private val teamCooperateWaterNum = IntegerModelField("teamCooperateWaterNum", "组队合种 | 浇水克数(0为关闭，10-5000)", 0).withDesc(
+        "组队合种每天目标浇水总量；填 0 关闭，实际会受官方剩余额度和当前能量限制。"
+    )
     override fun getFields(): ModelFields {
         val modelFields = ModelFields()
         modelFields.addField(cooperateWater)
@@ -96,8 +108,10 @@ class AntCooperate : ModelTask() {
                 teamCooperateWater()
 
             }
-            // 3. 普通合种
-            if (cooperateWater.value == true) {
+            // 3. 普通合种/召唤队友浇水
+            val enableCooperateWater = cooperateWater.value == true
+            val enableCooperateBeckon = cooperateSendCooperateBeckon.value == true
+            if (enableCooperateWater || enableCooperateBeckon) {
                 val queryUserCooperatePlantList = JSONObject(AntCooperateRpcCall.queryUserCooperatePlantList())
                 if (ResChecker.checkRes(TAG, queryUserCooperatePlantList)) {
                     // 1. 获取当前能量，设为 var，因为浇水后本地需要扣减，否则下一个合种会误判能量充足
@@ -117,12 +131,16 @@ class AntCooperate : ModelTask() {
                         val admin = plant.getString("admin")
 
                         // 2. 合种打招呼逻辑 (独立判断，不影响浇水主流程)
-                        if (cooperateSendCooperateBeckon.value == true && UserMap.currentUid == admin) {
+                        if (enableCooperateBeckon && UserMap.currentUid == admin) {
                             cooperateSendCooperateBeckon(cooperationId, name)
                         }
 
                         // 3. 记录合种信息到本地 Map
                         fansirsqi.xposed.sesame.util.maps.IdMapManager.getInstance(CooperateMap::class.java).add(cooperationId, name)
+
+                        if (!enableCooperateWater) {
+                            continue
+                        }
 
                         // 4. 检查是否满足“今日是否可浇水”的本地状态缓存
                         if (!Status.canCooperateWaterToday(UserMap.currentUid, cooperationId)) {
