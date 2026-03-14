@@ -122,7 +122,7 @@ class AntSports : ModelTask() {
 
         // 行走路线
         modelFields.addField(BooleanModelField("walk", "行走路线 | 开启", false).withDesc(
-            "开启运动路线自动行走，消耗步数推进路线并领取奖励。"
+            "开启新版运动路线自动行走，按配置主题或自定义路线推进路线并领取奖励。"
         ).also { walk = it })
         modelFields.addField(
             ChoiceModelField(
@@ -130,11 +130,11 @@ class AntSports : ModelTask() {
                 "行走路线 | 主题",
                 WalkPathTheme.DA_MEI_ZHONG_GUO,
                 WalkPathTheme.nickNames
-            ).withDesc("选择运动路线主题，影响加入或继续的路线。").also { walkPathTheme = it }
+            ).withDesc("选择新版行走路线主题，仅在开启行走路线且未启用自定义路线时生效。").also { walkPathTheme = it }
         )
         modelFields.addField(
             BooleanModelField("walkCustomPath", "行走路线 | 开启自定义路线", false).withDesc(
-                "改为使用自定义路线代码，不再按主题自动选线。"
+                "改为使用下方自定义路线代码，不再按主题自动选线。"
             ).also { walkCustomPath = it }
         )
         modelFields.addField(
@@ -142,20 +142,20 @@ class AntSports : ModelTask() {
                 "walkCustomPathId",
                 "行走路线 | 自定义路线代码(debug)",
                 "p0002023122214520001"
-            ).withDesc("自定义路线调试代码，仅在开启自定义路线时生效。").also { walkCustomPathId = it }
+            ).withDesc("自定义路线调试代码，仅在开启行走路线且启用自定义路线时生效。").also { walkCustomPathId = it }
         )
 
         // 旧版路线相关
         modelFields.addField(
             BooleanModelField("openTreasureBox", "开启宝箱", false).withDesc(
-                "路线行走后自动开启可领取的宝箱。"
+                "兼容旧版路线入口：在未开启新版行走路线时，自动处理旧版路线的加入、前进和宝箱领取。"
             ).also { openTreasureBox = it }
         )
 
         // 运动任务 & 能量球
         modelFields.addField(
             BooleanModelField("sportsTasks", "开启运动任务", false).withDesc(
-                "执行运动中心每日任务并领取奖励。"
+                "执行运动任务面板中的签到、任务完成与奖励领取。"
             ).also { sportsTasksField = it }
         )
         modelFields.addField(
@@ -163,13 +163,13 @@ class AntSports : ModelTask() {
                 "sportsEnergyBubble",
                 "运动球任务(开启后有概率出现滑块验证)",
                 false
-            ).withDesc("处理首页推荐的运动球任务，可能触发滑块验证。").also { sportsEnergyBubble = it }
+            ).withDesc("处理首页推荐的运动球任务，可能触发滑块验证，不包含任务面板任务。").also { sportsEnergyBubble = it }
         )
 
         // 首页金币 & 捐步
         modelFields.addField(
             BooleanModelField("receiveCoinAsset", "收能量🎈", false).withDesc(
-                "收取首页可领取的能量气球或运动币资源。"
+                "收取首页可领取的能量气球或运动币资源；关闭后不会在运动任务完成后顺带收取。"
             ).also { receiveCoinAssetField = it }
         )
         modelFields.addField(
@@ -183,11 +183,11 @@ class AntSports : ModelTask() {
                 "捐能量🎈 | 方式",
                 DonateCharityCoinType.ONE,
                 DonateCharityCoinType.nickNames
-            ).withDesc("控制只捐一个项目还是继续处理更多项目。").also { donateCharityCoinType = it }
+            ).withDesc("控制只捐一个项目还是继续处理更多项目，仅在开启捐能量时生效。").also { donateCharityCoinType = it }
         )
         modelFields.addField(
             IntegerModelField("donateCharityCoinAmount", "捐能量🎈 | 数量(每次)", 100).withDesc(
-                "每次捐赠的能量气球数量。"
+                "每次捐赠的能量气球数量，仅在开启捐能量时生效。"
             )
                 .also { donateCharityCoinAmount = it }
         )
@@ -195,17 +195,17 @@ class AntSports : ModelTask() {
         // 健康岛任务
         modelFields.addField(
             BooleanModelField("neverlandTask", "健康岛 | 任务", false).withDesc(
-                "执行健康岛日常任务。"
+                "执行健康岛签到、任务大厅、浏览任务和泡泡领取。"
             ).also { neverlandTask = it }
         )
         modelFields.addField(
             BooleanModelField("neverlandGrid", "健康岛 | 自动走路建造", false).withDesc(
-                "自动在健康岛走路建造，消耗可用步数。"
+                "自动在健康岛走路建造，消耗可用步数并受今日走路最大次数限制。"
             ).also { neverlandGrid = it }
         )
         modelFields.addField(
             IntegerModelField("neverlandGridStepCount", "健康岛 | 今日走路最大次数", 20).withDesc(
-                "健康岛当天最多执行的走路建造次数。"
+                "健康岛当天最多执行的走路建造次数，仅在开启自动走路建造时生效。"
             )
                 .also { neverlandGridStepCount = it }
         )
@@ -213,7 +213,7 @@ class AntSports : ModelTask() {
         // 抢好友相关
         modelFields.addField(
             BooleanModelField("battleForFriends", "抢好友 | 开启", false).withDesc(
-                "执行抢好友玩法。"
+                "执行抢好友大战主页收益收取与抢购好友逻辑。"
             ).also { battleForFriends = it }
         )
         modelFields.addField(
@@ -222,7 +222,7 @@ class AntSports : ModelTask() {
                 "抢好友 | 动作",
                 BattleForFriendType.ROB,
                 BattleForFriendType.nickNames
-            ).withDesc("决定列表中的好友是抢还是排除。").also { battleForFriendType = it }
+            ).withDesc("决定好友列表是“选中抢”还是“选中不抢”，仅在开启抢好友时生效。").also { battleForFriendType = it }
         )
         modelFields.addField(
             SelectModelField(
@@ -230,56 +230,48 @@ class AntSports : ModelTask() {
                 "抢好友 | 好友列表",
                 LinkedHashSet(),
                 AlipayUser::getList
-            ).withDesc("配置抢好友规则作用的好友名单。").also { originBossIdList = it }
+            ).withDesc("配置抢好友规则作用的好友名单，名单解释方式由“抢好友 | 动作”决定。").also { originBossIdList = it }
         )
 
         // 训练好友相关
         modelFields.addField(
             BooleanModelField("trainFriend", "训练好友 | 开启", false).withDesc(
-                "自动训练好友获取金币等奖励。"
+                "在抢好友大战中自动训练空闲好友，需同时开启“抢好友”。"
             ).also { trainFriend = it }
         )
         modelFields.addField(
             IntegerModelField("zeroCoinLimit", "训练好友 | 0金币上限次数当天关闭", 5).withDesc(
-                "当天连续遇到 0 金币达到次数后停止训练好友。"
+                "仅在开启训练好友时生效；连续收取 0 金币达到次数后，当天停止继续训练好友，设为 0 表示不限制。"
             )
                 .also { zeroCoinLimit = it }
         )
 
         // 文体中心 & 捐步 & 步数同步
         modelFields.addField(BooleanModelField("tiyubiz", "文体中心", false).withDesc(
-            "执行文体中心相关任务。"
+            "执行文体中心签到、任务、线路推进和走路挑战赛。"
         ).also { tiyubiz = it })
         modelFields.addField(
             IntegerModelField("minExchangeCount", "最小捐步步数", 0).withDesc(
-                "只有当步数达到该值后才执行捐步或兑换流程。"
+                "旧版捐步兑换的触发阈值；设为 0 关闭该流程，最晚时间前不足阈值会继续累积。"
             ).also { minExchangeCount = it }
         )
         modelFields.addField(
             IntegerModelField("earliestSyncStepTime", "同步步数 | 最早同步时间(24小时制)", 6, 0, 23).withDesc(
-                "允许开始同步自定义步数的最早时间。"
+                "允许开始同步自定义步数的最早时间，仅在自定义同步步数大于 0 时生效。"
             )
                 .also { earliestSyncStepTime = it }
         )
         modelFields.addField(
             IntegerModelField("latestExchangeTime", "最晚捐步时间(24小时制)", 22).withDesc(
-                "允许执行捐步或兑换的最晚时间。"
+                "旧版捐步兑换的最晚等待时间；超过该时间后即使未达到最小捐步步数也会按当前步数尝试处理。"
             )
                 .also { latestExchangeTime = it }
         )
         modelFields.addField(
             IntegerModelField("syncStepCount", "自定义同步步数", 22000).withDesc(
-                "自定义同步到支付宝的步数目标值。"
+                "在当前真实步数基础上额外增加的步数基数，运行时会随机上浮 0~1999，设为 0 关闭自定义同步。"
             ).also { syncStepCount = it }
         )
-
-        // 本地字段：能量兑换双击卡
-        val coinExchangeDoubleCard = BooleanModelField(
-            "coinExchangeDoubleCard",
-            "能量🎈兑换限时能量双击卡",
-            false
-        ).withDesc("用能量气球兑换限时双击卡。")
-        modelFields.addField(coinExchangeDoubleCard)
 
         return modelFields
     }
@@ -345,7 +337,8 @@ class AntSports : ModelTask() {
 
             // 步数同步
             val earliestHour = (earliestSyncStepTime.value ?: 0).coerceIn(0, 23)
-            if (!Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE) &&
+            if (isSyncStepEnabled() &&
+                !Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE) &&
                 TimeUtil.isNowAfterOrCompareTimeStr(String.format("%02d00", earliestHour))) {
                 syncStepTask()
             }
@@ -397,7 +390,9 @@ class AntSports : ModelTask() {
             // 抢好友大战
             if (battleForFriends.value == true) {
                 queryClubHome()
-                queryTrainItem()
+                if (trainFriend.value == true) {
+                    queryTrainItem()
+                }
                 buyMember()
             }
 
@@ -508,6 +503,23 @@ class AntSports : ModelTask() {
             cachedTargetDailyStep = (cachedOriginDailyStep + customStep).coerceAtMost(100_000)
         }
         return cachedTargetDailyStep
+    }
+
+    private fun isSyncStepEnabled(): Boolean {
+        return (syncStepCount.value ?: 0) > 0
+    }
+
+    private fun getTrainFriendZeroCoinLimit(): Int? {
+        if (trainFriend.value != true) {
+            return null
+        }
+        val maxCount = zeroCoinLimit.value ?: return null
+        return maxCount.takeIf { it > 0 }
+    }
+
+    private fun hasReachedTrainFriendZeroCoinLimit(): Boolean {
+        val maxCount = getTrainFriendZeroCoinLimit() ?: return false
+        return zeroTrainCoinCount >= maxCount
     }
 
     private fun shouldOverrideDailyStep(originStep: Int, targetStep: Int): Boolean {
@@ -994,6 +1006,9 @@ class AntSports : ModelTask() {
      * @brief 首页金币收集逻辑
      */
     private fun receiveCoinAsset() {
+        if (receiveCoinAssetField.value != true) {
+            return
+        }
         try {
             val s = AntSportsRpcCall.queryCoinBubbleModule()
             var jo = JSONObject(s)
@@ -1913,8 +1928,8 @@ class AntSports : ModelTask() {
      */
     private fun queryClubHome() {
         try {
-            val maxCount = zeroCoinLimit.value ?: Int.MAX_VALUE
-            if (zeroTrainCoinCount >= maxCount) {
+            val maxCount = getTrainFriendZeroCoinLimit()
+            if (maxCount != null && hasReachedTrainFriendZeroCoinLimit()) {
                 val today = TimeUtil.getDateStr2()
                 DataStore.put(TRAIN_FRIEND_ZERO_COIN_DATE, today)
                 Log.record(TAG, "✅ 训练好友获得0金币已达${maxCount}次上限，今日不再执行")
@@ -1964,13 +1979,13 @@ class AntSports : ModelTask() {
 
                 if (amount <= 0) {
                     zeroTrainCoinCount++
-                    val maxCount = zeroCoinLimit.value ?: Int.MAX_VALUE
-                    if (zeroTrainCoinCount >= maxCount) {
+                    val maxCount = getTrainFriendZeroCoinLimit()
+                    if (maxCount != null && hasReachedTrainFriendZeroCoinLimit()) {
                         val today = TimeUtil.getDateStr2()
                         DataStore.put(TRAIN_FRIEND_ZERO_COIN_DATE, today)
                         Log.record(TAG, "✅ 连续获得0金币已达${maxCount}次，今日停止执行")
                         return
-                    } else {
+                    } else if (maxCount != null) {
                         Log.record(TAG, "训练好友0金币计数: $zeroTrainCoinCount/$maxCount")
                     }
                 }
@@ -1986,6 +2001,14 @@ class AntSports : ModelTask() {
      * @brief 训练好友：选取可训练好友并执行一次训练
      */
     private fun queryTrainItem() {
+        if (trainFriend.value != true) {
+            return
+        }
+        val maxCount = getTrainFriendZeroCoinLimit()
+        if (maxCount != null && hasReachedTrainFriendZeroCoinLimit()) {
+            Log.record(TAG, "训练好友🥋0金币次数已达上限，跳过继续训练")
+            return
+        }
         try {
             val clubHomeData = JSONObject(AntSportsRpcCall.queryClubHome())
             val roomList = clubHomeData.optJSONArray("roomList") ?: return
