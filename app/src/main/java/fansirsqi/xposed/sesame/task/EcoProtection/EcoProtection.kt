@@ -5,6 +5,7 @@ import fansirsqi.xposed.sesame.data.Status.Companion.canAncientTreeToday
 import fansirsqi.xposed.sesame.entity.AreaCode
 import fansirsqi.xposed.sesame.model.ModelFields
 import fansirsqi.xposed.sesame.model.ModelGroup
+import fansirsqi.xposed.sesame.model.withDesc
 import fansirsqi.xposed.sesame.model.modelFieldExt.BooleanModelField
 import fansirsqi.xposed.sesame.model.modelFieldExt.SelectModelField
 import fansirsqi.xposed.sesame.task.ModelTask
@@ -13,9 +14,7 @@ import fansirsqi.xposed.sesame.util.GlobalThreadPools.sleepCompat
 import fansirsqi.xposed.sesame.util.Log
 import fansirsqi.xposed.sesame.util.ResChecker
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.Calendar
 
 class EcoProtection : ModelTask() {
     override fun getName(): String? {
@@ -34,13 +33,19 @@ class EcoProtection : ModelTask() {
     private var ancientTreeCityCodeList: SelectModelField? = null
     public override fun getFields(): ModelFields {
         val modelFields = ModelFields()
-        modelFields.addField(BooleanModelField("ancientTreeOnlyWeek", "仅星期一、三、五运行保护古树", false).also { ancientTreeOnlyWeek = it })
+        modelFields.addField(
+            BooleanModelField("ancientTreeOnlyWeek", "仅星期一、三、五运行保护古树", false).withDesc(
+                "开启后仅在周一、周三、周五执行古树保护；关闭后在模块总开关开启且早上 8 点后每天都会尝试执行。"
+            ).also { ancientTreeOnlyWeek = it }
+        )
         modelFields.addField(
             SelectModelField(
                 "ancientTreeCityCodeList",
                 "古树区划代码列表",
                 LinkedHashSet<String?>()
-            ) { AreaCode.getList() }.also { ancientTreeCityCodeList = it })
+            ) { AreaCode.getList() }.withDesc(
+                "选择需要自动保护古树的城市区划代码；只会处理列表中的城市，留空时不会执行古树保护。"
+            ).also { ancientTreeCityCodeList = it })
         return modelFields
     }
 
@@ -52,9 +57,10 @@ class EcoProtection : ModelTask() {
         }
 
         if (ancientTreeOnlyWeek?.value == true) {
-            val sdfWeek = SimpleDateFormat("EEEE", Locale.getDefault())
-            val week = sdfWeek.format(Date())
-            return "星期一" == week || "星期三" == week || "星期五" == week
+            val dayOfWeek = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+            return dayOfWeek == Calendar.MONDAY ||
+                dayOfWeek == Calendar.WEDNESDAY ||
+                dayOfWeek == Calendar.FRIDAY
         }
         return true
     }
