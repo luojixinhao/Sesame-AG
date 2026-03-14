@@ -481,6 +481,9 @@ class AntOcean : ModelTask() {
     }
 
     private suspend fun retrySelfOceanCleanIfNeeded(taskTitle: String): Boolean {
+        if (cleanOcean?.value != true) {
+            return false
+        }
         if (selfOceanCleanRetried) {
             return false
         }
@@ -510,9 +513,11 @@ class AntOcean : ModelTask() {
             }
             val userInfoVO = joHomePage.optJSONObject("userInfoVO")
             rememberSelfOceanState(userInfoVO)
-            val rubbishNumber = lastKnownRubbishNumber.coerceAtLeast(0)
-            val userId = currentOceanUserId.orEmpty()
-            cleanOcean(userId, rubbishNumber)
+            if (cleanOcean?.value == true) {
+                val rubbishNumber = lastKnownRubbishNumber.coerceAtLeast(0)
+                val userId = currentOceanUserId.orEmpty()
+                cleanOcean(userId, rubbishNumber)
+            }
             val ipVO = userInfoVO?.optJSONObject("ipVO")
             if (ipVO != null) {
                 val surprisePieceNum = ipVO.optInt("surprisePieceNum", 0)
@@ -524,7 +529,9 @@ class AntOcean : ModelTask() {
             queryNotice()
             queryRefinedMaterial()
             queryReplicaHome()
-            queryUserRanking() // 清理
+            if (cleanOcean?.value == true) {
+                queryUserRanking() // 清理
+            }
             querySeaAreaDetailList()
         } catch (t: Throwable) {
             Log.runtime(TAG, "queryHomePage err:")
@@ -1044,6 +1051,9 @@ class AntOcean : ModelTask() {
 
     private suspend fun queryUserRanking() {
         try {
+            if (cleanOcean?.value != true) {
+                return
+            }
             if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG)) {
                 return
             }
@@ -1055,11 +1065,6 @@ class AntOcean : ModelTask() {
                 } else {
                     Log.runtime(TAG, extractOceanResultDesc(jo))
                 }
-                return
-            }
-
-            // 未开启清理功能时，无需额外请求 fillUserFlag
-            if (cleanOcean?.value != true) {
                 return
             }
 
