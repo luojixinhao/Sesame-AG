@@ -3,6 +3,7 @@ package fansirsqi.xposed.sesame.task.AnswerAI
 import fansirsqi.xposed.sesame.model.Model
 import fansirsqi.xposed.sesame.model.ModelFields
 import fansirsqi.xposed.sesame.model.ModelGroup
+import fansirsqi.xposed.sesame.model.withDesc
 import fansirsqi.xposed.sesame.model.modelFieldExt.ChoiceModelField
 import fansirsqi.xposed.sesame.model.modelFieldExt.StringModelField
 import fansirsqi.xposed.sesame.model.modelFieldExt.TextModelField
@@ -28,40 +29,46 @@ class AnswerAI : Model() {
         "getTongyiAIToken",
         "通义千问 | 获取令牌",
         "https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key"
+    ).withDesc("打开通义千问官方文档查看 API Key 的申请与配置方式，仅在下方 AI 类型选择通义千问时使用。")
+    private val tongYiToken = StringModelField("tongYiToken", "qwen-turbo | 设置令牌", "").withDesc(
+        "填写通义千问的 DashScope API Key；未填写或失效时无法使用通义千问答题。"
     )
-    private val tongYiToken = StringModelField("tongYiToken", "qwen-turbo | 设置令牌", "")
     private val getGeminiAIToken = TextModelField.UrlTextModelField(
         "getGeminiAIToken",
         "Gemini | 获取令牌",
         "https://aistudio.google.com/app/apikey"
+    ).withDesc("打开 Gemini 官方密钥页面获取 API Key，仅在下方 AI 类型选择 Gemini 时使用。")
+    private val GeminiToken = StringModelField("GeminiAIToken", "gemini-1.5-flash | 设置令牌", "").withDesc(
+        "填写 Gemini API Key；用于调用 gemini-1.5-flash 模型进行答题。"
     )
-    private val GeminiToken = StringModelField("GeminiAIToken", "gemini-1.5-flash | 设置令牌", "")
     private val getDeepSeekToken = TextModelField.UrlTextModelField(
         "getDeepSeekToken",
         "DeepSeek | 获取令牌",
         "https://platform.deepseek.com/usage"
+    ).withDesc("打开 DeepSeek 开放平台查看 API Key 获取方式，仅在下方 AI 类型选择 DeepSeek 时使用。")
+    private val DeepSeekToken = StringModelField("DeepSeekToken", "DeepSeek-R1 | 设置令牌", "").withDesc(
+        "填写 DeepSeek API Key；用于调用 DeepSeek-R1 模型进行答题。"
     )
-    private val DeepSeekToken = StringModelField("DeepSeekToken", "DeepSeek-R1 | 设置令牌", "")
     private val getCustomServiceToken = TextModelField.ReadOnlyTextModelField(
         "getCustomServiceToken",
         "粉丝福利😍",
         "下面这个不用动可以白嫖到3月10号让我们感谢讯飞大善人🙏"
-    )
+    ).withDesc("仅作当前默认自定义服务的提示说明；如果你有自己的兼容服务，可直接改下面三项配置。")
     private val CustomServiceToken = StringModelField(
         "CustomServiceToken",
         "自定义服务 | 设置令牌",
         "sk-pQF9jek0CTTh3boKDcA9DdD7340a4e929eD00a13F681Cd8e"
-    )
+    ).withDesc("填写兼容 OpenAI 接口的自定义服务令牌，仅在 AI 类型选择自定义服务时生效。")
     private val CustomServiceUrl = StringModelField(
         "CustomServiceBaseUrl",
         "自定义服务 | 设置BaseUrl",
         "https://maas-api.cn-huabei-1.xf-yun.com/v1"
-    )
+    ).withDesc("填写自定义服务的接口根地址，通常形如 https://host/v1，仅在 AI 类型选择自定义服务时生效。")
     private val CustomServiceModel = StringModelField(
         "CustomServiceModel",
         "自定义服务 | 设置模型",
         "xdeepseekr1"
-    )
+    ).withDesc("填写自定义服务实际使用的模型名称，仅在 AI 类型选择自定义服务时生效。")
 
     override fun getName(): String = "AI答题"
 
@@ -85,22 +92,32 @@ class AnswerAI : Model() {
         return modelFields
     }
 
+    override fun prepare() {
+        enable = enableField.value == true
+        if (!enable) {
+            disableAIService()
+        }
+    }
+
     override fun boot(classLoader: ClassLoader?) {
         try {
-            enable = enableField?.value ?: false
+            enable = enableField.value == true
             val selectedType = aiType.value ?: AIType.TONGYI
             Log.runtime(String.format("初始化AI服务：已选择[%s]", AIType.nickNames[selectedType]))
             initializeAIService(selectedType)
         } catch (e: Exception) {
             Log.error(TAG, "初始化AI服务失败: ${e.message}")
             Log.printStackTrace(TAG, e)
+            disableAIService()
         }
     }
 
-    private fun initializeAIService(selectedType: Int) {
-        answerAIInterface?.release()
+    override fun destroy() {
+        disableAIService()
+    }
 
-        answerAIInterface = when (selectedType) {
+    private fun initializeAIService(selectedType: Int) {
+        val nextService = when (selectedType) {
             AIType.TONGYI -> TongyiAI(tongYiToken.value)
             AIType.GEMINI -> GeminiAI(GeminiToken.value)
             AIType.DEEPSEEK -> DeepSeek(DeepSeekToken.value)
@@ -118,6 +135,14 @@ class AnswerAI : Model() {
             }
             else -> AnswerAIInterface.getInstance()
         }
+        answerAIInterface?.release()
+        answerAIInterface = nextService
+    }
+
+    private fun disableAIService() {
+        enable = false
+        answerAIInterface?.release()
+        answerAIInterface = null
     }
 
     private fun selectlogger(flag: String, msg: String) {
@@ -136,8 +161,10 @@ class AnswerAI : Model() {
         private const val ERROR_AI_ANSWER = "AI回答异常：无法获取有效答案，请检查AI服务配置是否正确"
 
         private var enable = false
-        private var answerAIInterface: AnswerAIInterface? = AnswerAIInterface.getInstance()
-        private val aiType = ChoiceModelField("useGeminiAI", "AI类型", AIType.TONGYI, AIType.nickNames)
+        private var answerAIInterface: AnswerAIInterface? = null
+        private val aiType = ChoiceModelField("useGeminiAI", "AI类型", AIType.TONGYI, AIType.nickNames).withDesc(
+            "选择当前用于自动答题的 AI 服务；关闭模块总开关后会退回普通答题逻辑。"
+        )
 
         @JvmStatic
         fun getAnswer(text: String?, answerList: List<String>?, flag: String): String {
