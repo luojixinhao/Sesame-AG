@@ -181,6 +181,10 @@ class CommandService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // TODO: 当前模块侧命令服务既承担 UI 命令执行，也会影响“用户划掉模块后台后是否仍被系统保活”。
+        // 现象上，用户希望保留必要的后台能力，但在主动划掉任务时应允许真正退出。
+        // 后续可增加独立配置开关，决定 CommandService 使用 START_STICKY 还是 START_NOT_STICKY，
+        // 以及在 onTaskRemoved 时是否 stopSelf()。
         // 命令服务仅用于模块侧 UI / 命令执行，不需要在任务被用户划掉后持续保活。
         return START_NOT_STICKY
     }

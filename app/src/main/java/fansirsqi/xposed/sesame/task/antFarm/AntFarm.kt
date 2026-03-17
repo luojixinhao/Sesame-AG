@@ -3303,6 +3303,12 @@ class AntFarm : ModelTask() {
                             dailyLimitedFoodMaterialAmount
                         )
                     )
+                    val resultCode = jo.optString("resultCode")
+                    val memo = jo.optString("memo")
+                    if (resultCode == "U15" || memo.contains("食材槽剩余空间不足")) {
+                        Log.record(TAG, "小鸡厨房👨🏻‍🍳[爱心食材店食材槽空间不足，跳过领取]")
+                        return
+                    }
                     if (ResChecker.checkRes(TAG, jo)) {
                         Log.farm("小鸡厨房👨🏻‍🍳[领取爱心食材店食材]#" + dailyLimitedFoodMaterialAmount + "g")
                     }

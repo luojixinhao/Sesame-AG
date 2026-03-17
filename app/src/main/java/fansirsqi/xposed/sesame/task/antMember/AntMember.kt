@@ -2630,6 +2630,10 @@ class AntMember : ModelTask() {
                         val alchemyRes = AntMemberRpcCall.Zmxy.Alchemy.alchemyExecute()
                         val alchemyJo = JSONObject(alchemyRes)
 
+                        if (isSesameAlchemyCapReached(alchemyJo)) {
+                            Log.record(TAG, "芝麻炼金⚗️[已达盖帽值，停止自动炼金]")
+                            break
+                        }
                         if (ResChecker.checkRes(TAG, alchemyJo)) {
                             val alData = alchemyJo.optJSONObject("data")
                             if (alData != null) {
@@ -3317,6 +3321,10 @@ class AntMember : ModelTask() {
 
                     val collectResp = AntMemberRpcCall.Zmxy.collectProgressBall(idList) ?: return
                     val collectJson = JSONObject(collectResp)
+                    if (isSesameProgressBallEmpty(collectJson)) {
+                        record(TAG, "攒芝麻分🎁[暂无可领取进度球]")
+                        return
+                    }
                     if (!ResChecker.checkRes(TAG, collectJson)) {
                         if (attempt == 0) {
                             record(TAG, "攒芝麻分🎁[领取进度球失败，1.2秒后重试]")
@@ -3496,6 +3504,20 @@ class AntMember : ModelTask() {
             ) || resultView.contains("请稍后") ||
                 resultView.contains("频繁") ||
                 resultView.contains("网络不可用")
+        }
+
+        private fun isSesameProgressBallEmpty(response: JSONObject): Boolean {
+            val resultCode = response.optString("resultCode", response.optString("errorCode", ""))
+            val resultView = response.optString("resultView")
+            return resultCode == "INIT_SCORE_BALL_EMPTY" ||
+                resultCode == "无可领取的信用球" ||
+                resultView.contains("无可领取的信用球")
+        }
+
+        private fun isSesameAlchemyCapReached(response: JSONObject): Boolean {
+            val resultCode = response.optString("resultCode", response.optString("errorCode", ""))
+            val resultView = response.optString("resultView")
+            return resultCode == "CAP_REACHED" || resultView.contains("盖帽值拦截")
         }
 
         private fun autoBlacklistSesameTaskIfNeeded(

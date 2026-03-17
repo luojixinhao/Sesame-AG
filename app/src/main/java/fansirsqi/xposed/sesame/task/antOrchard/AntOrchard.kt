@@ -478,7 +478,7 @@ class AntOrchard : ModelTask() {
             collectYebExpGoldManualTasks(taskMap, manualTaskTitles)
             handledTask = claimPendingYebExpGoldRewards(queryResponse, taskMap) || handledTask
 
-            for ((taskId, task) in taskMap) {
+            for ((taskId, task) in taskMap.entries.toList()) {
                 if (taskId.isBlank()) {
                     continue
                 }

@@ -258,6 +258,17 @@ class ChouChouLe {
             .any { message.contains(it) }
     }
 
+    private fun isTaskQuotaReachedResponse(jo: JSONObject): Boolean {
+        val resultCode = jo.optString("resultCode").ifBlank { jo.optString("code") }
+        if (resultCode == "309") {
+            return true
+        }
+        val message = getResponseMessage(jo)
+        return message.contains("任务数达到当日上限") ||
+            message.contains("权益获取次数超过上限") ||
+            message.contains("当日上限")
+    }
+
     /**
      * 解析任务列表
      */
@@ -347,6 +358,15 @@ class ChouChouLe {
             }
             val s = AntFarmRpcCall.chouchouleDoFarmTask(drawType, task.taskId)
             val jo = JSONObject(s)
+            val resultCode = jo.optString("resultCode")
+            if ("DRAW_MACHINE07" == resultCode) {
+                Log.record(TAG, "${taskName}任务[${task.title}]失败: 饲料不足，停止后续尝试")
+                return false
+            }
+            if (isTaskQuotaReachedResponse(jo)) {
+                Log.record(TAG, "${taskName}任务[${task.title}]今日次数已达上限，停止继续尝试")
+                return false
+            }
             if (ResChecker.checkRes(TAG, jo)) {
                 Log.farm("$taskName🧾️[任务: ${task.title}]")
                 if (task.title == "消耗饲料换机会") {
@@ -356,11 +376,6 @@ class ChouChouLe {
                 }
                 return true
             } else {
-                val resultCode = jo.optString("resultCode")
-                if ("DRAW_MACHINE07" == resultCode) {
-                    Log.record(TAG, "${taskName}任务[${task.title}]失败: 饲料不足，停止后续尝试")
-                    return false
-                }
                 if (isLimitedTaskEndedResponse(jo)) {
                     markLimitedTaskEndedToday(task, getResponseMessage(jo))
                     return true
@@ -398,6 +413,10 @@ class ChouChouLe {
             }
             val response = AntFarmRpcCall.finishTask(task.taskId, taskSceneCode, outBizNo)
             val jo = JSONObject(response)
+            if (isTaskQuotaReachedResponse(jo)) {
+                Log.record(TAG, "广告任务[${task.title}]今日权益已达上限，停止继续尝试")
+                return -1
+            }
             if (ResChecker.checkRes(TAG, jo)) {
                 successCount++
                 Log.farm("$taskName🧾️[任务: ${task.title}]#第${task.rightsTimes + successCount}次")
@@ -429,27 +448,35 @@ class ChouChouLe {
             }
             val taskSceneCode = if (drawType == "ipDraw") "ANTFARM_IP_DRAW_TASK" else "ANTFARM_DAILY_DRAW_TASK"
             val directSuccessCount = finishAdTaskDirectly(drawType, task, taskSceneCode)
-            if (directSuccessCount > 0) {
-                return true
+            if (directSuccessCount != 0) {
+                return directSuccessCount > 0
             }
 
             val referToken = AntFarm.loadAntFarmReferToken()
             if (!referToken.isNullOrEmpty()) {
                 val response = AntFarmRpcCall.xlightPlugin(referToken, "HDWFCJGXNZW_CUSTOM_20250826173111")
                 val jo = JSONObject(response)
+                if (isTaskQuotaReachedResponse(jo)) {
+                    Log.record(TAG, "浏览广告任务[${task.title}]今日权益已达上限，跳过插件流程")
+                    return false
+                }
 
                 if (jo.optString("retCode") == "0") {
-                    val resData = jo.getJSONObject("resData")
-                    val adList = resData.optJSONArray("adList")
+                    val resData = jo.optJSONObject("resData")
+                    if (resData != null) {
+                        val adList = resData.optJSONArray("adList")
 
-                    if (adList != null && adList.length() > 0) {
-                        // 检查是否有猜一猜任务
-                        val playingResult = resData.optJSONObject("playingResult")
-                        if (playingResult != null &&
-                            "XLIGHT_GUESS_PRICE_FEEDS" == playingResult.optString("playingStyleType")
-                        ) {
-                            return handleGuessTask(drawType, task, adList, playingResult)
+                        if (adList != null && adList.length() > 0) {
+                            // 检查是否有猜一猜任务
+                            val playingResult = resData.optJSONObject("playingResult")
+                            if (playingResult != null &&
+                                "XLIGHT_GUESS_PRICE_FEEDS" == playingResult.optString("playingStyleType")
+                            ) {
+                                return handleGuessTask(drawType, task, adList, playingResult)
+                            }
                         }
+                    } else {
+                        Log.record(TAG, "浏览广告任务[广告插件未返回resData，回退普通完成方式]")
                     }
                 }
                 Log.record(TAG, "浏览广告任务[没有可用广告或不支持，使用普通完成方式]")

@@ -508,6 +508,10 @@ class ApplicationHook {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val s = param.thisObject as Service
                     if (General.CURRENT_USING_SERVICE == s.javaClass.getCanonicalName()) {
+                        // TODO: 目前观察到用户手动划掉支付宝后台时，也会走到这里。
+                        // 如果直接 restartByBroadcast()/reOpenApp()，会把“用户主动退出”误判成“异常退出需要恢复”，
+                        // 进而出现支付宝/模块后台被反复复活的问题。后续可增加独立配置开关，
+                        // 由用户决定“宿主前台服务销毁后是否自动恢复目标应用/执行链路”。
                         updateStatusText("目标应用前台服务被销毁")
                         destroyHandler()
                         service = null
