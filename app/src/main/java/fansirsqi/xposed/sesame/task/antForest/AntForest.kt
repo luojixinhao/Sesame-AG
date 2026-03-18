@@ -367,7 +367,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 15,
             ).withDesc("兼容模式下每局目标击打数量，用于保守刷奖励。").also { whackMoleMoleCount = it })
         modelFields.addField(
-            StringModelField(
+            StringModelField.TimeStringModelField(
                 "whackMoleTime",
                 "🎮 6秒拼手速 | 执行时间",
                 "0820"
@@ -380,7 +380,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 false
             ).withDesc("自动进入能量雨并完成收集。").also { energyRain = it })
         modelFields.addField(
-            StringModelField(
+            StringModelField.TimeStringModelField(
                 "energyRainTime",
                 "能量雨 | 默认8点10分后执行",
                 "0810"
@@ -680,7 +680,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         modelFields.addField(BooleanModelField("ecoLife", "绿色行动 | 开关", false).withDesc(
             "执行绿色行动任务。"
         ).also { ecoLife = it })
-        modelFields.addField(StringModelField("ecoLifeTime", "绿色行动 | 默认8点后执行", "0800").withDesc(
+        modelFields.addField(StringModelField.TimeStringModelField("ecoLifeTime", "绿色行动 | 默认8点后执行", "0800").withDesc(
             "限制绿色行动开始时间。"
         ).also { ecoLifeTime = it })
         modelFields.addField(BooleanModelField("ecoLifeOpen", "绿色任务 |  自动开通", false).withDesc(
@@ -691,13 +691,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "ecoLifeOption", "绿色行动 | 选项", LinkedHashSet<String?>(), listEcoLifeOptions(), "光盘行动需要先完成一次光盘打卡"
             ).also { ecoLifeOption = it })
 
-        modelFields.addField(StringModelField("queryInterval", "查询间隔(毫秒或毫秒范围)", "1000-2000").withDesc(
+        modelFields.addField(StringModelField.IntervalStringModelField("queryInterval", "查询间隔(毫秒或毫秒范围)", "1000-2000", 10, 10000).withDesc(
             "控制查询主页、排行榜等请求间隔，可填固定值或范围。"
         ).also { queryInterval = it })
-        modelFields.addField(StringModelField("collectInterval", "收取间隔(毫秒或毫秒范围)", "1000-1500").withDesc(
+        modelFields.addField(StringModelField.IntervalStringModelField("collectInterval", "收取间隔(毫秒或毫秒范围)", "1000-1500", 50, 10000).withDesc(
             "控制实际收取能量请求的间隔，可填固定值或范围。"
         ).also { collectInterval = it })
-        modelFields.addField(StringModelField("doubleCollectInterval", "双击间隔(毫秒或毫秒范围)", "800-2400").withDesc(
+        modelFields.addField(StringModelField.IntervalStringModelField("doubleCollectInterval", "双击间隔(毫秒或毫秒范围)", "800-2400", 10, 5000).withDesc(
             "控制双击补收时两次收取之间的间隔，可填固定值或范围。"
         ).also { doubleCollectInterval = it })
         modelFields.addField(BooleanModelField("balanceNetworkDelay", "平衡网络延迟", true).withDesc(

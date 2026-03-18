@@ -140,6 +140,13 @@ open class IntegerModelField : ModelField<Int> {
         val multiple: Int
     ) : IntegerModelField(code, name, value * multiple, minLimit, maxLimit) {
 
+        private fun clampExpandedValue(rawValue: Int): Int {
+            var newValue = rawValue
+            minLimit?.let { newValue = maxOf(it * multiple, newValue) }
+            maxLimit?.let { newValue = minOf(it * multiple, newValue) }
+            return newValue
+        }
+
         /**
          * 获取字段类型
          *
@@ -157,23 +164,24 @@ open class IntegerModelField : ModelField<Int> {
                 reset()
                 return
             }
-            
-            super.setConfigValue(configValue)
-            try {
-                // 根据乘数调整值
-                value = (value ?: 0) * multiple
-                return
-            } catch (e: Exception) {
-                Log.printStackTrace(e)
-            }
-            reset()
+
+            setObjectValue(configValue)
         }
 
         override fun setObjectValue(objectValue: Any?) {
-            var newValue = parseIntValue(objectValue) ?: defaultValue ?: 0
-            minLimit?.let { newValue = maxOf(it * multiple, newValue) }
-            maxLimit?.let { newValue = minOf(it * multiple, newValue) }
-            value = newValue
+            val parsedValue = parseIntValue(objectValue) ?: run {
+                value = clampExpandedValue(defaultValue ?: 0)
+                return
+            }
+
+            val expandedValue = when {
+                // 兼容 UI / 旧配置中的“未乘倍率”值，例如 50(分钟)。
+                parsedValue >= 0 && maxLimit != null && parsedValue <= maxLimit -> parsedValue * multiple
+                // 已经是内部存储值（例如 3000000ms）时直接使用。
+                else -> parsedValue
+            }
+
+            value = clampExpandedValue(expandedValue)
         }
 
         /**

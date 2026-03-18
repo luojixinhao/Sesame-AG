@@ -299,7 +299,7 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("执行庄园每日任务获取饲料、道具和抽奖机会。").also { doFarmTask = it })
         modelFields.addField(
-            StringModelField(
+            StringModelField.TimeStringModelField(
                 "doFarmTaskTime",
                 "饲料任务执行时间 | 默认8:30后执行",
                 "0830"
@@ -330,7 +330,7 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("满足条件时连续使用多张加速卡，快速清空库存。").also { useAccelerateToolContinue = it })
         modelFields.addField(
-            IntegerModelField("remainingTime", "饲料剩余时间大于多少时直接使用加速（分钟）（-1关闭）", 40).withDesc(
+            IntegerModelField("remainingTime", "饲料剩余时间大于多少时直接使用加速（分钟）（-1关闭）", 40, -1, 60).withDesc(
                 "饲料剩余时间超过该值时才使用加速卡，-1 为关闭。"
             ).also { remainingTime = it }
         )
@@ -363,7 +363,7 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("IP 或活动抽抽乐按奖励价值从高到低自动兑换。").also { autoExchange = it })
         modelFields.addField(
-            StringModelField(
+            StringModelField.TimeStringModelField(
                 "enableChouchouleTime",
                 "小鸡抽抽乐执行时间 | 默认9:00后执行",
                 "0900"
@@ -394,16 +394,18 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("自动领取庄园游戏中心可开启的宝箱奖励。").also { enableDdrawGameCenterAward = it })
         modelFields.addField(
-            StringModelField(
+            StringModelField.TimeStringModelField(
                 "sleepTime",
                 "小鸡睡觉时间(关闭:-1)",
-                "2330"
+                "2330",
+                true
             ).withDesc("设置自动让小鸡睡觉的时间，填 -1 关闭睡觉定时。").also { sleepTime = it })
         modelFields.addField(
-            StringModelField(
+            StringModelField.TimeStringModelField(
                 "wakeupTime",
                 "小鸡起床时间(关闭:-1)",
-                "0530"
+                "0530",
+                true
             ).withDesc("设置自动让小鸡起床的时间，填 -1 关闭起床定时。").also { wakeUpTime = it })
         modelFields.addField(
             SelectAndCountModelField(
@@ -495,7 +497,7 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("自动遣返来偷吃或做客的小鸡。").also { sendBackAnimal = it })
         modelFields.addField(
-            IntegerModelField("timeSendBack", "投喂饲料后间隔时间赶鸡(分,<10关闭)", 0, 0, null).withDesc(
+            IntegerModelField("timeSendBack", "投喂饲料后间隔时间赶鸡(分,<10关闭)", 0, 0, 12 * 60).withDesc(
                 "投喂后等待多少分钟再赶鸡，避免刚投喂就遣返。"
             ).also { timeSendBack = it }
         )
@@ -1839,7 +1841,7 @@ class AntFarm : ModelTask() {
             if (!cacheHit) {
                 Log.record(TAG, "缓存未命中，尝试使用AI答题：$title")
                 answer = AnswerAI.getAnswer(title, JsonUtil.jsonArrayToList(labels), "farm")
-                if (answer == null || answer.isEmpty()) {
+                if (answer.isNullOrEmpty()) {
                     answer = labels.getString(0) // 默认选择第一个选项
                 }
             }
@@ -2512,9 +2514,7 @@ class AntFarm : ModelTask() {
                     val remainingFood = jo.optInt("foodStock", 0).coerceAtLeast(0)
                     Log.farm("${UserMap.getCurrentMaskName()}投喂小鸡🥣[180g]#剩余饲料${remainingFood}g")
 
-                    val interval = BaseModel.checkInterval.value
-                        ?: BaseModel.checkInterval.defaultValue
-                        ?: 0
+                    val interval = BaseModel.checkInterval.getConfigValue()?.toIntOrNull() ?: 0
                     val timeSendBackValue = timeSendBack?.value ?: 0
                     var timeSendBackAnimal = 0
                     if (timeSendBackValue in 10..interval){
@@ -3624,7 +3624,7 @@ class AntFarm : ModelTask() {
         var hasPreviousMore = false
         try {
             var jo: JSONObject?
-            jo = if (StringUtil.isEmpty(queryMonthStr)) {
+            jo = if (queryMonthStr.isNullOrEmpty()) {
                 JSONObject(AntFarmRpcCall.queryChickenDiaryList())
             } else {
                 JSONObject(AntFarmRpcCall.queryChickenDiaryList(queryMonthStr))
@@ -4713,7 +4713,7 @@ class AntFarm : ModelTask() {
     }
 
     suspend fun family() {
-        if (StringUtil.isEmpty(familyGroupId)) {
+        if (familyGroupId.isNullOrEmpty()) {
             return
         }
         try {

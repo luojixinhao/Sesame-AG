@@ -76,7 +76,7 @@ class AntOrchard : ModelTask() {
         )
 
         modelFields.addField(
-            IntegerModelField("executeInterval", "执行间隔(毫秒)", 500).withDesc(
+            IntegerModelField("executeInterval", "执行间隔(毫秒)", 500, 500, null).withDesc(
                 "单次农场操作之间的等待时间，过小可能增加风控。"
             ).also { executeInterval = it }
         )

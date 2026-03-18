@@ -322,9 +322,7 @@ class WebSettingsActivity : BaseActivity() {
                 )
                 for ((fieldCode, newModelField) in map.entries) {
                     val modelField = modelFields[fieldCode] ?: continue
-                    val configValue = newModelField.configValue as String?
-                    if (configValue.isNullOrBlank()) continue
-                    modelField.setConfigValue(configValue)
+                    modelField.setConfigValue(newModelField.configValue)
                 }
                 return "SUCCESS"
             } catch (e: Exception) {

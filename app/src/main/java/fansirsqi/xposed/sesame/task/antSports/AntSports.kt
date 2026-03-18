@@ -262,7 +262,7 @@ class AntSports : ModelTask() {
                 .also { earliestSyncStepTime = it }
         )
         modelFields.addField(
-            IntegerModelField("latestExchangeTime", "最晚捐步时间(24小时制)", 22).withDesc(
+            IntegerModelField("latestExchangeTime", "最晚捐步时间(24小时制)", 22, 0, 24).withDesc(
                 "旧版捐步兑换的最晚等待时间；超过该时间后即使未达到最小捐步步数也会按当前步数尝试处理。"
             )
                 .also { latestExchangeTime = it }

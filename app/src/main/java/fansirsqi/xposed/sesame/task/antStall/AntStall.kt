@@ -106,7 +106,9 @@ class AntStall : ModelTask() {
                 IntegerModelField(
                     "stallSelfOpenTime",
                     "收摊 | 摆摊时长(分钟)",
-                    120
+                    120,
+                    0,
+                    null
                 ).withDesc("单个摊位摆出多久后自动收摊；需开启“收摊 | 开启”。")
                     .also { stallSelfOpenTime = it })
             addField(
@@ -189,7 +191,9 @@ class AntStall : ModelTask() {
                 IntegerModelField(
                     "stallAllowOpenTime",
                     "请走小摊 | 允许摆摊时长(分钟)",
-                    121
+                    121,
+                    0,
+                    null
                 ).withDesc("好友在你家摆摊超过该时长后会被自动请走；白名单除外。需开启“请走小摊 | 开启”。")
                     .also { stallAllowOpenTime = it })
             addField(

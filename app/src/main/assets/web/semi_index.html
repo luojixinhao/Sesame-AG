@@ -230,6 +230,7 @@
 
             const [tabs, setTabs] = useState([]);
             const [modelsMap, setModelsMap] = useState({});
+            const [draftValues, setDraftValues] = useState({});
             const panelRefs = useRef({});
 
             // 列表弹窗相关的 State
@@ -251,24 +252,70 @@
                 setModelsMap(initialMap);
             }, []);
 
-            const handleFieldChange = (modelCode, fieldCode, newValue) => {
+            const getDraftKey = (modelCode, fieldCode) => `${modelCode}::${fieldCode}`;
+
+            const clearDraftValue = (modelCode, fieldCode) => {
+                const draftKey = getDraftKey(modelCode, fieldCode);
+                setDraftValues(prev => {
+                    if (!Object.prototype.hasOwnProperty.call(prev, draftKey)) {
+                        return prev;
+                    }
+                    const next = { ...prev };
+                    delete next[draftKey];
+                    return next;
+                });
+            };
+
+            const commitFieldChange = (modelCode, fieldCode, newValue) => {
+                const serializedValue = newValue == null ? '' : String(newValue);
                 setModelsMap(prev => {
-                    let currentFields = [...prev[modelCode]];
+                    let currentFields = [...(prev[modelCode] || [])];
                     const fieldIndex = currentFields.findIndex(f => f.code === fieldCode);
                     if (fieldIndex > -1) {
-                        currentFields[fieldIndex] = { ...currentFields[fieldIndex], configValue: String(newValue) };
+                        currentFields[fieldIndex] = { ...currentFields[fieldIndex], configValue: serializedValue };
                     }
-                    const savePayload = {};
-                    currentFields.forEach(f => { savePayload[f.code] = { configValue: f.configValue }; });
-                    if (window.HOOK && window.HOOK.setModel) {
+
+                    let committed = false;
+                    if (window.HOOK && window.HOOK.setField) {
+                        try {
+                            committed = window.HOOK.setField(modelCode, fieldCode, serializedValue) === 'SUCCESS';
+                        } catch (e) {
+                            committed = false;
+                        }
+                    }
+
+                    if (!committed && window.HOOK && window.HOOK.setModel) {
+                        const savePayload = {};
+                        currentFields.forEach(f => { savePayload[f.code] = { configValue: f.configValue }; });
                         window.HOOK.setModel(modelCode, JSON.stringify(savePayload));
+                    }
+
+                    if ((window.HOOK && window.HOOK.setField) || (window.HOOK && window.HOOK.setModel)) {
                         const refreshedFields = getModelData(modelCode);
                         if (Array.isArray(refreshedFields) && refreshedFields.length > 0) {
                             currentFields = refreshedFields;
                         }
                     }
+
                     return { ...prev, [modelCode]: currentFields };
                 });
+            };
+
+            const handleInputDraftChange = (modelCode, fieldCode, newValue) => {
+                const draftKey = getDraftKey(modelCode, fieldCode);
+                setDraftValues(prev => ({ ...prev, [draftKey]: newValue ?? '' }));
+            };
+
+            const commitInputDraft = (modelCode, fieldCode, fallbackValue = '') => {
+                const draftKey = getDraftKey(modelCode, fieldCode);
+                const hasDraft = Object.prototype.hasOwnProperty.call(draftValues, draftKey);
+                const draftValue = hasDraft ? draftValues[draftKey] : fallbackValue;
+                if (String(draftValue ?? '') === String(fallbackValue ?? '')) {
+                    clearDraftValue(modelCode, fieldCode);
+                    return;
+                }
+                commitFieldChange(modelCode, fieldCode, draftValue ?? '');
+                clearDraftValue(modelCode, fieldCode);
             };
 
             // --- 列表弹窗逻辑 (关键修改部分) ---
@@ -328,7 +375,7 @@
                     });
                     newValueStr = JSON.stringify(obj);
                 }
-                handleFieldChange(modelCode, fieldCode, newValueStr);
+                commitFieldChange(modelCode, fieldCode, newValueStr);
                 setSheetVisible(false);
                 Toast.success("已保存列表设置");
             };
@@ -425,17 +472,36 @@
                         <div className={rowClassName} key={code}>
                             {renderFieldLabel(name, desc, todayInactive, todayInactiveReason)}
                             <div className="field-control">
-                                <Switch checked={configValue === 'true'} onChange={(v) => handleFieldChange(modelCode, code, v)} />
+                                <Switch checked={configValue === 'true'} onChange={(v) => commitFieldChange(modelCode, code, v)} />
                             </div>
                         </div>
                     );
                 }
                 if (['MULTIPLY_INTEGER', 'LIST', 'INTEGER', 'STRING', 'TEXT'].includes(type)) {
+                    const draftKey = getDraftKey(modelCode, code);
+                    const inputValue = Object.prototype.hasOwnProperty.call(draftValues, draftKey)
+                        ? draftValues[draftKey]
+                        : configValue;
                     return (
                         <div className={rowClassName} key={code}>
                             {renderFieldLabel(name, desc, todayInactive, todayInactiveReason)}
                             <div className="field-control" style={{ width: '50%' }}>
-                                <Input value={configValue} onChange={(v) => handleFieldChange(modelCode, code, v)} placeholder="请输入..." />
+                                <Input
+                                    value={inputValue}
+                                    onChange={(v) => handleInputDraftChange(modelCode, code, v)}
+                                    onBlur={() => commitInputDraft(modelCode, code, configValue)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            if (e.currentTarget && typeof e.currentTarget.blur === 'function') {
+                                                e.currentTarget.blur();
+                                            } else {
+                                                commitInputDraft(modelCode, code, configValue);
+                                            }
+                                        }
+                                    }}
+                                    placeholder="请输入..."
+                                />
                             </div>
                         </div>
                     );
@@ -455,7 +521,7 @@
                         <div className={choiceRowClassName} key={code}>
                             {renderFieldLabel(name, desc, todayInactive, todayInactiveReason)}
                             <div style={{ marginTop: '0.5rem' }}>
-                                <RadioGroup type="button" value={Number(configValue)} onChange={(e) => handleFieldChange(modelCode, code, e.target.value)}>
+                                <RadioGroup type="button" value={Number(configValue)} onChange={(e) => commitFieldChange(modelCode, code, e.target.value)}>
                                     {expandKey && expandKey.map((label, idx) => (<Radio value={idx} key={idx}>{label}</Radio>))}
                                 </RadioGroup>
                             </div>
