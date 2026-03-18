@@ -4,10 +4,12 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageInfo
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -347,10 +349,24 @@ class ApplicationHook {
                             }
 
                             val resumeAt = System.currentTimeMillis()
+                            val resumedFromBackground = consumeHostAppBackgrounded()
+                            val moduleInitiatedResume =
+                                isPendingModuleForegroundResume(resumeAt) ||
+                                    (lastReOpenAppLaunchAtMs > 0L &&
+                                        (resumeAt - lastReOpenAppLaunchAtMs) in 0..AUTH_LIKE_AUTO_RECOVER_GUARD_MS)
+                            if (moduleInitiatedResume) {
+                                pendingModuleForegroundResume = false
+                            }
                             val recentlyReopenedByModule =
                                 lastReOpenAppLaunchAtMs > 0L &&
                                     (resumeAt - lastReOpenAppLaunchAtMs) in 0..AUTH_LIKE_AUTO_RECOVER_GUARD_MS
-                            if (!recentlyReopenedByModule && !recoveredFromOffline && manualTriggerAutoSchedule.value == true) {
+                            if (
+                                resumedFromBackground &&
+                                !moduleInitiatedResume &&
+                                !recentlyReopenedByModule &&
+                                !recoveredFromOffline &&
+                                manualTriggerAutoSchedule.value == true
+                            ) {
                                 record(TAG, "检测到手动回到目标应用，补触发一次任务执行")
                                 ApplicationHookCore.requestExecution(
                                     ApplicationHookConstants.TriggerInfo(
@@ -558,7 +574,13 @@ class ApplicationHook {
                             record(TAG, "忽略非当前用户的重启广播: target=$targetUserId, current=$currentUserId")
                             return@submitEntry
                         }
-                        initHandler("broadcast_restart")
+                        val restartReason =
+                            if (safeIntent.getBooleanExtra("configReload", false)) {
+                                "config_reload"
+                            } else {
+                                "broadcast_restart"
+                            }
+                        initHandler(restartReason)
                     }
                 }
 
@@ -746,6 +768,12 @@ class ApplicationHook {
         private var rootCheckInProgress = false
 
         @Volatile
+        private var hostAppWentBackground = false
+
+        @Volatile
+        private var pendingModuleForegroundResume = false
+
+        @Volatile
         var dayCalendar: Calendar?
 
         @Volatile
@@ -769,6 +797,25 @@ class ApplicationHook {
             return init && Config.isLoaded() && service != null && WorkflowRootGuard.hasGrantedRoot()
         }
 
+        private fun consumeHostAppBackgrounded(): Boolean {
+            val wasBackgrounded = hostAppWentBackground
+            hostAppWentBackground = false
+            return wasBackgrounded
+        }
+
+        private fun isPendingModuleForegroundResume(now: Long): Boolean {
+            if (!pendingModuleForegroundResume) {
+                return false
+            }
+            val lastLaunchAt = lastReOpenAppLaunchAtMs
+            val delta = now - lastLaunchAt
+            if (lastLaunchAt <= 0L || delta < 0L || delta > MODULE_FOREGROUND_RESUME_GUARD_MS) {
+                pendingModuleForegroundResume = false
+                return false
+            }
+            return true
+        }
+
         @Volatile
         var rpcBridge: RpcBridge? = null
         private val rpcBridgeLock = Any()
@@ -782,6 +829,7 @@ class ApplicationHook {
         private var lastReOpenAppLaunchAtMs: Long = 0L
 
         private const val AUTH_LIKE_AUTO_RECOVER_GUARD_MS: Long = 1500L
+        private const val MODULE_FOREGROUND_RESUME_GUARD_MS: Long = 15_000L
 
         private const val AUTH_LIKE_AUTO_RECOVER_GUARD_IGNORE_REOPEN_COUNT: Int = 1
 
@@ -799,6 +847,21 @@ class ApplicationHook {
 
         // Deoptimize 方法缓存
         private val deoptimizeMethod: Method?
+
+        private val appVisibilityCallbacks = object : ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+                    hostAppWentBackground = true
+                }
+            }
+
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+            override fun onLowMemory() = Unit
+        }
+
+        @Volatile
+        private var appVisibilityCallbacksRegistered = false
 
         init {
             dayCalendar = Calendar.getInstance()
@@ -933,6 +996,9 @@ class ApplicationHook {
                 try {
                     registerBroadcastReceiver(appContext!!)
                 } catch (_: Throwable) { /* ignore */ }
+                try {
+                    registerAppVisibilityCallbacks(appContext!!)
+                } catch (_: Throwable) { /* ignore */ }
 
                 ensureScheduler()
                 Model.initAllModel()
@@ -1035,6 +1101,8 @@ class ApplicationHook {
                 pendingInit = false
                 pendingInitReason = null
                 rootCheckInProgress = false
+                hostAppWentBackground = false
+                pendingModuleForegroundResume = false
                 lastExecTime = 0
                 try {
                     fansirsqi.xposed.sesame.util.DataStore.shutdown()
@@ -1057,6 +1125,7 @@ class ApplicationHook {
 
                 // 注销广播接收器
                 unregisterBroadcastReceiver(appContext)
+                unregisterAppVisibilityCallbacks(appContext)
 
                 synchronized(rpcBridgeLock) {
                     if (rpcBridge != null) {
@@ -1168,6 +1237,7 @@ class ApplicationHook {
             schedule(20000L, "重新登录") {
                 try {
                     lastReOpenAppLaunchAtMs = System.currentTimeMillis()
+                    pendingModuleForegroundResume = true
                     val intent = Intent(Intent.ACTION_VIEW)
                     intent.setClassName(General.PACKAGE_NAME, General.CURRENT_USING_ACTIVITY)
                     intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -1250,6 +1320,18 @@ class ApplicationHook {
             }
         }
 
+        fun registerAppVisibilityCallbacks(context: Context) {
+            if (appVisibilityCallbacksRegistered) return
+            try {
+                context.registerComponentCallbacks(appVisibilityCallbacks)
+                hostAppWentBackground = false
+                appVisibilityCallbacksRegistered = true
+            } catch (th: Throwable) {
+                appVisibilityCallbacksRegistered = false
+                printStackTrace(TAG, "Register app visibility callbacks failed", th)
+            }
+        }
+
         fun unregisterBroadcastReceiver(context: Context?) {
             if (mBroadcastReceiver == null || context == null) return
             try {
@@ -1259,6 +1341,18 @@ class ApplicationHook {
                 // ignore: receiver not registered
             } finally {
                 mBroadcastReceiver = null
+            }
+        }
+
+        fun unregisterAppVisibilityCallbacks(context: Context?) {
+            if (!appVisibilityCallbacksRegistered || context == null) return
+            try {
+                context.unregisterComponentCallbacks(appVisibilityCallbacks)
+            } catch (_: Throwable) {
+                // ignore: callbacks not registered
+            } finally {
+                appVisibilityCallbacksRegistered = false
+                hostAppWentBackground = false
             }
         }
     }

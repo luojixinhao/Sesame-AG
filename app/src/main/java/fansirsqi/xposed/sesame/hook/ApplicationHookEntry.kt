@@ -3,6 +3,9 @@ package fansirsqi.xposed.sesame.hook
 object ApplicationHookEntry {
 
     fun onInitCompleted(reason: String) {
+        if (reason == "broadcast_restart" || reason == "config_reload") {
+            return
+        }
         val type = when (reason) {
             "onResume", "user_switch" -> ApplicationHookConstants.TriggerType.ON_RESUME
             else -> ApplicationHookConstants.TriggerType.INIT

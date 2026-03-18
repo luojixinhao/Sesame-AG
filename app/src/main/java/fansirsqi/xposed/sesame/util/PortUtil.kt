@@ -25,7 +25,7 @@ object PortUtil {
             return
         }
         try {
-            val configV2File = if (StringUtil.isEmpty(userId)) {
+            val configV2File = if (userId.isNullOrEmpty()) {
                 Files.getDefaultConfigV2File()
             } else {
                 Files.getConfigV2File(userId!!)
@@ -66,7 +66,7 @@ object PortUtil {
                 return
             }
 
-            val configV2File = if (StringUtil.isEmpty(userId)) {
+            val configV2File = if (userId.isNullOrEmpty()) {
                 Files.getDefaultConfigV2File()
             } else {
                 Files.getConfigV2File(userId!!)
@@ -77,10 +77,11 @@ object PortUtil {
                 outputStream.use { output ->
                     if (Files.streamTo(input, output)) {
                         ToastUtil.makeText("导入成功！", Toast.LENGTH_SHORT).show()
-                        if (!StringUtil.isEmpty(userId)) {
+                        if (!userId.isNullOrEmpty()) {
                             try {
                                 val intent = Intent("com.eg.android.AlipayGphone.sesame.restart")
                                 intent.putExtra("userId", userId)
+                                intent.putExtra("configReload", true)
                                 context.sendBroadcast(intent)
                             } catch (th: Throwable) {
                                 Log.printStackTrace(th)
@@ -109,13 +110,14 @@ object PortUtil {
         try {
             if (Config.isModify(userId) && Config.save(userId, false)) {
                 ToastUtil.showToastWithDelay("保存成功！", 100)
-                if (!StringUtil.isEmpty(userId)) {
+                if (!userId.isNullOrEmpty()) {
                     val intent = Intent("com.eg.android.AlipayGphone.sesame.restart")
                     intent.putExtra("userId", userId)
+                    intent.putExtra("configReload", true)
                     context.sendBroadcast(intent)
                 }
             }
-            if (!StringUtil.isEmpty(userId)) {
+            if (!userId.isNullOrEmpty()) {
                 UserMap.save(userId)
                 IdMapManager.getInstance(CooperateMap::class.java).save(userId)
             }
