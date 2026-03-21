@@ -120,8 +120,9 @@ class ApplicationHook {
     // --- 入口方法 ---
     fun loadPackage(lpparam: PackageLoadedParam) {
         if (General.PACKAGE_NAME != lpparam.packageName) return
-        val packageClassLoader = extractPackageClassLoader(lpparam) ?: run {
-            record(TAG, "跳过 onPackageLoaded：当前回调未提供可用的 app classloader")
+        val packageClassLoader = extractLegacyPackageClassLoader(lpparam) ?: run {
+            val defaultClassLoaderName = extractDefaultPackageClassLoader(lpparam)?.javaClass?.name ?: "null"
+            record(TAG, "跳过 onPackageLoaded：当前回调仅提供 defaultClassLoader=$defaultClassLoaderName，等待 onPackageReady")
             return
         }
         handleHookLogic(
@@ -181,7 +182,7 @@ class ApplicationHook {
         }
     }
 
-    private fun extractPackageClassLoader(param: PackageLoadedParam): ClassLoader? {
+    private fun extractDefaultPackageClassLoader(param: PackageLoadedParam): ClassLoader? {
         return runCatching {
             param.defaultClassLoader
         }.getOrNull()
@@ -190,9 +191,17 @@ class ApplicationHook {
                     .firstOrNull { it.name == "getDefaultClassLoader" && it.parameterCount == 0 }
                     ?.invoke(param) as? ClassLoader
             }.getOrNull()
+    }
+
+    private fun extractLegacyPackageClassLoader(param: PackageLoadedParam): ClassLoader? {
+        return runCatching {
+            param.javaClass.methods
+                .firstOrNull { it.name == "getClassLoader" && it.parameterCount == 0 }
+                ?.invoke(param) as? ClassLoader
+        }.getOrNull()
             ?: runCatching {
                 param.javaClass.methods
-                    .firstOrNull { it.name == "getClassLoader" && it.parameterCount == 0 }
+                    .firstOrNull { it.name == "getAppClassLoader" && it.parameterCount == 0 }
                     ?.invoke(param) as? ClassLoader
             }.getOrNull()
     }

@@ -14,6 +14,7 @@ import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 class HookEntry() : XposedModule() {
     private val tag = "LsposedEntry"
     private var processName = ""
+    private var runtimeApiVersion = 100
     private var initialized = false
     private val customHooker = ApplicationHook()
 
@@ -29,12 +30,22 @@ class HookEntry() : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         try {
             if (!shouldHandlePackage(param.packageName)) return
-            val packageClassLoader = extractPackageClassLoader(param)
-            if (packageClassLoader == null) {
-                logInfo("onPackageLoaded ${param.packageName} did not expose a usable default classloader, waiting for onPackageReady")
+            if (runtimeApiVersion >= 101) {
+                val defaultClassLoaderName = extractDefaultPackageClassLoader(param)?.javaClass?.name ?: "null"
+                logInfo(
+                    "onPackageLoaded ${param.packageName} observed runtimeApiVersion=$runtimeApiVersion with defaultClassLoader=$defaultClassLoaderName, waiting for onPackageReady"
+                )
                 return
             }
-            prepareEnv(param.packageName, param.applicationInfo, packageClassLoader)
+            val legacyClassLoader = extractLegacyPackageClassLoader(param)
+            if (legacyClassLoader == null) {
+                val defaultClassLoaderName = extractDefaultPackageClassLoader(param)?.javaClass?.name ?: "null"
+                logInfo(
+                    "onPackageLoaded ${param.packageName} only exposed defaultClassLoader=$defaultClassLoaderName, waiting for onPackageReady"
+                )
+                return
+            }
+            prepareEnv(param.packageName, param.applicationInfo, legacyClassLoader)
             customHooker.loadPackage(param)
             logInfo("Hooking ${param.packageName} in process $processName via onPackageLoaded")
         } catch (e: Throwable) {
@@ -58,6 +69,7 @@ class HookEntry() : XposedModule() {
         initialized = true
         this.processName = processName
         customHooker.xposedInterface = base
+        runtimeApiVersion = resolveRuntimeApiVersion(base)
 
         logInfo("Initialized for process $processName", base)
 
@@ -66,7 +78,7 @@ class HookEntry() : XposedModule() {
         val frameworkVersionCode = runCatching { base.frameworkVersionCode }.getOrDefault(-1L)
         val moduleProcess = resolveModuleProcessName(base) ?: "unknown"
         logInfo(
-            "Framework from base: $frameworkName $frameworkVersion $frameworkVersionCode target_model_process: $moduleProcess",
+            "Framework from base: $frameworkName $frameworkVersion $frameworkVersionCode api=$runtimeApiVersion target_model_process: $moduleProcess",
             base
         )
     }
@@ -82,7 +94,7 @@ class HookEntry() : XposedModule() {
         return General.PACKAGE_NAME == packageName
     }
 
-    private fun extractPackageClassLoader(param: PackageLoadedParam): ClassLoader? {
+    private fun extractDefaultPackageClassLoader(param: PackageLoadedParam): ClassLoader? {
         return runCatching {
             param.defaultClassLoader
         }.getOrNull()
@@ -91,9 +103,17 @@ class HookEntry() : XposedModule() {
                     .firstOrNull { it.name == "getDefaultClassLoader" && it.parameterCount == 0 }
                     ?.invoke(param) as? ClassLoader
             }.getOrNull()
+    }
+
+    private fun extractLegacyPackageClassLoader(param: PackageLoadedParam): ClassLoader? {
+        return runCatching {
+            param.javaClass.methods
+                .firstOrNull { it.name == "getClassLoader" && it.parameterCount == 0 }
+                ?.invoke(param) as? ClassLoader
+        }.getOrNull()
             ?: runCatching {
                 param.javaClass.methods
-                    .firstOrNull { it.name == "getClassLoader" && it.parameterCount == 0 }
+                    .firstOrNull { it.name == "getAppClassLoader" && it.parameterCount == 0 }
                     ?.invoke(param) as? ClassLoader
             }.getOrNull()
     }
@@ -105,6 +125,15 @@ class HookEntry() : XposedModule() {
                     .firstOrNull { it.name == "getApplicationInfo" && it.parameterCount == 0 }
                     ?.invoke(base) as? ApplicationInfo
             }.getOrNull()?.processName
+    }
+
+    private fun resolveRuntimeApiVersion(base: XposedInterface): Int {
+        return runCatching {
+            base.javaClass.methods
+                .firstOrNull { it.name == "getApiVersion" && it.parameterCount == 0 }
+                ?.invoke(base) as? Int
+        }.getOrNull()
+            ?: runCatching { XposedInterface::class.java.getDeclaredField("API").getInt(null) }.getOrDefault(100)
     }
 
     private fun logInfo(message: String, base: XposedInterface? = null) {
