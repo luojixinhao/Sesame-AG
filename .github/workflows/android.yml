@@ -1,21 +1,45 @@
 name: Release Build
-run-name: Release Build - ${{ github.event.release.tag_name || github.ref_name }}
+run-name: Release Build - ${{ github.ref_name }}
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "[0-9]*-*"
+
+env:
+  CI: "true"
+  JAVA_DISTRIBUTION: "oracle"
+  JAVA_VERSION: "17.0.1"
+  ANDROID_API_LEVEL: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  LOCAL_GRADLE_VERSION: "9.4.0-milestone-3"
+  LOCAL_AGP_VERSION: "9.0.1"
+  LOCAL_KOTLIN_VERSION: "2.3.0"
+  RELEASE_DIR: app/build/outputs/apk/release
+  STAGING_DIR: app/build/outputs/apk/all
+  ASSET_DIR: app/build/outputs/apk/release-assets
+  RELEASE_TAG_RAW: ${{ github.ref_name }}
+  TARGET_SOURCE_BRANCH: dev
+  TARGET_MODULE_REPO: Xposed-Modules-Repo/io.github.aoguai.sesameag
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  build:
+  preflight:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-    env:
-      CI: "true"
-      RELEASE_DIR: app/build/outputs/apk/release
-      STAGING_DIR: app/build/outputs/apk/all
-      ASSET_DIR: app/build/outputs/apk/release-assets
-      RELEASE_TAG_RAW: ${{ github.event.release.tag_name || github.ref_name }}
+      contents: read
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+      reason: ${{ steps.check.outputs.reason }}
+      tag_valid: ${{ steps.meta.outputs.tag_valid }}
+      tag_version_code: ${{ steps.meta.outputs.tag_version_code }}
+      configured_version_name: ${{ steps.meta.outputs.configured_version_name }}
+      version_name: ${{ steps.meta.outputs.version_name }}
+      version_code: ${{ steps.meta.outputs.version_code }}
+      xposed_tag: ${{ steps.meta.outputs.xposed_tag }}
 
     steps:
       - name: Set Timezone to Asia/Shanghai
@@ -29,26 +53,199 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ github.ref }}
 
-      - name: Normalize Version
-        id: version
+      - name: Validate Project Toolchain Baseline
         shell: bash
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG_RAW#v}"
-          if [[ -z "${version}" ]]; then
-            echo "Release tag is empty after normalization" >&2
+
+          grep -Eq '^distributionUrl=.*gradle-'"${LOCAL_GRADLE_VERSION//./\\.}"'-bin\.zip$' gradle/wrapper/gradle-wrapper.properties
+          grep -Eq '^android-plugin = "'"${LOCAL_AGP_VERSION//./\\.}"'"$' gradle/libs.versions.toml
+          grep -Eq '^kotlin = "'"${LOCAL_KOTLIN_VERSION//./\\.}"'"$' gradle/libs.versions.toml
+          grep -Eq '^appVersion=.+' gradle.properties
+          grep -Eq 'compileSdk = '"${ANDROID_API_LEVEL}"'$' app/build.gradle.kts
+          grep -Eq 'sourceCompatibility = JavaVersion.VERSION_17' app/build.gradle.kts
+          grep -Eq 'targetCompatibility = JavaVersion.VERSION_17' app/build.gradle.kts
+
+      - name: Resolve Release Metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_valid="false"
+          tag_version_code=""
+          configured_version_name=""
+          version_name=""
+
+          if [[ "${RELEASE_TAG_RAW}" =~ ^([0-9]+)-(.+)$ ]]; then
+            tag_valid="true"
+            tag_version_code="${BASH_REMATCH[1]}"
+            version_name="${BASH_REMATCH[2]}"
+          fi
+
+          configured_version_name="$(sed -n 's/^appVersion=//p' gradle.properties | head -n1 | tr -d '\r')"
+          if [[ -z "${configured_version_name}" ]]; then
+            echo "Failed to resolve appVersion from gradle.properties" >&2
             exit 1
           fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+          version_code="$(git rev-list --count HEAD | tr -d '\n')"
+          if [[ -z "${version_code}" ]]; then
+            echo "Failed to resolve versionCode from git history" >&2
+            exit 1
+          fi
+
+          xposed_tag="${RELEASE_TAG_RAW}"
+          echo "tag_valid=${tag_valid}" >> "$GITHUB_OUTPUT"
+          echo "tag_version_code=${tag_version_code}" >> "$GITHUB_OUTPUT"
+          echo "configured_version_name=${configured_version_name}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${version_name}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${version_code}" >> "$GITHUB_OUTPUT"
+          echo "xposed_tag=${xposed_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Check Signing And Target Repository
+        id: check
+        shell: bash
+        env:
+          TAG_VALID: ${{ steps.meta.outputs.tag_valid }}
+          TAG_VERSION_CODE: ${{ steps.meta.outputs.tag_version_code }}
+          CONFIGURED_VERSION_NAME: ${{ steps.meta.outputs.configured_version_name }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          XPOSED_TAG: ${{ steps.meta.outputs.xposed_tag }}
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin "refs/heads/${TARGET_SOURCE_BRANCH}:refs/remotes/origin/${TARGET_SOURCE_BRANCH}" --force
+
+          missing=()
+          [[ -n "${ANDROID_SIGNING_KEY}" ]] || missing+=("ANDROID_SIGNING_KEY")
+          [[ -n "${ANDROID_KEY_ALIAS}" ]] || missing+=("ANDROID_KEY_ALIAS")
+          [[ -n "${ANDROID_KEYSTORE_PASSWORD}" ]] || missing+=("ANDROID_KEYSTORE_PASSWORD")
+          [[ -n "${ANDROID_KEY_PASSWORD}" ]] || missing+=("ANDROID_KEY_PASSWORD")
+          [[ -n "${TARGET_REPO_PAT}" ]] || missing+=("TARGET_REPO_PAT")
+
+          ready="false"
+          reason=""
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            reason="缺少必要 Secrets: ${missing[*]}"
+          elif [[ "${TAG_VALID}" != "true" ]]; then
+            reason="标签 ${RELEASE_TAG_RAW} 不符合 Xposed 要求的 VersionCode-VersionName 格式"
+          elif [[ "${VERSION_NAME}" != "${CONFIGURED_VERSION_NAME}" ]]; then
+            reason="标签中的 versionName (${VERSION_NAME}) 与 gradle.properties 中配置的 appVersion (${CONFIGURED_VERSION_NAME}) 不一致"
+          elif [[ "${TAG_VERSION_CODE}" != "${VERSION_CODE}" ]]; then
+            reason="标签中的 versionCode (${TAG_VERSION_CODE}) 与当前提交计算得到的 versionCode (${VERSION_CODE}) 不一致"
+          elif ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/${TARGET_SOURCE_BRANCH}"; then
+            reason="标签 ${RELEASE_TAG_RAW} 指向的提交不在 ${TARGET_SOURCE_BRANCH} 分支上"
+          else
+            api_url="https://api.github.com/repos/${TARGET_MODULE_REPO}"
+            if http_code="$(curl -sS -o target_repo.json -w "%{http_code}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${TARGET_REPO_PAT}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${api_url}")"; then
+              case "${http_code}" in
+                200)
+                  ready="true"
+                  reason="预检通过，将发布到 ${TARGET_MODULE_REPO}"
+                  ;;
+                401|403)
+                  reason="TARGET_REPO_PAT 无法访问 ${TARGET_MODULE_REPO} (HTTP ${http_code})"
+                  ;;
+                404)
+                  reason="目标 Xposed 模块仓库不存在: ${TARGET_MODULE_REPO}"
+                  ;;
+                *)
+                  reason="无法确认目标 Xposed 模块仓库状态: ${TARGET_MODULE_REPO} (HTTP ${http_code})"
+                  ;;
+              esac
+            else
+              reason="检查目标 Xposed 模块仓库失败，请稍后重试"
+            fi
+
+            rm -f target_repo.json
+          fi
+
+          echo "ready=${ready}" >> "$GITHUB_OUTPUT"
+          {
+            echo "reason<<EOF"
+            printf '%s\n' "${reason}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release Preflight"
+            echo
+            echo "- 触发事件: \`push(tag)\`"
+            echo "- 源仓库标签: \`${RELEASE_TAG_RAW}\`"
+            echo "- 校验分支: \`${TARGET_SOURCE_BRANCH}\`"
+            echo "- 标签格式有效: \`${TAG_VALID}\`"
+            echo "- 标签中的版本号: \`${TAG_VERSION_CODE}\`"
+            echo "- 配置中的版本名: \`${CONFIGURED_VERSION_NAME}\`"
+            echo "- 版本名称: \`${VERSION_NAME}\`"
+            echo "- 版本号: \`${VERSION_CODE}\`"
+            echo "- 模块仓库标签: \`${XPOSED_TAG}\`"
+            echo "- 目标仓库: \`${TARGET_MODULE_REPO}\`"
+            echo "- 检查结果: ${reason}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Set Timezone to Asia/Shanghai
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo timedatectl set-timezone Asia/Shanghai
+          echo "Current time: $(date)"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
-          java-version: "17"
-          distribution: "zulu"
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+          architecture: x64
+          check-latest: false
           cache: gradle
+
+      - name: Pin Gradle Java Home
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ORG_GRADLE_JAVA_HOME=${JAVA_HOME}" >> "$GITHUB_ENV"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Required Android SDK Packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API_LEVEL}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}"
+          yes | sdkmanager --licenses >/dev/null
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -59,11 +256,23 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Print Toolchain Versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=${JAVA_HOME}"
+          echo "ORG_GRADLE_JAVA_HOME=${ORG_GRADLE_JAVA_HOME}"
+          echo "ANDROID_HOME=${ANDROID_HOME:-}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+          java -version
+          sdkmanager --version
+          ./gradlew --version
+
       - name: Build Release APKs
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon assembleRelease -PappVersion="${{ steps.version.outputs.version }}"
+          ./gradlew --no-daemon --stacktrace assembleRelease
 
       - name: Stage Unsigned APKs
         shell: bash
@@ -89,7 +298,7 @@ jobs:
           keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}
           keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          buildToolsVersion: 36.0.0
+          buildToolsVersion: ${{ env.ANDROID_BUILD_TOOLS }}
 
       - name: Prepare Release Assets
         id: prepare_assets
@@ -114,60 +323,77 @@ jobs:
           fi
           echo "asset_dir=${ASSET_DIR}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Release Assets Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-assets-${{ steps.version.outputs.version }}
-          path: ${{ steps.prepare_assets.outputs.asset_dir }}/*
-          if-no-files-found: error
+      - name: Generate Release Notes
+        id: release_notes
+        shell: bash
+        env:
+          XPOSED_TAG: ${{ needs.preflight.outputs.xposed_tag }}
+        run: |
+          set -euo pipefail
 
-      - name: Upload Assets to Source Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ env.RELEASE_TAG_RAW }}
-          files: |
-            ${{ steps.prepare_assets.outputs.asset_dir }}/*
-          tag_name: ${{ env.RELEASE_TAG_RAW }}
-          draft: false
-          append_body: true
-          make_latest: true
-          generate_release_notes: false
-          body: |
-            > [!Important]
-            >
-            > ## 模块的蓬勃生机离不开社区与群组,感谢各位的贡献
+          body_path="${RUNNER_TEMP}/xposed-release-body.md"
+          tag_object_type="$(git cat-file -t "${GITHUB_REF}" 2>/dev/null || true)"
+          notes=""
 
-            > [!NOTE]
-            > 项目仓库：https://github.com/${{ github.repository }}
+          if [[ "${tag_object_type}" == "tag" ]]; then
+            notes="$(git for-each-ref "${GITHUB_REF}" --format='%(contents)')"
+          fi
 
-            > ## 下载说明
-            <b>- arm64-v8a:</b> 适用于64位ARM设备 (主流新手机)
-            <b>- armeabi-v7a:</b> 适用于32位ARM设备 (旧款手机)
-            <b>- x86 / x86_64:</b> 主要用于PC上的安卓模拟器
-            <b>- universal:</b> 通用版 (不确定时使用，体积较大)
-            >
-            > **如果不确定，请下载 `universal` 版本。**
+          if [[ -z "${notes//[[:space:]]/}" ]]; then
+            notes="$(git log -1 --format='%s%n%n%b' "${GITHUB_SHA}")"
+          fi
+
+          {
+            echo "内容同步自源仓库 [Sesame-AG](https://github.com/${{ github.repository }})"
+            echo
+            echo "源仓库标签：\`${RELEASE_TAG_RAW}\`"
+            echo "模块仓库标签：\`${XPOSED_TAG}\`"
+            echo "源分支：\`${TARGET_SOURCE_BRANCH}\`"
+            echo
+            echo "${notes}"
+            echo
+            echo "> ## 下载说明"
+            echo "<b>- arm64-v8a:</b> 适用于64位 ARM 设备 (主流新手机)"
+            echo "<b>- armeabi-v7a:</b> 适用于32位 ARM 设备 (旧款手机)"
+            echo "<b>- x86 / x86_64:</b> 主要用于 PC 上的安卓模拟器"
+            echo "<b>- universal:</b> 通用版 (不确定时使用，体积较大)"
+            echo ">"
+            echo "> **如果不确定，请下载 \`universal\` 版本。**"
+          } > "${body_path}"
+
+          echo "body_path=${body_path}" >> "$GITHUB_OUTPUT"
 
       - name: Sync Release to Target Repository
         uses: softprops/action-gh-release@v2
         with:
-          repository: Xposed-Modules-Repo/io.github.aoguai.sesameag
-          name: ${{ env.RELEASE_TAG_RAW }}
+          repository: ${{ env.TARGET_MODULE_REPO }}
+          name: ${{ needs.preflight.outputs.version_name }}
           files: |
             ${{ steps.prepare_assets.outputs.asset_dir }}/*
           token: ${{ secrets.TARGET_REPO_PAT }}
-          tag_name: ${{ env.RELEASE_TAG_RAW }}
+          tag_name: ${{ needs.preflight.outputs.xposed_tag }}
           draft: false
+          prerelease: false
           make_latest: true
-          body: |
-            内容同步自源仓库 [Sesame-AG](https://github.com/${{ github.repository }})
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+          body_path: ${{ steps.release_notes.outputs.body_path }}
 
-            ${{ github.event.release.body }}
+  skip:
+    needs: preflight
+    if: needs.preflight.outputs.ready != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
-            > ## 下载说明
-            <b>- arm64-v8a:</b> 适用于64位ARM设备 (主流新手机)
-            <b>- armeabi-v7a:</b> 适用于32位ARM设备 (旧款手机)
-            <b>- x86 / x86_64:</b> 主要用于PC上的安卓模拟器
-            <b>- universal:</b> 通用版 (不确定时使用，体积较大)
-            >
-            > **如果不确定，请下载 `universal` 版本。**
+    steps:
+      - name: Report Skip Reason
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Release workflow skipped: ${{ needs.preflight.outputs.reason }}"
+          {
+            echo "## Release Skipped"
+            echo
+            echo "- 原因: ${{ needs.preflight.outputs.reason }}"
+          } >> "$GITHUB_STEP_SUMMARY"
