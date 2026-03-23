@@ -62,3 +62,11 @@
 - [LEGAL.md](LEGAL.md)：许可、附加限制、风险提示与免责声明。
 - [CONTRIBUTING.md](CONTRIBUTING.md)：Issue / PR 规则与协作边界。
 
+---
+
+## 贡献者
+
+感谢所有为 `Sesame-AG` 提交代码、修复问题、补全文档与改进协作流程的贡献者。
+
+[![贡献者头像墙](https://contrib.rocks/image?repo=aoguai/Sesame-AG&max=200)](https://github.com/aoguai/Sesame-AG/graphs/contributors)
+
