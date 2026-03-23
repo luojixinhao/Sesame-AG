@@ -1032,7 +1032,7 @@ class ApplicationHook {
                 load(userId)
                 updateDay()
 
-                val successMsg = "Loaded SesameTk " + BuildConfig.VERSION_NAME + "✨"
+                val successMsg = "Loaded SesameAG " + BuildConfig.VERSION_NAME + "✨"
                 record(successMsg)
                 show(successMsg)
 

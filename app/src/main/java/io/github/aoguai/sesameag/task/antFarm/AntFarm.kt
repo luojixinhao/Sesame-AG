@@ -1260,7 +1260,7 @@ class AntFarm : ModelTask() {
         // 2. 判断是否需要喂食
         if (AnimalFeedStatus.HUNGRY.name == ownerAnimal.animalFeedStatus) {
             if (feedAnimal?.value == true) {
-                Log.record("小鸡在挨饿~Tk 尝试为你自动喂食")
+                Log.record("小鸡在挨饿, 尝试为你自动喂食")
                 if (feedAnimal(ownerFarmId)) {
                     // 刷新状态
                     syncAnimalStatus(ownerFarmId)
