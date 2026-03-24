@@ -256,6 +256,44 @@ object AntMemberRpcCall {
     }
 
     @JvmStatic
+    fun queryMemberTaskList(): String {
+        val args = JSONObject().apply {
+            put("source", "signInAd")
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.memtask.h5.MemTaskListQueryFacade.queryAllStatusTaskList",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun executeMemberTask(bizParam: String, bizSubType: String, bizType: String): String {
+        val args = JSONObject().apply {
+            put("bizParam", bizParam)
+            put("bizSubType", bizSubType)
+            put("bizType", bizType)
+            put("outBizNo", TimeUtil.getFormatDate().replace("-", ""))
+            put("sourcePassMap", buildMemberSourcePassMap())
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.memtask.h5.MemTaskManagerFacade.executeTask",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
+    fun querySingleTaskProcessDetail(taskProcessId: String): String {
+        val args = JSONObject().apply {
+            put("sourcePassMap", buildMemberSourcePassMap())
+            put("taskProcessId", taskProcessId)
+        }
+        return RequestManager.requestString(
+            "com.alipay.amic.memtask.h5.MemTaskListQueryFacade.querySingleTaskProcessDetail",
+            JSONArray().put(args).toString()
+        )
+    }
+
+    @JvmStatic
     fun rpcCall_signIn(): String {
         val args1 = """[{"sceneCode":"KOUBEI_INTEGRAL","source":"ALIPAY_TAB","version":"2.0"}]"""
         return RequestManager.requestString("alipay.kbmemberprod.action.signIn", args1)
