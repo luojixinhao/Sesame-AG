@@ -1,6 +1,7 @@
 package io.github.aoguai.sesameag.hook
 
 import io.github.aoguai.sesameag.model.BaseModel
+import io.github.aoguai.sesameag.task.ModelTask.Companion.stopAllTask
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.Log.record
 import kotlinx.coroutines.CoroutineName
@@ -152,6 +153,15 @@ object ApplicationHookConstants {
                 detail = detail
             )
         )
+
+        if (!wasOffline) {
+            val runningMainTask = ApplicationHook.mainTask
+            if (runningMainTask?.isRunning == true) {
+                record(TAG, "offline entered, stop current mainTask to pause workflow")
+                runningMainTask.stopTask()
+            }
+            stopAllTask()
+        }
 
         ModuleStatusReporter.requestUpdate(if (wasOffline) "offline_refresh" else "offline_enter")
     }

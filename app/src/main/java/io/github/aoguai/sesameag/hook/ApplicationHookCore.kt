@@ -20,6 +20,11 @@ object ApplicationHookCore {
     private fun dispatchPendingTriggers() {
         if (!ApplicationHookConstants.hasPendingTriggers()) return
 
+        if (ApplicationHookConstants.isOffline()) {
+            record(TAG, "offline active, skip dispatch, pending=${ApplicationHookConstants.pendingTriggerCount()}")
+            return
+        }
+
         val mainTask = ApplicationHook.mainTask
         if (mainTask == null) {
             record(TAG, "mainTask is null, pending=${ApplicationHookConstants.pendingTriggerCount()}")
