@@ -120,6 +120,19 @@ class AntMember : ModelTask() {
         UNCONFIRMED
     }
 
+    private data class SesameTaskBatchResult(
+        val completedCount: Int = 0,
+        val skippedCount: Int = 0,
+        val interrupted: Boolean = false
+    )
+
+    private data class SesameTaskRunSummary(
+        val finishedAllRounds: Boolean = false,
+        val completedCount: Int = 0,
+        val skippedCount: Int = 0,
+        val interrupted: Boolean = false
+    )
+
     override fun getFields(): ModelFields {
         val modelFields = ModelFields()
         modelFields.addField(BooleanModelField("memberSign", "会员签到", false).withDesc(
@@ -306,9 +319,13 @@ class AntMember : ModelTask() {
                             } else {
                                 needSesameProgressCollectAfterTasks = true
                                 record(TAG, "🎮 开始执行芝麻信用任务")
-                                doAllAvailableSesameTask()
-                                handleGrowthGuideTasks()
-                                record(TAG, "✅ 芝麻信用任务已执行，稍后统一领取涨分进度球")
+                                val sesameTaskSummary = doAllAvailableSesameTask()
+                                if (sesameTaskSummary.interrupted || ApplicationHookConstants.isOffline()) {
+                                    record(TAG, "芝麻信用任务被离线或验证状态中断，保留后续重试机会")
+                                } else {
+                                    handleGrowthGuideTasks()
+                                    record(TAG, "芝麻信用任务已执行，稍后统一领取涨分进度球")
+                                }
                             }
                         }
                         if (collectSesame?.value == true) {
@@ -469,6 +486,10 @@ class AntMember : ModelTask() {
 
     private fun handleGrowthGuideTasks() {
         try {
+            if (ApplicationHookConstants.isOffline()) {
+                record("$TAG.handleGrowthGuideTasks", "信誉任务领取因离线模式跳过，保留后续重试机会")
+                return
+            }
             record("$TAG.", "开始执行信誉任务领取")
             var resp: String?
             try {
@@ -1595,12 +1616,13 @@ class AntMember : ModelTask() {
     /**
      * 芝麻信用任务
      */
-    private suspend fun doAllAvailableSesameTask(): Unit = CoroutineUtils.run {
+    private suspend fun doAllAvailableSesameTask(): SesameTaskRunSummary = CoroutineUtils.run {
+        var overallCompletedTasks = 0
+        var overallSkippedTasks = 0
         try {
             var round = 0
-            var overallCompletedTasks = 0
-            var overallSkippedTasks = 0
             var finishedAllRounds = false
+            var interrupted = false
             while (round < sesameTaskRefreshRoundLimit) {
                 round++
                 val s = AntMemberRpcCall.queryAvailableSesameTask()
@@ -1614,7 +1636,12 @@ class AntMember : ModelTask() {
                         "$TAG.doAllAvailableSesameTask.queryAvailableSesameTask",
                         "芝麻信用💳[查询任务响应失败]#$s"
                     )
-                    return@run
+                    val interrupted = true
+                    return@run SesameTaskRunSummary(
+                        completedCount = overallCompletedTasks,
+                        skippedCount = overallSkippedTasks,
+                        interrupted = interrupted
+                    )
                 }
 
                 val taskObj = jo.optJSONObject("data")
@@ -1638,9 +1665,15 @@ class AntMember : ModelTask() {
                             TAG,
                             "芝麻信用💳[第${round}轮待完成任务]#开始处理(" + waitCompleteTaskVOS.length() + "个)"
                         )
-                        val results: IntArray = joinAndFinishSesameTaskWithResult(waitCompleteTaskVOS)
-                        roundCompletedTasks += results[0]
-                        roundSkippedTasks += results[1]
+                        val results = joinAndFinishSesameTaskWithResult(waitCompleteTaskVOS)
+                        roundCompletedTasks += results.completedCount
+                        roundSkippedTasks += results.skippedCount
+                        if (results.interrupted) {
+                            interrupted = true
+                            overallCompletedTasks += roundCompletedTasks
+                            overallSkippedTasks += roundSkippedTasks
+                            break
+                        }
                     }
 
                     if (dailyTaskListVO.has("waitJoinTaskVOS")) {
@@ -1650,9 +1683,15 @@ class AntMember : ModelTask() {
                             TAG,
                             "芝麻信用💳[第${round}轮待加入任务]#开始处理(" + waitJoinTaskVOS.length() + "个)"
                         )
-                        val results: IntArray = joinAndFinishSesameTaskWithResult(waitJoinTaskVOS)
-                        roundCompletedTasks += results[0]
-                        roundSkippedTasks += results[1]
+                        val results = joinAndFinishSesameTaskWithResult(waitJoinTaskVOS)
+                        roundCompletedTasks += results.completedCount
+                        roundSkippedTasks += results.skippedCount
+                        if (results.interrupted) {
+                            interrupted = true
+                            overallCompletedTasks += roundCompletedTasks
+                            overallSkippedTasks += roundSkippedTasks
+                            break
+                        }
                     }
                 }
 
@@ -1663,9 +1702,15 @@ class AntMember : ModelTask() {
                         TAG,
                         "芝麻信用💳[第${round}轮toCompleteVOS任务]#开始处理(" + toCompleteVOS.length() + "个)"
                     )
-                    val results: IntArray = joinAndFinishSesameTaskWithResult(toCompleteVOS)
-                    roundCompletedTasks += results[0]
-                    roundSkippedTasks += results[1]
+                    val results = joinAndFinishSesameTaskWithResult(toCompleteVOS)
+                    roundCompletedTasks += results.completedCount
+                    roundSkippedTasks += results.skippedCount
+                    if (results.interrupted) {
+                        interrupted = true
+                        overallCompletedTasks += roundCompletedTasks
+                        overallSkippedTasks += roundSkippedTasks
+                        break
+                    }
                 }
 
                 overallCompletedTasks += roundCompletedTasks
@@ -1697,6 +1742,14 @@ class AntMember : ModelTask() {
                 "芝麻信用💳[任务总计]#轮次:$round, 完成:${overallCompletedTasks}个, 跳过:${overallSkippedTasks}个"
             )
 
+            if (interrupted || ApplicationHookConstants.isOffline()) {
+                return@run SesameTaskRunSummary(
+                    completedCount = overallCompletedTasks,
+                    skippedCount = overallSkippedTasks,
+                    interrupted = true
+                )
+            }
+
             if (finishedAllRounds) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_DO_ALL_SESAME_TASK)
                 record(
@@ -1713,8 +1766,18 @@ class AntMember : ModelTask() {
                     "芝麻信用💳[达到最大刷新轮次]#$sesameTaskRefreshRoundLimit，保留后续重试机会"
                 )
             }
+            return@run SesameTaskRunSummary(
+                finishedAllRounds = finishedAllRounds,
+                completedCount = overallCompletedTasks,
+                skippedCount = overallSkippedTasks
+            )
         } catch (t: Throwable) {
             Log.printStackTrace(TAG + "doAllAvailableSesameTask err", t)
+            return@run SesameTaskRunSummary(
+                completedCount = overallCompletedTasks,
+                skippedCount = overallSkippedTasks,
+                interrupted = true
+            )
         }
     }
 
@@ -3934,13 +3997,14 @@ class AntMember : ModelTask() {
         /**
          * 芝麻信用-领取并完成任务（带结果统计）
          * @param taskList 任务列表
-         * @return int数组 [完成数量, 跳过数量]
+         * @return 任务处理结果
          * @throws JSONException JSON解析异常，上抛处理
          */
         @Throws(JSONException::class)
-        private suspend fun joinAndFinishSesameTaskWithResult(taskList: JSONArray): IntArray {
+        private suspend fun joinAndFinishSesameTaskWithResult(taskList: JSONArray): SesameTaskBatchResult {
             var completedCount = 0
             var skippedCount = 0
+            var interrupted = false
             var joinLimitReached = hasFlagToday(StatusFlags.FLAG_ANTMEMBER_SESAME_JOIN_LIMIT_REACHED)
             var joinLimitLogged = false
 
@@ -4039,6 +4103,10 @@ class AntMember : ModelTask() {
                             autoBlacklistSesameTaskIfNeeded(taskTitle, errorCode, resultView)
                         }
                         skippedCount++
+                        if (isSesameTaskFlowInterrupted(responseObj)) {
+                            interrupted = true
+                            break
+                        }
                         continue
                     }
                     recordId = responseObj.optJSONObject("data")?.optString("recordId").orEmpty()
@@ -4051,6 +4119,10 @@ class AntMember : ModelTask() {
 
                 if (!reportSesameTaskFeedback(task, taskTitle, "芝麻信用💳", sceneCode = "zml", preferExtended = true)) {
                     skippedCount++
+                    if (isSesameTaskFlowInterrupted()) {
+                        interrupted = true
+                        break
+                    }
                     continue
                 }
 
@@ -4070,6 +4142,9 @@ class AntMember : ModelTask() {
                     if (!errorCode.isEmpty()) {
                         autoBlacklistSesameTaskIfNeeded(taskTitle, errorCode, resultView)
                     }
+                    if (isSesameTaskFlowInterrupted(responseObj)) {
+                        interrupted = true
+                    }
                 }
 
                 if (taskCompleted) {
@@ -4077,9 +4152,33 @@ class AntMember : ModelTask() {
                 } else {
                     skippedCount++
                 }
+                if (interrupted) {
+                    break
+                }
             }
 
-            return intArrayOf(completedCount, skippedCount)
+            return SesameTaskBatchResult(completedCount, skippedCount, interrupted)
+        }
+
+        private fun isSesameTaskFlowInterrupted(response: JSONObject? = null): Boolean {
+            if (ApplicationHookConstants.isOffline()) {
+                return true
+            }
+            if (response == null) {
+                return false
+            }
+            val resultCode = response.optString("resultCode").ifEmpty {
+                response.optString("errorCode").ifEmpty {
+                    response.optString("code")
+                }
+            }
+            val resultDesc = response.optString("resultDesc").ifEmpty {
+                response.optString("errorMsg")
+            }
+            val resultView = response.optString("resultView")
+            return resultCode == "I07" ||
+                resultDesc.contains("需要验证") ||
+                resultView.contains("需要验证")
         }
 
         /**

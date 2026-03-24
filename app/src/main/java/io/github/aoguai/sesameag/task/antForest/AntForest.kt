@@ -897,7 +897,17 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         }
 
         rebornConfigSignature = computeRebornConfigSignature()
-        val state = RebornEnergyWeeklyPersistence.loadOrInit(rebornConfigSignature)
+        var state = RebornEnergyWeeklyPersistence.loadOrInit(rebornConfigSignature)
+        if (state.completed && !state.lastScanFoundProtectable && !state.lastScanLimitReached) {
+            state = RebornEnergyWeeklyPersistence.updateAfterScan(
+                configSignature = rebornConfigSignature,
+                scanAt = state.lastScanAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                foundProtectable = state.lastScanFoundProtectable,
+                limitReached = state.lastScanLimitReached,
+                completed = false
+            )
+            Log.record(TAG, "复活能量：已清理旧版周轮封存状态，恢复本周复活检查")
+        }
         rebornWeeklyCompleted = state.completed
         if (rebornWeeklyCompleted) {
             Log.record(TAG, "⏭️ 复活能量：本周周轮已完成，跳过复活检查")
@@ -927,18 +937,16 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         val foundProtectable = rebornScanFoundProtectable.get()
         val limitReached = rebornScanLimitReached.get()
         val checkedAnyCandidate = rebornScanCheckedAnyCandidate.get()
-        val completed = checkedAnyCandidate && !limitReached && !foundProtectable
-
         val state = RebornEnergyWeeklyPersistence.updateAfterScan(
             configSignature = rebornConfigSignature,
             scanAt = scanAt,
             foundProtectable = foundProtectable,
             limitReached = limitReached,
-            completed = completed
+            completed = false
         )
         rebornWeeklyCompleted = state.completed
-        if (rebornWeeklyCompleted) {
-            Log.record(TAG, "✅ 复活能量：本周无可复活好友能量，周轮结束")
+        if (checkedAnyCandidate && !limitReached && !foundProtectable) {
+            Log.record(TAG, "复活能量：本次未发现可复活好友，保留后续重试机会")
         }
     }
 

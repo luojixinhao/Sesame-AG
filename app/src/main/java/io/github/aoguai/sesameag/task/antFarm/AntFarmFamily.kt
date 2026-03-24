@@ -184,15 +184,17 @@ data object AntFarmFamily {
                     && hasFamilyOption(familyOptions, "assignRights")
                 ) {
                     val assignRights = assignFamilyMemberInfo.optJSONObject("assignRights")
+                    val assignConfigList = assignFamilyMemberInfo.optJSONArray("assignConfigList")
                     if (assignRights == null) {
                         Log.record(TAG, "家庭任务🏡[使用顶梁柱特权] 缺少 assignRights 信息，跳过")
-                    } else if (assignRights.optString("status") != "USED" &&
-                        assignRights.optString("assignRightsOwner") == UserMap.currentUid
-                    ) {
+                    } else if (assignConfigList == null || assignConfigList.length() == 0) {
+                        Log.record(TAG, "家庭任务[使用顶梁柱特权] 缺少可分配配置，跳过")
+                    } else if (assignRights.optString("status") == "USED") {
+                        Log.record(TAG, "家庭任务[使用顶梁柱特权] 今日已使用，跳过")
+                    } else if (assignRights.optString("assignRightsOwner") == UserMap.currentUid) {
                         assignFamilyMember(assignFamilyMemberInfo, familyUserIds)
                     } else {
-                        Log.record("家庭任务🏡[使用顶梁柱特权] 不是家里的顶梁柱！")
-                        familyOptions.value?.remove("assignRights")
+                        Log.record("家庭任务[使用顶梁柱特权] 当前账号不是顶梁柱，跳过")
                     }
                 }
 
@@ -290,7 +292,11 @@ data object AntFarmFamily {
             }
             val beAssignUser = userIds[RandomUtil.nextInt(0, userIds.size - 1)]
             //随机获取一个任务类型
-            val assignConfigList = jsonObject.getJSONArray("assignConfigList")
+            val assignConfigList = jsonObject.optJSONArray("assignConfigList")
+            if (assignConfigList == null || assignConfigList.length() == 0) {
+                Log.record(TAG, "家庭任务[使用顶梁柱特权] assignConfigList 为空，跳过")
+                return
+            }
             val assignConfig = assignConfigList.getJSONObject(RandomUtil.nextInt(0, assignConfigList.length() - 1))
             val jo = JSONObject(AntFarmRpcCall.assignFamilyMember(assignConfig.getString("assignAction"), beAssignUser))
             if (ResChecker.checkRes(TAG, jo)) {
