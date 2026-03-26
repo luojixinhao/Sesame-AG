@@ -106,7 +106,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.aoguai.sesameag.ui.compose.CommonAlertDialog
 import io.github.aoguai.sesameag.ui.viewmodel.LogViewerViewModel
 import io.github.aoguai.sesameag.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.max
@@ -143,10 +145,12 @@ fun LogViewerScreen(
     // 自动滚动逻辑
     LaunchedEffect(filePath) {
         viewModel.loadLogs(filePath)
-        viewModel.scrollEvent.collect { index ->
+        viewModel.scrollEvent.collectLatest { index ->
             if (index >= 0 && index < state.totalCount) {
                 try {
                     listState.scrollToItem(index)
+                } catch (_: CancellationException) {
+                    // 新的滚动事件会抢占旧协程，属于正常行为，不记为错误。
                 } catch (e: Exception) {
                     Log.printStackTrace("LogViewerScreen", "scrollToItem failed", e)
                 }

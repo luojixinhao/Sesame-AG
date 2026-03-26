@@ -11,6 +11,7 @@ import io.github.aoguai.sesameag.task.antOcean.AntOcean
 import io.github.aoguai.sesameag.task.antOrchard.AntOrchard
 import io.github.aoguai.sesameag.task.antSports.AntSports
 import io.github.aoguai.sesameag.task.antStall.AntStall
+import io.github.aoguai.sesameag.task.customTasks.ManualTaskModel
 import io.github.aoguai.sesameag.task.greenFinance.GreenFinance
 import io.github.aoguai.sesameag.task.other.OtherTask
 import io.github.aoguai.sesameag.task.reserve.Reserve
@@ -30,6 +31,7 @@ object ModelOrder {
         EcoProtection::class.java,     // 古树
         GreenFinance::class.java,  // 绿色经营
         Reserve::class.java,       // 保护地
+        ManualTaskModel::class.java, // 手动调度任务
         OtherTask::class.java,      // 其他
         AnswerAI::class.java         // AI答题
 

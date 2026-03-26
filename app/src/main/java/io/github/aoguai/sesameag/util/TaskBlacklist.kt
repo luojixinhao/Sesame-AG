@@ -138,7 +138,8 @@ object TaskBlacklist {
             "104",
             "OP_REPEAT_CHECK",               // 操作频率过高，被系统限制
             "ILLEGAL_ARGUMENT",              // 参数不合法或格式错误
-            "PROMISE_HAS_PROCESSING_TEMPLATE" -> true // 存在进行中的生活记录
+            "PROMISE_HAS_PROCESSING_TEMPLATE", // 存在进行中的生活记录
+            "PROMISE_TEMPLATE_NOT_EXIST" -> true // 服务端模板已下线
             "TASK_ID_INVALID" -> true        // 海豚任务ID非法
             else -> false                    // 其他错误码不自动加入黑名单
         }
@@ -154,6 +155,7 @@ object TaskBlacklist {
                 "OP_REPEAT_CHECK" -> "操作太频繁"
                 "ILLEGAL_ARGUMENT" -> "参数错误"
                 "104", "PROMISE_HAS_PROCESSING_TEMPLATE" -> "存在进行中的生活记录"
+                "PROMISE_TEMPLATE_NOT_EXIST" -> "服务端模板不存在"
                 "TASK_ID_INVALID" -> true        // 海豚任务ID非法
                 else -> "未知错误"  // 理论上不会执行到此处
             }

@@ -33,6 +33,7 @@ private val sesameCreditDefaultBlacklist = setOf(
     "去玩小游戏",            // 参数错误：promiseActivityExtCheck
     "浏览租赁商家小程序",     // 需要小程序操作
     "订阅小组件",            // 参数错误：promiseActivityExtCheck
+    "订阅芝麻粒签到提醒",     // 模板失效：PROMISE_TEMPLATE_NOT_EXIST
     "租1笔图书",             // 参数错误：promiseActivityExtCheck
     "去订阅芝麻小组件",       // 参数错误：promiseActivityExtCheck
     "坚持攒保障",            // 参数错误：promiseActivityExtCheck（与"坚持攒保障金"类似，防止匹配遗漏）
