@@ -95,6 +95,31 @@ class AntOcean : ModelTask() {
         private var userprotectType: ChoiceModelField? = null
     }
 
+    private data class SeaAreaAdvanceState(
+        val hasOpenedUnfinishedExtraCollect: Boolean,
+        val canCreateExtraCollect: Boolean,
+        val hasPendingLockedSeaArea: Boolean,
+        val allOpenedSeaAreasCompleted: Boolean
+    ) {
+        val canRepairNextSeaArea: Boolean
+            get() = allOpenedSeaAreasCompleted &&
+                hasPendingLockedSeaArea &&
+                !hasOpenedUnfinishedExtraCollect &&
+                !canCreateExtraCollect
+
+        val currentChapterFullyCompleted: Boolean
+            get() = allOpenedSeaAreasCompleted &&
+                !hasPendingLockedSeaArea &&
+                !hasOpenedUnfinishedExtraCollect &&
+                !canCreateExtraCollect
+    }
+
+    private data class FishPropTarget(
+        val name: String,
+        val order: Int,
+        val pieceIds: LinkedHashSet<Int>
+    )
+
     /**
      * 海洋任务
      */
@@ -253,12 +278,19 @@ class AntOcean : ModelTask() {
 
             if (dailyOceanTask?.value == true) {
                 receiveTaskAward() // 日常任务
-                querySeaAreaDetailList() // 任务奖励可能改变碎片和推进条件，刷新后确保同轮生效
+                if (noticeLinkedRefreshNeeded) {
+                    // 公告提示到存在待完成/待领取任务时，再做一次晚刷新，
+                    // 尽量承接前置模块已完成后的联动状态，减少同轮碎片漏领。
+                    receiveTaskAward()
+                }
             }
 
             if (userprotectType?.value != ProtectType.DONT_PROTECT) {
                 protectOcean() // 保护
             }
+
+            // 日常清理和任务奖励完成后，先做一轮当前系列直连合成。
+            querySeaAreaDetailList(allowAdvance = false)
 
             // 制作万能碎片
             if (exchangeProp?.value == true) {
@@ -273,12 +305,8 @@ class AntOcean : ModelTask() {
             if (PDL_task?.value == true) {
                 doOceanPDLTask() // 潘多拉任务领取
             }
-            if (dailyOceanTask?.value == true && noticeLinkedRefreshNeeded) {
-                // 公告提示到存在待完成/待领取任务时，再做一次晚刷新，
-                // 尽量承接前置模块已完成后的联动状态，减少同轮碎片漏领。
-                receiveTaskAward()
-                querySeaAreaDetailList()
-            }
+            // 所有清理、任务、万能拼图处理完成后，再统一推进当前海域/系列。
+            querySeaAreaDetailList(allowAdvance = true)
         } catch (e: CancellationException) {
             Log.runtime(TAG, "AntOcean 协程被取消")
             throw e
@@ -489,6 +517,89 @@ class AntOcean : ModelTask() {
             status != "TO_OPEN"
     }
 
+    private fun getFishList(container: JSONObject?): JSONArray? {
+        if (container == null) {
+            return null
+        }
+        return container.optJSONArray("fishVO") ?: container.optJSONArray("fishVOList")
+    }
+
+    private fun isSeaAreaLocked(seaAreaVO: JSONObject): Boolean {
+        return when (seaAreaVO.optString("status")) {
+            "WAIT_FOR_UNLOCK", "LOCKED", "TO_OPEN", "NOT_OPEN" -> true
+            else -> false
+        }
+    }
+
+    private fun isFishUnlocked(fish: JSONObject): Boolean {
+        if (fish.optBoolean("unlock", false)) {
+            return true
+        }
+        return when (fish.optString("status").uppercase()) {
+            "UNLOCK", "UNLOCKED", "OBTAINED", "FINISHED" -> true
+            else -> false
+        }
+    }
+
+    private fun areAllFishUnlocked(fishVOs: JSONArray?): Boolean {
+        if (fishVOs == null || fishVOs.length() == 0) {
+            return true
+        }
+        for (i in 0 until fishVOs.length()) {
+            val fish = fishVOs.optJSONObject(i) ?: return false
+            if (!isFishUnlocked(fish)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun isSeaAreaFullyCompleted(seaAreaVO: JSONObject): Boolean {
+        if (isSeaAreaLocked(seaAreaVO)) {
+            return false
+        }
+        if (!areAllFishUnlocked(getFishList(seaAreaVO))) {
+            return false
+        }
+        val extraCollectVO = seaAreaVO.optJSONObject("seaAreaExtraCollectVO") ?: return true
+        val extraFishList = getFishList(extraCollectVO)
+        if (isActiveExtraCollect(extraCollectVO)) {
+            return areAllFishUnlocked(extraFishList)
+        }
+        if (extraFishList != null && extraFishList.length() > 0) {
+            return areAllFishUnlocked(extraFishList)
+        }
+        return extraCollectVO.optString("status").equals("FINISHED", ignoreCase = true)
+    }
+
+    private fun buildSeaAreaAdvanceState(jo: JSONObject, seaAreaVOs: JSONArray): SeaAreaAdvanceState {
+        var hasOpenedUnfinishedExtraCollect = false
+        var hasPendingLockedSeaArea = false
+        var allOpenedSeaAreasCompleted = true
+
+        for (i in 0 until seaAreaVOs.length()) {
+            val seaAreaVO = seaAreaVOs.optJSONObject(i) ?: continue
+            if (isSeaAreaLocked(seaAreaVO)) {
+                hasPendingLockedSeaArea = true
+                continue
+            }
+            val extraCollectVO = seaAreaVO.optJSONObject("seaAreaExtraCollectVO")
+            if (isActiveExtraCollect(extraCollectVO)) {
+                hasOpenedUnfinishedExtraCollect = true
+            }
+            if (!isSeaAreaLocked(seaAreaVO) && !isSeaAreaFullyCompleted(seaAreaVO)) {
+                allOpenedSeaAreasCompleted = false
+            }
+        }
+
+        return SeaAreaAdvanceState(
+            hasOpenedUnfinishedExtraCollect = hasOpenedUnfinishedExtraCollect,
+            canCreateExtraCollect = jo.optBoolean("awardSeaAreaCanCreateExtraCollect", false),
+            hasPendingLockedSeaArea = hasPendingLockedSeaArea,
+            allOpenedSeaAreasCompleted = allOpenedSeaAreasCompleted
+        )
+    }
+
     private suspend fun retrySelfOceanCleanIfNeeded(taskTitle: String): Boolean {
         if (cleanOcean?.value != true) {
             return false
@@ -541,7 +652,6 @@ class AntOcean : ModelTask() {
             if (cleanOcean?.value == true) {
                 queryUserRanking() // 清理
             }
-            querySeaAreaDetailList()
         } catch (t: Throwable) {
             Log.runtime(TAG, "queryHomePage err:")
             Log.printStackTrace(TAG, t)
@@ -554,13 +664,6 @@ class AntOcean : ModelTask() {
             val jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
             if (ResChecker.checkRes(TAG, jo)) {
                 val miscHandlerVOMap = jo.optJSONObject("miscHandlerVOMap") ?: return
-                val homeTipsRefresh = miscHandlerVOMap.optJSONObject("HOME_TIPS_REFRESH")
-                val fishCanBeCombined = homeTipsRefresh?.optBoolean("fishCanBeCombined") == true
-                val canBeRepaired = homeTipsRefresh?.optBoolean("canBeRepaired") == true
-                val currentChapterFixed = homeTipsRefresh?.optBoolean("currentChapterFixed") == true
-                if (fishCanBeCombined || canBeRepaired || currentChapterFixed) {
-                    querySeaAreaDetailList()
-                }
                 val emergency = miscHandlerVOMap.optJSONObject("EMERGENCY")
                 if (emergency?.optBoolean("showEmergency") == true || emergency?.optBoolean("showIntroduceBubble") == true) {
                     Log.record(TAG, "神奇海洋🌊[检测到海洋活动入口]")
@@ -779,6 +882,14 @@ class AntOcean : ModelTask() {
     private suspend fun repairSeaArea() {
         try {
             val jo = JsonUtil.parseJSONObjectOrNull(AntOceanRpcCall.repairSeaArea()) ?: return
+            val resultCode = jo.optString("resultCode")
+            val resultDesc = jo.optString("resultDesc")
+            if (resultCode == "SEA_AREA_EXTRA_COLLECT_COLLECTING" ||
+                resultDesc.contains("先结束正在进行的限时挑战")
+            ) {
+                Log.record(TAG, "神奇海洋[限时挑战进行中，跳过开启下一海域]")
+                return
+            }
             if (ResChecker.checkRes(TAG, jo)) {
                 val seaAreaName = jo.optJSONObject("currentSeaAreaVO")?.optString("name")
                     ?: jo.optJSONObject("seaAreaVO")?.optString("name")
@@ -790,7 +901,7 @@ class AntOcean : ModelTask() {
                     Log.forest("神奇海洋🌊[开启新海域修复]")
                 }
             } else {
-                Log.runtime(TAG, jo.optString("resultDesc").ifBlank { jo.toString() })
+                Log.runtime(TAG, resultDesc.ifBlank { jo.toString() })
             }
         } catch (t: Throwable) {
             Log.runtime(TAG, "repairSeaArea err:")
@@ -816,8 +927,8 @@ class AntOcean : ModelTask() {
         }
     }
 
-    private suspend fun switchOceanChapter(hasOpenedUnfinishedExtraCollect: Boolean = false) {
-        if (hasOpenedUnfinishedExtraCollect) {
+    private suspend fun switchOceanChapter(currentChapterFullyCompleted: Boolean) {
+        if (!currentChapterFullyCompleted) {
             return
         }
         val s = AntOceanRpcCall.queryOceanChapterList()
@@ -826,7 +937,6 @@ class AntOcean : ModelTask() {
             if (ResChecker.checkRes(TAG, jo)) {
                 val currentChapterCode = jo.getString("currentChapterCode")
                 val chapterVOs = jo.getJSONArray("userChapterDetailVOList")
-                var isFinish = false
                 var hasReachedCurrentChapter = false
                 var dstChapterCode = ""
                 var dstChapterName = ""
@@ -835,7 +945,6 @@ class AntOcean : ModelTask() {
                     val repairedSeaAreaNum = chapterVO.getInt("repairedSeaAreaNum")
                     val seaAreaNum = chapterVO.getInt("seaAreaNum")
                     if (chapterVO.getString("chapterCode") == currentChapterCode) {
-                        isFinish = repairedSeaAreaNum >= seaAreaNum
                         hasReachedCurrentChapter = true
                     } else {
                         if (repairedSeaAreaNum >= seaAreaNum || !chapterVO.getBoolean("chapterOpen")) {
@@ -849,7 +958,7 @@ class AntOcean : ModelTask() {
                         break
                     }
                 }
-                if (isFinish && dstChapterCode.isNotEmpty()) {
+                if (dstChapterCode.isNotEmpty()) {
                     val switchS = AntOceanRpcCall.switchOceanChapter(dstChapterCode)
                     jo = JsonUtil.parseJSONObjectOrNull(switchS) ?: return
                     if (ResChecker.checkRes(TAG, jo)) {
@@ -867,61 +976,60 @@ class AntOcean : ModelTask() {
         }
     }
 
-    private suspend fun querySeaAreaDetailList() {
+    private suspend fun querySeaAreaDetailList(allowAdvance: Boolean) {
         try {
-            val s = AntOceanRpcCall.querySeaAreaDetailList()
-            val jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
-            if (ResChecker.checkRes(TAG, jo)) {
-                var hasOpenedUnfinishedExtraCollect = false
-                if (jo.optBoolean("awardSeaAreaCanCreateExtraCollect", false)) {
-                    createSeaAreaExtraCollect()
-                    hasOpenedUnfinishedExtraCollect = true
+            var detailJo = querySeaAreaDetailData() ?: return
+            val firstSeaAreaVOs = detailJo.optJSONArray("seaAreaVOs") ?: return
+            var combinedAnyFish = false
+            for (i in 0 until firstSeaAreaVOs.length()) {
+                val seaAreaVO = firstSeaAreaVOs.optJSONObject(i) ?: continue
+                combinedAnyFish = combineCompletedFish(getFishList(seaAreaVO)) || combinedAnyFish
+                val seaAreaExtraCollectVO = seaAreaVO.optJSONObject("seaAreaExtraCollectVO")
+                if (seaAreaExtraCollectVO != null) {
+                    combinedAnyFish = combineCompletedFish(getFishList(seaAreaExtraCollectVO)) || combinedAnyFish
                 }
-                val seaAreaNum = jo.getInt("seaAreaNum")
-                val fixSeaAreaNum = jo.getInt("fixSeaAreaNum")
-                val currentSeaAreaIndex = jo.getInt("currentSeaAreaIndex")
-                if (!hasOpenedUnfinishedExtraCollect && currentSeaAreaIndex < fixSeaAreaNum && seaAreaNum > fixSeaAreaNum) {
-                    queryOceanPropList()
-                }
-                val seaAreaVOs = jo.optJSONArray("seaAreaVOs") ?: return
-                for (i in 0 until seaAreaVOs.length()) {
-                    val seaAreaVO = seaAreaVOs.optJSONObject(i) ?: continue
-                    combineCompletedFish(seaAreaVO.optJSONArray("fishVO") ?: seaAreaVO.optJSONArray("fishVOList"))
-                    val seaAreaExtraCollectVO = seaAreaVO.optJSONObject("seaAreaExtraCollectVO")
-                    if (seaAreaExtraCollectVO != null) {
-                        if (isActiveExtraCollect(seaAreaExtraCollectVO)) {
-                            hasOpenedUnfinishedExtraCollect = true
-                        }
-                        combineCompletedFish(
-                            seaAreaExtraCollectVO.optJSONArray("fishVO")
-                                ?: seaAreaExtraCollectVO.optJSONArray("fishVOList")
-                        )
-                    }
-                }
-                var hasWaitForUnlockSeaArea = false
-                for (i in 0 until seaAreaVOs.length()) {
-                    if (seaAreaVOs.optJSONObject(i)?.optString("status") == "WAIT_FOR_UNLOCK") {
-                        hasWaitForUnlockSeaArea = true
-                        break
-                    }
-                }
-                if (!hasOpenedUnfinishedExtraCollect && hasWaitForUnlockSeaArea) {
-                    repairSeaArea()
-                }
-                switchOceanChapter(hasOpenedUnfinishedExtraCollect)
-            } else {
-                Log.runtime(TAG, jo.getString("resultDesc"))
             }
+
+            if (!allowAdvance) {
+                return
+            }
+
+            if (combinedAnyFish) {
+                detailJo = querySeaAreaDetailData() ?: return
+            }
+            val seaAreaVOs = detailJo.optJSONArray("seaAreaVOs") ?: return
+            val advanceState = buildSeaAreaAdvanceState(detailJo, seaAreaVOs)
+
+            if (advanceState.canCreateExtraCollect) {
+                createSeaAreaExtraCollect()
+                return
+            }
+            if (advanceState.canRepairNextSeaArea) {
+                queryOceanPropList()
+                return
+            }
+            switchOceanChapter(advanceState.currentChapterFullyCompleted)
         } catch (t: Throwable) {
             Log.runtime(TAG, "querySeaAreaDetailList err:")
             Log.printStackTrace(TAG, t)
         }
     }
 
-    private suspend fun combineCompletedFish(fishVOs: JSONArray?) {
-        if (fishVOs == null) {
-            return
+    private suspend fun querySeaAreaDetailData(): JSONObject? {
+        val s = AntOceanRpcCall.querySeaAreaDetailList()
+        val jo = JsonUtil.parseJSONObjectOrNull(s) ?: return null
+        if (!ResChecker.checkRes(TAG, jo)) {
+            Log.runtime(TAG, extractOceanResultDesc(jo))
+            return null
         }
+        return jo
+    }
+
+    private suspend fun combineCompletedFish(fishVOs: JSONArray?): Boolean {
+        if (fishVOs == null) {
+            return false
+        }
+        var attemptedCombine = false
         for (j in 0 until fishVOs.length()) {
             val fishVO = fishVOs.optJSONObject(j) ?: continue
             if (!shouldCombineFish(fishVO)) {
@@ -929,9 +1037,11 @@ class AntOcean : ModelTask() {
             }
             val fishId = fishVO.opt("id")?.toString().orEmpty()
             if (fishId.isNotBlank()) {
+                attemptedCombine = true
                 combineFish(fishId)
             }
         }
+        return attemptedCombine
     }
 
     private fun shouldCombineFish(fish: JSONObject): Boolean {
@@ -1601,111 +1711,122 @@ class AntOcean : ModelTask() {
         }
     }
 
+    private fun findCurrentChapterPropTarget(
+        detailJo: JSONObject,
+        maxPieceCount: Int,
+        extraCollectOnly: Boolean
+    ): FishPropTarget? {
+        if (maxPieceCount <= 0) {
+            return null
+        }
+        val seaAreaVOs = detailJo.optJSONArray("seaAreaVOs") ?: return null
+        for (i in 0 until seaAreaVOs.length()) {
+            val seaAreaVO = seaAreaVOs.optJSONObject(i) ?: continue
+            if (isSeaAreaLocked(seaAreaVO) || isSeaAreaFullyCompleted(seaAreaVO)) {
+                continue
+            }
+            if (extraCollectOnly) {
+                val extraCollectVO = seaAreaVO.optJSONObject("seaAreaExtraCollectVO")
+                if (!isActiveExtraCollect(extraCollectVO)) {
+                    return null
+                }
+                return buildFishPropTarget(getFishList(extraCollectVO), maxPieceCount)
+            }
+            return buildFishPropTarget(getFishList(seaAreaVO), maxPieceCount)
+        }
+        return null
+    }
+
+    private fun buildFishPropTarget(fishVOs: JSONArray?, maxPieceCount: Int): FishPropTarget? {
+        if (fishVOs == null || maxPieceCount <= 0) {
+            return null
+        }
+        for (i in 0 until fishVOs.length()) {
+            val fish = fishVOs.optJSONObject(i) ?: continue
+            if (isFishUnlocked(fish) || shouldCombineFish(fish)) {
+                continue
+            }
+            val order = fish.optInt("order", 0)
+            if (order <= 0) {
+                continue
+            }
+            val pieces = fish.optJSONArray("pieces") ?: continue
+            val pieceIds = LinkedHashSet<Int>()
+            for (j in 0 until pieces.length()) {
+                val piece = pieces.optJSONObject(j) ?: continue
+                if (piece.optInt("num", 0) > 0) {
+                    continue
+                }
+                val pieceId = piece.opt("id")?.toString()?.toIntOrNull() ?: continue
+                pieceIds.add(pieceId)
+                if (pieceIds.size >= maxPieceCount) {
+                    break
+                }
+            }
+            if (pieceIds.isNotEmpty()) {
+                return FishPropTarget(
+                    name = fish.optString("name").ifBlank { "未知鱼类" },
+                    order = order,
+                    pieceIds = pieceIds
+                )
+            }
+        }
+        return null
+    }
+
     // 使用万能拼图
     private suspend fun usePropByType() {
         try {
-            // 获取道具使用类型列表的JSON数据
             val propListJson = AntOceanRpcCall.usePropByTypeList()
             val propListObj = JsonUtil.parseJSONObjectOrNull(propListJson) ?: return
-            if (ResChecker.checkRes(TAG, propListObj)) {
-                val propInfos = ArrayList<JSONObject>()
-                val oceanPropVOList = propListObj.optJSONArray("oceanPropVOList")
-                if (oceanPropVOList != null) {
-                    for (i in 0 until oceanPropVOList.length()) {
-                        val propInfo = oceanPropVOList.optJSONObject(i) ?: continue
-                        if (propInfo.optString("type") == "UNIVERSAL_PIECE") {
-                            propInfos.add(propInfo)
-                        }
-                    }
-                } else {
-                    val oceanPropVOByTypeList = propListObj.optJSONArray("oceanPropVOByTypeList") ?: return
-                    for (i in 0 until oceanPropVOByTypeList.length()) {
-                        val propInfo = oceanPropVOByTypeList.optJSONObject(i) ?: continue
-                        if (propInfo.optString("type") == "UNIVERSAL_PIECE") {
-                            propInfos.add(propInfo)
-                        }
+            if (!ResChecker.checkRes(TAG, propListObj)) {
+                Log.runtime(TAG, extractOceanResultDesc(propListObj))
+                return
+            }
+            val propInfos = ArrayList<JSONObject>()
+            val oceanPropVOList = propListObj.optJSONArray("oceanPropVOList")
+            if (oceanPropVOList != null) {
+                for (i in 0 until oceanPropVOList.length()) {
+                    val propInfo = oceanPropVOList.optJSONObject(i) ?: continue
+                    if (propInfo.optString("type") == "UNIVERSAL_PIECE") {
+                        propInfos.add(propInfo)
                     }
                 }
-                propInfos.sortByDescending { it.optString("code") == "LIMIT_TIME_UNIVERSAL_PIECE" }
-                // 遍历每个道具类型信息
-                for (propInfo in propInfos) {
-                    val propCode = propInfo.optString("code").ifBlank { "UNIVERSAL_PIECE" }
-                    val propName = propInfo.optString("name").ifBlank {
-                        if (propCode == "LIMIT_TIME_UNIVERSAL_PIECE") "限时万能拼图" else "万能拼图"
+            } else {
+                val oceanPropVOByTypeList = propListObj.optJSONArray("oceanPropVOByTypeList") ?: return
+                for (i in 0 until oceanPropVOByTypeList.length()) {
+                    val propInfo = oceanPropVOByTypeList.optJSONObject(i) ?: continue
+                    if (propInfo.optString("type") == "UNIVERSAL_PIECE") {
+                        propInfos.add(propInfo)
                     }
-                    var holdsNum = propInfo.getInt("holdsNum")
-                    if (holdsNum <= 0) {
-                        continue
+                }
+            }
+            propInfos.sortByDescending { it.optString("code") == "LIMIT_TIME_UNIVERSAL_PIECE" }
+            for (propInfo in propInfos) {
+                val propCode = propInfo.optString("code").ifBlank { "UNIVERSAL_PIECE" }
+                val propName = propInfo.optString("name").ifBlank {
+                    if (propCode == "LIMIT_TIME_UNIVERSAL_PIECE") "限时万能拼图" else "万能拼图"
+                }
+                var holdsNum = propInfo.optInt("holdsNum", 0)
+                if (holdsNum <= 0) {
+                    continue
+                }
+                val extraCollectOnly = propCode == "LIMIT_TIME_UNIVERSAL_PIECE"
+                while (holdsNum > 0) {
+                    val detailJo = querySeaAreaDetailData() ?: break
+                    val target = findCurrentChapterPropTarget(detailJo, holdsNum, extraCollectOnly) ?: break
+                    val useCount = target.pieceIds.size
+                    val usePropResult = AntOceanRpcCall.usePropByType(propCode, target.order, target.pieceIds) ?: break
+                    val usePropResultObj = JsonUtil.parseJSONObjectOrNull(usePropResult) ?: break
+                    if (!ResChecker.checkRes(TAG, usePropResultObj)) {
+                        Log.runtime(TAG, usePropResultObj.optString("resultDesc").ifBlank {
+                            usePropResultObj.optString("memo").ifBlank { usePropResultObj.toString() }
+                        })
+                        break
                     }
-                    val prioritizeExtraCollect = propCode == "LIMIT_TIME_UNIVERSAL_PIECE"
-                    val scanExtraCollectOnlyList = if (prioritizeExtraCollect) listOf(true, false) else listOf(false)
-                    th@ for (scanExtraCollectOnly in scanExtraCollectOnlyList) {
-                        if (holdsNum <= 0) {
-                            break
-                        }
-                        var pageNum = 0
-                        while (holdsNum > 0) {
-                            // 查询鱼列表的JSON数据
-                            pageNum++
-                            val fishListJson = AntOceanRpcCall.queryFishList(pageNum)
-                            val fishListObj = JsonUtil.parseJSONObjectOrNull(fishListJson) ?: break
-                            // 检查是否成功获取到鱼列表并且 hasMore 为 true
-                            if (!ResChecker.checkRes(TAG, fishListObj)) {
-                                // 如果没有成功获取到鱼列表或者 hasMore 为 false，则停止后续操作
-                                break
-                            }
-                            // 获取鱼列表中的fishVOS数组
-                            val fishVOS = fishListObj.optJSONArray("fishVOS") ?: fishListObj.optJSONArray("fishVOList")
-                            if (fishVOS == null) {
-                                break
-                            }
-                            // 遍历fishVOS数组，寻找pieces中num值为0的鱼的order和id
-                            for (j in 0 until fishVOS.length()) {
-                                val fish = fishVOS.getJSONObject(j)
-                                val fishTag = fish.optString("tag")
-                                if (scanExtraCollectOnly && fishTag != "EXTRA_COLLECT") {
-                                    continue
-                                }
-                                val pieces = fish.optJSONArray("pieces")
-                                if (pieces == null) {
-                                    continue
-                                }
-                                val order = fish.getInt("order")
-                                val name = fish.getString("name")
-                                val idSet = LinkedHashSet<Int>()
-                                for (k in 0 until pieces.length()) {
-                                    val piece = pieces.getJSONObject(k)
-                                    if (piece.optInt("num") <= 0) {
-                                        idSet.add(Integer.parseInt(piece.getString("id")))
-                                        if (idSet.size >= holdsNum) {
-                                            break
-                                        }
-                                    }
-                                }
-                                if (idSet.isNotEmpty()) {
-                                    val useCount = idSet.size
-                                    val usePropResult = AntOceanRpcCall.usePropByType(propCode, order, idSet) ?: continue
-                                    val usePropResultObj = JsonUtil.parseJSONObjectOrNull(usePropResult) ?: continue
-                                    if (ResChecker.checkRes(TAG, usePropResultObj)) {
-                                        holdsNum -= useCount
-                                        Log.forest("神奇海洋🏖️[$propName]使用${useCount}张，获得[$name]剩余${holdsNum}张")
-                                        delay(1000)
-                                        if (holdsNum <= 0) {
-                                            break@th
-                                        }
-                                    } else {
-                                        Log.runtime(TAG, usePropResultObj.optString("resultDesc").ifBlank {
-                                            usePropResultObj.optString("memo").ifBlank { usePropResultObj.toString() }
-                                        })
-                                        break@th
-                                    }
-                                }
-                            }
-                            if (!fishListObj.optBoolean("hasMore")) {
-                                break
-                            }
-                        }
-                    }
+                    holdsNum -= useCount
+                    Log.forest("神奇海洋???[$propName]使用${useCount}张，获得[${target.name}]剩余${holdsNum}张")
+                    delay(1000)
                 }
             }
         } catch (t: Throwable) {
@@ -1714,4 +1835,3 @@ class AntOcean : ModelTask() {
         }
     }
 }
-
