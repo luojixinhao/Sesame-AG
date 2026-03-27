@@ -1,6 +1,7 @@
 package io.github.aoguai.sesameag.task.antFarm
 
 import io.github.aoguai.sesameag.data.Status
+import io.github.aoguai.sesameag.data.StatusFlags
 import io.github.aoguai.sesameag.entity.AlipayUser
 import io.github.aoguai.sesameag.extensions.JSONExtensions.toJSONArray
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
@@ -20,7 +21,6 @@ import kotlin.math.abs
 
 data object AntFarmFamily {
     private const val TAG = "小鸡家庭"
-    private const val FLAG_FAMILY_FEED_DONE = "farm::familyFeedFriendAnimalDone"
 
     /**
      * 家庭ID
@@ -239,9 +239,10 @@ data object AntFarmFamily {
      */
     fun familySign() {
         try {
-            if (Status.hasFlagToday("farmfamily::dailySign")) return
+            if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FAMILY_SIGNED)) return
             val res = JSONObject(AntFarmRpcCall.familyReceiveFarmTaskAward("FAMILY_SIGN_TASK"))
             if (ResChecker.checkRes(TAG, res)) {
+                Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_SIGNED)
                 Log.farm("家庭任务🏡每日签到")
             }
         } catch (e: Exception) {
@@ -314,11 +315,14 @@ data object AntFarmFamily {
      */
     fun familyFeedFriendAnimal(animals: JSONArray) {
         try {
-            if (Status.hasFlagToday(FLAG_FAMILY_FEED_DONE)) {
-                Log.record(TAG, "家庭任务帮喂今日已完成，跳过重复请求")
+            if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)) {
+                Log.record(TAG, "家庭任务帮喂今日次数已达上限，跳过")
                 return
             }
             for (i in 0 until animals.length()) {
+                if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)) {
+                    return
+                }
                 val animal = animals.getJSONObject(i)
                 val status = animal.getJSONObject("animalStatusVO")
 
@@ -338,7 +342,7 @@ data object AntFarmFamily {
                     continue
                 }
 
-                val flagKey = "farm::feedFriendLimit::$userId"
+                val flagKey = StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT_PREFIX + userId
 
                 // 如果该用户已经记录今日上限 → 跳过
                 if (Status.hasFlagToday(flagKey)) {
@@ -352,16 +356,17 @@ data object AntFarmFamily {
                 // 统一错误码检查
                 if (!jo.optBoolean("success", false)) {
                     val code = jo.optString("resultCode")
+                    val memo = jo.optString("memo")
 
-                    if (code == "391") {
+                    if (code == "391" || memo.contains("今日帮喂次数已达上限")) {
                         // 记录该用户今日不能再喂
                         Status.setFlagToday(flagKey)
-                        Status.setFlagToday(FLAG_FAMILY_FEED_DONE)
+                        Status.setFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)
                         Log.record("[$userId] 今日帮喂次数已达上限🥣，已记录为当日限制")
                     } else {
                         Log.error(TAG, "喂食失败 user=$userId code=$code msg=${jo.optString("memo")}")
                     }
-                    if (Status.hasFlagToday(FLAG_FAMILY_FEED_DONE)) {
+                    if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)) {
                         return
                     }
                     continue
@@ -370,9 +375,8 @@ data object AntFarmFamily {
                 // 正常成功
                 val foodStock = jo.optInt("foodStock")
                 val maskName = UserMap.getMaskName(userId) ?: userId
-                Status.setFlagToday(FLAG_FAMILY_FEED_DONE)
                 Log.farm("家庭任务🏠帮喂小鸡🥣[$maskName]180g #剩余${foodStock}g")
-                return
+                continue
             }
 
         } catch (t: Throwable) {
@@ -387,7 +391,7 @@ data object AntFarmFamily {
     private fun familySleepTogether(enterRes: JSONObject) {
         try {
             if (groupId.isEmpty()) return
-            if (Status.hasFlagToday("antFarm::familySleepTogether")) return
+            if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FAMILY_SLEEP_TOGETHER)) return
 
             // 远端任务状态校验：只在 SLEEP_TOGETHER=TODO 时触发，避免误刷
             val taskTipsRes = JSONObject(AntFarmRpcCall.familyTaskTips(familyAnimals))
@@ -398,7 +402,7 @@ data object AntFarmFamily {
 
             val taskTips = taskTipsRes.optJSONArray("familyTaskTips")
             if (taskTips == null || taskTips.length() == 0) {
-                Status.setFlagToday("antFarm::familySleepTogether")
+                Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_SLEEP_TOGETHER)
                 return
             }
 
@@ -415,7 +419,7 @@ data object AntFarmFamily {
             }
 
             if (!hasSleepTodo) {
-                Status.setFlagToday("antFarm::familySleepTogether")
+                Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_SLEEP_TOGETHER)
                 return
             }
 
@@ -430,7 +434,7 @@ data object AntFarmFamily {
             if (ResChecker.checkRes(TAG, sleepRes)) {
                 Log.farm("家庭任务🏠去睡觉🛌")
                 Status.animalSleep()
-                Status.setFlagToday("antFarm::familySleepTogether")
+                Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_SLEEP_TOGETHER)
                 return
             }
 
@@ -440,7 +444,7 @@ data object AntFarmFamily {
             if (memo.contains("睡觉") || resultDesc.contains("睡觉")) {
                 Log.record(TAG, "家庭任务🏠去睡觉#可能已在睡觉：${resultDesc.ifBlank { memo }}")
                 Status.animalSleep()
-                Status.setFlagToday("antFarm::familySleepTogether")
+                Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_SLEEP_TOGETHER)
                 return
             }
 
@@ -764,7 +768,7 @@ data object AntFarmFamily {
             }
 
             // 本地去重：一天只发送一次，避免重复打扰
-            if (Status.hasFlagToday("antFarm::deliverMsgSend")) {
+            if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FAMILY_DELIVER_MSG_SEND)) {
                 Log.record(TAG, "家庭任务🏠道早安#今日已在本地发送过，跳过")
                 return
             }
@@ -781,7 +785,7 @@ data object AntFarmFamily {
                 if (taskTips == null || taskTips.length() == 0) {
                     // familyTaskTips 为空：要么今天已经完成，要么当前无早安任务
                     Log.record(TAG, "家庭任务🏠道早安#远端无 GREETING 任务，可能今日已完成，跳过")
-                    Status.setFlagToday("antFarm::deliverMsgSend")
+                    Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_DELIVER_MSG_SEND)
                     return
                 }
 
@@ -798,7 +802,7 @@ data object AntFarmFamily {
 
                 if (!hasGreetingTodo) {
                     Log.record(TAG, "家庭任务🏠道早安#GREETING 任务非 TODO 状态，跳过")
-                    Status.setFlagToday("antFarm::deliverMsgSend")
+                    Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_DELIVER_MSG_SEND)
                     return
                 }
             } catch (e: Throwable) {
@@ -888,7 +892,7 @@ data object AntFarmFamily {
             val resp4 = JSONObject(AntFarmRpcCall.deliverMsgSend(groupId, userIds, content, deliverId))
             if (ResChecker.checkRes(TAG, resp4)) {
                 Log.farm("家庭任务🏠道早安: $content 🌈")
-                Status.setFlagToday("antFarm::deliverMsgSend")
+                Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_DELIVER_MSG_SEND)
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "deliverMsgSend err:", t)
@@ -902,7 +906,7 @@ data object AntFarmFamily {
      */
     private fun familyShareToFriends(familyUserIds: MutableList<String>, notInviteList: SelectModelField) {
         try {
-            if (Status.hasFlagToday("antFarm::familyShareToFriends")) {
+            if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FAMILY_SHARE_TO_FRIENDS)) {
                 return
             }
 
@@ -937,7 +941,7 @@ data object AntFarmFamily {
             val jo = JSONObject(AntFarmRpcCall.inviteFriendVisitFamily(inviteList))
             if (ResChecker.checkRes(TAG, jo)) {
                 Log.farm("家庭任务🏠分享好友")
-                Status.setFlagToday("antFarm::familyShareToFriends")
+                Status.setFlagToday(StatusFlags.FLAG_FARM_FAMILY_SHARE_TO_FRIENDS)
                 syncFamilyStatusIntimacy(groupId)
             }
         } catch (t: Throwable) {

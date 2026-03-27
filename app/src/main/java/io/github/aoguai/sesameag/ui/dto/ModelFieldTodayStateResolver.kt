@@ -13,6 +13,20 @@ data class ModelFieldTodayState(
 object ModelFieldTodayStateResolver {
     private const val ANTORCHARD_SPREAD_MANURE_COUNT_YEB = "ANTORCHARD_SPREAD_MANURE_COUNT_YEB"
 
+    private data class OptionFlagState(
+        val flag: String,
+        val reason: String
+    )
+
+    private val antFarmFamilyOptionStates = mapOf(
+        "familySign" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SIGNED, "今日家庭签到已处理"),
+        "feedFamilyAnimal" to OptionFlagState(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT, "今日帮喂次数已达上限"),
+        "sleepTogether" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SLEEP_TOGETHER, "今日一起睡觉已处理"),
+        "deliverMsgSend" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_DELIVER_MSG_SEND, "今日道早安已处理"),
+        "shareToFriends" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SHARE_TO_FRIENDS, "今日家庭分享已处理"),
+        "inviteFriendVisitFamily" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SHARE_TO_FRIENDS, "今日家庭分享已处理")
+    )
+
     @JvmStatic
     fun resolve(
         modelCode: String,
@@ -113,6 +127,16 @@ object ModelFieldTodayStateResolver {
             "AntFarm.doFarmTaskTime" ->
                 flag(StatusFlags.FLAG_FARM_TASK_FINISHED, "今日饲料任务已处理")
 
+            "AntFarm.feedFriendAnimalList" ->
+                if (mapValue(modelField)?.isNotEmpty() == true) {
+                    flag(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT, "今日帮喂次数已达上限")
+                } else {
+                    ModelFieldTodayState()
+                }
+
+            "AntFarm.familyOptions" ->
+                familyOptionsState(modelField)
+
             "AntFarm.useAccelerateTool",
             "AntFarm.useAccelerateToolContinue",
             "AntFarm.remainingTime",
@@ -138,6 +162,28 @@ object ModelFieldTodayStateResolver {
         }
     }
 
+    private fun familyOptionsState(modelField: ModelField<*>): ModelFieldTodayState {
+        val selectedOptions = stringSetValue(modelField)
+        if (selectedOptions.isEmpty()) {
+            return ModelFieldTodayState()
+        }
+
+        val matchedStates = selectedOptions.map {
+            antFarmFamilyOptionStates[it] ?: return ModelFieldTodayState()
+        }
+
+        return if (matchedStates.all { Status.hasFlagToday(it.flag) }) {
+            val reason = if (matchedStates.size == 1) {
+                matchedStates.first().reason
+            } else {
+                "今日已完成所有带状态标记的家庭任务"
+            }
+            inactive(reason)
+        } else {
+            ModelFieldTodayState()
+        }
+    }
+
     private fun limitReached(current: Int?, limit: Int?, reason: String): ModelFieldTodayState {
         val safeLimit = limit ?: 0
         if (safeLimit <= 0) return ModelFieldTodayState()
@@ -146,6 +192,14 @@ object ModelFieldTodayStateResolver {
 
     private fun intValue(modelField: ModelField<*>?): Int? {
         return modelField?.value as? Int
+    }
+
+    private fun mapValue(modelField: ModelField<*>?): Map<*, *>? {
+        return modelField?.value as? Map<*, *>
+    }
+
+    private fun stringSetValue(modelField: ModelField<*>?): Set<String> {
+        return (modelField?.value as? Set<*>)?.mapNotNull { it as? String }?.toSet() ?: emptySet()
     }
 
     private fun inactive(reason: String): ModelFieldTodayState {

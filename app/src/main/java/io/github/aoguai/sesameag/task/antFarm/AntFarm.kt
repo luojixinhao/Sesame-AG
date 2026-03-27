@@ -2714,9 +2714,15 @@ class AntFarm : ModelTask() {
     private suspend fun feedFriend() {
         try {
             val feedFriendAnimalMap: Map<String?, Int?> = feedFriendAnimalList?.value ?: emptyMap()
-            val feedFriendEntries = feedFriendAnimalMap.entries
-                .toList()
-                .sortedByDescending { AntFarmFamily.isFamilyMember(it.key) }
+            val useFamilyFeedForMembers =
+                family?.value == true && familyOptions?.value?.contains("feedFamilyAnimal") == true
+            val feedFriendEntries = if (useFamilyFeedForMembers) {
+                feedFriendAnimalMap.entries.toList()
+            } else {
+                feedFriendAnimalMap.entries
+                    .toList()
+                    .sortedByDescending { AntFarmFamily.isFamilyMember(it.key) }
+            }
             for (entry in feedFriendEntries) {
                 val userId = entry.key?.trim().orEmpty()
                 val maxDailyCount = entry.value ?: 0
@@ -2737,6 +2743,11 @@ class AntFarm : ModelTask() {
                         // 未开启"自动喂小鸡" → 使用好友列表机制（尊重次数限制）
                         // 继续执行后续逻辑
                     }
+                }
+
+                // 家庭成员优先走家庭接口，普通帮喂仅处理非家庭好友
+                if (useFamilyFeedForMembers && AntFarmFamily.isFamilyMember(userId)) {
+                    continue
                 }
 
                 if (!Status.canFeedFriendToday(userId, maxDailyCount)) continue
@@ -2764,7 +2775,7 @@ class AntFarm : ModelTask() {
                                 }
                                 //第二次检查
                                 if (foodStock >= 180) {
-                                    if (Status.hasFlagToday("farm::feedFriendLimit")) {
+                                    if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)) {
                                         return
                                     }
                                     val feedFriendAnimaljo =
@@ -2781,7 +2792,7 @@ class AntFarm : ModelTask() {
                                             "😞喂[$user]的鸡失败$feedFriendAnimaljo"
                                         )
                                         if ("391" == resultCode || memo.contains("今日帮喂次数已达上限")) {
-                                            Status.setFlagToday("farm::feedFriendLimit")
+                                            Status.setFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)
                                             break
                                         }
                                         continue
@@ -4862,7 +4873,7 @@ class AntFarm : ModelTask() {
                         //非好友
                         continue
                     }
-                    if (Status.hasFlagToday("farm::feedFriendLimit")) {
+                    if (Status.hasFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)) {
                         Log.record("今日喂鸡次数已达上限🥣")
                         return
                     }
@@ -4877,7 +4888,7 @@ class AntFarm : ModelTask() {
                         val resultCode = jo.optString("resultCode")
                         val memo = jo.optString("memo")
                         if ("391" == resultCode || memo.contains("今日帮喂次数已达上限")) {
-                            Status.setFlagToday("farm::feedFriendLimit")
+                            Status.setFlagToday(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT)
                             Log.record(TAG, "庄园家庭🏠帮喂好友🥣今日次数已达上限，已记录为当日限制")
                             return
                         }

@@ -127,5 +127,23 @@ object StatusFlags {
 
     /** 庄园：今日是否已签到 */
     const val FLAG_FARM_SIGNED = "antFarm::signed"
+
+    /** 庄园：今日帮喂次数已达上限 */
+    const val FLAG_FARM_FEED_FRIEND_LIMIT = "antFarm::feedFriendLimit"
+
+    /** 庄园：按好友维度记录帮喂上限的前缀 */
+    const val FLAG_FARM_FEED_FRIEND_LIMIT_PREFIX = "antFarm::feedFriendLimit::"
+
+    /** 庄园家庭：今日签到已处理 */
+    const val FLAG_FARM_FAMILY_SIGNED = "antFarm::familyDailySign"
+
+    /** 庄园家庭：今日一起睡觉已处理 */
+    const val FLAG_FARM_FAMILY_SLEEP_TOGETHER = "antFarm::familySleepTogether"
+
+    /** 庄园家庭：今日道早安已处理 */
+    const val FLAG_FARM_FAMILY_DELIVER_MSG_SEND = "antFarm::deliverMsgSend"
+
+    /** 庄园家庭：今日好友分享已处理 */
+    const val FLAG_FARM_FAMILY_SHARE_TO_FRIENDS = "antFarm::familyShareToFriends"
 }
 
