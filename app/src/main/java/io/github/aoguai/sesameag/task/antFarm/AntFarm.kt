@@ -2479,6 +2479,10 @@ class AntFarm : ModelTask() {
         }
         // 4) 同步最新状态，确保消耗速度、已吃量、食槽上限为最新
         syncAnimalStatus(ownerFarmId)
+        if (AnimalBuff.ACCELERATING.name == ownerAnimal.animalBuff) {
+            Log.record(TAG, "加速卡效果仍在生效，跳过本轮继续使用")
+            return false
+        }
 
         // 当前小鸡剩余多长时间吃完饲料
         val currentCountdown = countdown?.toDouble() ?: 0.0
@@ -2545,6 +2549,10 @@ class AntFarm : ModelTask() {
             // 可选条件：若勾选“仅心情满值时加速”，且当前心情不为 100，则跳出
             if (whenMaxEmotionOnly && finalScore != 100.0) {
                 exitReason = "EMOTION_NOT_MAX"
+                break
+            }
+            if (AnimalBuff.ACCELERATING.name == ownerAnimal.animalBuff) {
+                exitReason = "BUFF_STILL_ACTIVE"
                 break
             }
             if (useFarmTool(ownerFarmId, ToolType.ACCELERATETOOL)) {
@@ -2617,6 +2625,7 @@ class AntFarm : ModelTask() {
             "CONDITION_NOT_MET" -> Log.record("剩余可加速的时间少于设置的${remainingTimeValue}分钟，将在下次喂食后再次使用加速卡")
             "SINGLE_USE_MODE" -> Log.record("开启了“仅在满状态使用加速卡")
             "EMOTION_NOT_MAX" -> Log.record("开启了“仅心情满值时加速”，且当前心情不为 100")
+            "BUFF_STILL_ACTIVE" -> Log.record("加速卡效果仍在生效，本轮不继续叠加使用加速卡")
         }
         Log.record(TAG, "加速卡内部⏩最终 isUseAccelerateTool=$isUseAccelerateTool")
         return isUseAccelerateTool
@@ -2626,12 +2635,21 @@ class AntFarm : ModelTask() {
         targetFarmId: String?,
         toolType: ToolType,
         toolCountBefore: Int,
-        wasBigEaterActive: Boolean
+        wasBigEaterActive: Boolean,
+        wasAcceleratingActive: Boolean
     ): Boolean {
         try {
             Log.record(TAG, "道具🎭[${toolType.nickName()}]返回“道具使用无效”，开始刷新状态复核")
             syncAnimalStatus(targetFarmId)
             listFarmTool()
+            if (toolType == ToolType.ACCELERATETOOL &&
+                wasAcceleratingActive &&
+                AnimalBuff.ACCELERATING.name == ownerAnimal.animalBuff
+            ) {
+                invalidToolTypesThisRound.add(toolType)
+                Log.record(TAG, "道具🎭[${toolType.nickName()}]加速效果仍在生效，本轮停止继续尝试")
+                return false
+            }
             val toolCountAfter = getFarmToolCount(toolType, forceRefresh = false)
             if (toolCountAfter in 0 until toolCountBefore) {
                 Log.record(
@@ -2680,6 +2698,8 @@ class AntFarm : ModelTask() {
 
             val toolCountBefore = tool.toolCount
             val wasBigEaterActive = serverUseBigEaterTool
+            val wasAcceleratingActive =
+                toolType == ToolType.ACCELERATETOOL && AnimalBuff.ACCELERATING.name == ownerAnimal.animalBuff
             var s = AntFarmRpcCall.useFarmTool(targetFarmId, tool.toolId.orEmpty(), toolType.name)
             var jo = JSONObject(s)
             val memo = jo.optString("memo")
@@ -2695,7 +2715,15 @@ class AntFarm : ModelTask() {
                 // 针对加速卡：当日达到上限(resultCode=3D16)后，设置当日标记，避免后续重复尝试
                 val resultCode = jo.optString("resultCode")
                 if (resultCode == "348" || memo.contains("道具使用无效")) {
-                    if (confirmFarmToolResultAfterInvalid(targetFarmId, toolType, toolCountBefore, wasBigEaterActive)) {
+                    if (
+                        confirmFarmToolResultAfterInvalid(
+                            targetFarmId,
+                            toolType,
+                            toolCountBefore,
+                            wasBigEaterActive,
+                            wasAcceleratingActive
+                        )
+                    ) {
                         return true
                     }
                 }
