@@ -45,7 +45,6 @@ import io.github.aoguai.sesameag.task.customTasks.ManualTaskModel
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.JsonUtil
-import io.github.aoguai.sesameag.util.LanguageUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.PortUtil
 import io.github.aoguai.sesameag.util.ToastUtil
@@ -81,7 +80,6 @@ class WebSettingsActivity : BaseActivity() {
         userId = intent?.getStringExtra("userId")
         userName = intent?.getStringExtra("userName")
 
-        LanguageUtil.setLocale(this)
         setContentView(R.layout.activity_web_settings)
 
         // BaseActivity 采用 pendingSubtitle 驱动 Toolbar；这里直接赋值即可

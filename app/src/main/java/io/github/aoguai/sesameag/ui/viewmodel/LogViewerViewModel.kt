@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicLong
 data class LogUiState(
     val mappingList: List<Int> = emptyList(),
     val isLoading: Boolean = true,
+    val isExporting: Boolean = false,
     val isSearching: Boolean = false,
     val searchQuery: String = "",
     val totalCount: Int = 0,
@@ -73,6 +74,7 @@ class LogViewerViewModel(application: Application) : AndroidViewModel(applicatio
     private var currentFilePath: String? = null
     private var searchJob: Job? = null
     private var loadJob: Job? = null
+    private var exportJob: Job? = null
     private var updateJob: Job? = null // ✅ 新增:文件更新任务
 
     // --- 核心数据结构 ---
@@ -396,22 +398,33 @@ class LogViewerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun exportLogFile(context: Context) {
         val path = currentFilePath ?: return
-        try {
-            val file = File(path)
-            if (!file.exists()) {
-                ToastUtil.showToast(context, "源文件不存在")
-                return
+        if (exportJob?.isActive == true || _uiState.value.isExporting) return
+        exportJob = viewModelScope.launch {
+            _uiState.update { it.copy(isExporting = true) }
+            try {
+                val sourceFile = File(path)
+                if (!sourceFile.exists()) {
+                    ToastUtil.showToast(context, "源文件不存在")
+                    return@launch
+                }
+                val exportFile = withContext(Dispatchers.IO) {
+                    Files.exportFile(sourceFile, true)
+                }
+
+                if (exportFile != null && exportFile.exists()) {
+                    val msg = "${context.getString(R.string.file_exported)} ${exportFile.path}"
+                    ToastUtil.showToast(context, msg)
+                } else {
+                    ToastUtil.showToast(context, "导出失败")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.printStackTrace(tag, "Export error", e)
+                ToastUtil.showToast(context, "导出异常: ${e.message}")
+            } finally {
+                _uiState.update { it.copy(isExporting = false) }
             }
-            val exportFile = Files.exportFile(file, true)
-            if (exportFile != null && exportFile.exists()) {
-                val msg = "${context.getString(R.string.file_exported)} ${exportFile.path}"
-                ToastUtil.showToast(context, msg)
-            } else {
-                ToastUtil.showToast(context, "导出失败")
-            }
-        } catch (e: Exception) {
-            Log.printStackTrace(tag, "Export error", e)
-            ToastUtil.showToast(context, "导出异常: ${e.message}")
         }
     }
 
@@ -474,6 +487,7 @@ class LogViewerViewModel(application: Application) : AndroidViewModel(applicatio
         closeFile()
         loadJob?.cancel()
         searchJob?.cancel()
+        exportJob?.cancel()
         updateJob?.cancel()
     }
 }

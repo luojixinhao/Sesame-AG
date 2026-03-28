@@ -68,21 +68,11 @@
     <string name="koubei_sign_in">口碑签到</string>
     <string name="more">更多</string>
     <string name="hello_user">你好，旅行者！</string>
-    <string name="forest_log">森林</string>
-    <string name="farm_log">庄园</string>
-    <string name="all_log">全部</string>
-    <string name="runtime_log">运行日志</string>
     <string name="unactivated">未激活</string>
     <string name="tips">小贴士</string>
     <string name="hide_the_application_icon">隐藏图标</string>
-    <string name="view_error_log_file">查看异常日志</string>
-    <string name="export_error_log_file">导出异常日志</string>
-    <string name="export_runtime_log_file">导出运行日志</string>
-    <string name="view_all_log_file">查看全部日志</string>
     <string name="export_the_statistic_file">导出统计</string>
     <string name="import_the_statistic_file">导入统计</string>
-    <string name="view_runtim_log_file">查看运行日志</string>
-    <string name="view_capture">抓包</string>
     <string name="settings">设  置</string>
     <string name="extend">扩展功能</string>
     <string name="limit_collect">限制收取</string>
@@ -92,17 +82,12 @@
     <string name="sync_step_count">自定义同步步数</string>
     <string name="use_double_card">使用双击卡</string>
     <string name="wait_when_exception">异常等待时间(分钟)</string>
-    <string name="other_log">查看其他日志</string>
     <string name="search">搜索</string>
     <string name="last">上一个</string>
     <string name="next">下一个</string>
     <string name="ok">确认</string>
-    <string name="clear_file">清空文件</string>
     <string name="open_with_other_browser">用浏览器打开</string>
-    <string name="export_file">导出文件</string>
     <string name="copy_the_url">复制链接</string>
-    <string name="scroll_to_top">跳到顶部</string>
-    <string name="scroll_to_bottom">跳到底部</string>
     <string name="choose_a_browser">选择浏览器</string>
     <string name="copy_success">复制成功</string>
     <string name="cancel">取消</string>
@@ -183,7 +168,6 @@
     <string name="consume_gold">目标应用消费金</string>
     <string name="use_special_food">使用特殊食品</string>
     <string name="file_exported">文件已导出到: </string>
-    <string name="file_cleared">文件已清空</string>
     <string name="file_not_support_open_with_browser">该文件不支持用浏览器打开</string>
     <string name="not_support_open_with_browser">不支持用浏览器打开</string>
     <string name="text_diary_toast">测试弹窗字符串</string>
@@ -200,8 +184,6 @@
     <string name="the_image_of_unactivated">The image of unactivated</string>
     <string name="debug_tips">请在debug日志查看结果！</string>
     <string name="clear_photo">清空光盘行动图片💿</string>
-    <string name="all_log_file">全部日志</string>
-    <string name="error_log_file">异常日志</string>
     <string name="xposed_description">春种一粒粟，秋收万颗子。</string>
 
 </resources>

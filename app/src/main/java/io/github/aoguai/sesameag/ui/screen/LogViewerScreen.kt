@@ -259,7 +259,7 @@ fun LogViewerScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    if (state.isLoading) "Loading..." else "${state.totalCount} lines",
+                                    if (state.isExporting) "导出中..." else if (state.isLoading) "Loading..." else "${state.totalCount} lines",
                                     style = MaterialTheme.typography.bodySmall,
                                     // ✅ 统一颜色
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -306,7 +306,10 @@ fun LogViewerScreen(
                                         tooltip = { PlainTooltip { Text("更多选项") } },
                                         state = rememberTooltipState()
                                     ) {
-                                        IconButton(onClick = { showMenu = true }) {
+                                        IconButton(
+                                            onClick = { showMenu = true },
+                                            enabled = !state.isExporting
+                                        ) {
                                             Icon(Icons.Default.MoreVert, "More Options")
                                         }
                                     }
@@ -374,6 +377,7 @@ fun LogViewerScreen(
                                         HorizontalDivider()
                                         DropdownMenuItem(
                                             text = { Text("导出文件") },
+                                            enabled = !state.isExporting,
                                             onClick = { showMenu = false; viewModel.exportLogFile(context) },
                                             leadingIcon = { Icon(Icons.Default.Share, null) }
                                         )
@@ -407,7 +411,7 @@ fun LogViewerScreen(
                     }
                 }
         ) {
-            if (state.isLoading && state.mappingList.isEmpty()) {
+            if (state.isExporting || (state.isLoading && state.mappingList.isEmpty())) {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -415,7 +419,7 @@ fun LogViewerScreen(
                     CircularProgressIndicator()
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Loading...",
+                        if (state.isExporting) "导出中..." else "Loading...",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onBackground
                     )

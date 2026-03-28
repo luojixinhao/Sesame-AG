@@ -12,6 +12,7 @@ import androidx.compose.material.icons.rounded.Agriculture
 import androidx.compose.material.icons.rounded.AlignVerticalTop
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Forest
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.runtime.Composable
@@ -42,12 +43,17 @@ fun LogsContent(
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MenuButton(text = "其他日志", icon = Icons.Rounded.AlignVerticalTop, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenOtherLog) }
-            MenuButton(text = "错误日志", icon = Icons.Rounded.BugReport, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenErrorLog) }
+            MenuButton(text = "错误日志", icon = Icons.Rounded.ErrorOutline, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenErrorLog) }
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MenuButton(text = "全部日志", icon = Icons.Rounded.Description, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenAllLog) }
             MenuButton(text = "抓包日志", icon = Icons.Rounded.History, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenCaptureLog) }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            MenuButton(text = "调试日志", icon = Icons.Rounded.BugReport, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenDebugLog) }
+            Spacer(modifier)
         }
     }
 }
