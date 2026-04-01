@@ -63,65 +63,6 @@ open class StringModelField(code: String, name: String, value: String) : ModelFi
             }
         }
     }
-
-    class TimeStringModelField(
-        code: String,
-        name: String,
-        value: String,
-        private val allowDisable: Boolean = false,
-        private val extraAllowedValues: Set<String> = emptySet()
-    ) : StringModelField(code, name, value) {
-
-        @Transient
-        private var initialized = false
-
-        init {
-            initialized = true
-            setObjectValue(value)
-            defaultValue = this.value
-        }
-
-        override fun normalizeValue(rawValue: String): String {
-            if (!initialized) {
-                return rawValue.trim()
-            }
-            val trimmed = rawValue.trim()
-            if (allowDisable && trimmed == "-1") {
-                return "-1"
-            }
-            if (trimmed in extraAllowedValues) {
-                return trimmed
-            }
-
-            val digits = trimmed.filter { it.isDigit() }
-            val normalized = when (digits.length) {
-                2 -> digits + "00"
-                3 -> "0$digits"
-                4, 6 -> digits
-                else -> defaultValue ?: ""
-            }
-
-            if (normalized.isBlank()) {
-                return normalized
-            }
-
-            val hour = normalized.substring(0, 2).toIntOrNull() ?: return defaultValue ?: ""
-            val minute = normalized.substring(2, 4).toIntOrNull() ?: return defaultValue ?: ""
-            if (hour !in 0..23 || minute !in 0..59) {
-                return defaultValue ?: ""
-            }
-
-            if (normalized.length == 6) {
-                val second = normalized.substring(4, 6).toIntOrNull() ?: return defaultValue ?: ""
-                if (second !in 0..59) {
-                    return defaultValue ?: ""
-                }
-            }
-
-            return normalized
-        }
-    }
-
     class IntervalStringModelField(
         code: String,
         name: String,

@@ -11,6 +11,7 @@ import io.github.aoguai.sesameag.model.ModelGroup
 import io.github.aoguai.sesameag.model.withDesc
 import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.HourOfDayModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
@@ -74,8 +75,8 @@ class AntSports : ModelTask() {
     private lateinit var donateCharityCoinType: ChoiceModelField
     private lateinit var donateCharityCoinAmount: IntegerModelField
     private lateinit var minExchangeCount: IntegerModelField
-    private lateinit var earliestSyncStepTime: IntegerModelField
-    private lateinit var latestExchangeTime: IntegerModelField
+    private lateinit var earliestSyncStepTime: HourOfDayModelField
+    private lateinit var latestExchangeTime: HourOfDayModelField
     private lateinit var syncStepCount: IntegerModelField
     private lateinit var tiyubiz: BooleanModelField
     private lateinit var battleForFriends: BooleanModelField
@@ -254,14 +255,14 @@ class AntSports : ModelTask() {
             ).also { minExchangeCount = it }
         )
         modelFields.addField(
-            IntegerModelField("earliestSyncStepTime", "同步步数 | 最早同步时间(24小时制)", 6, 0, 23).withDesc(
+            HourOfDayModelField("earliestSyncStepTime", "同步步数 | 最早同步时间", "0600").withDesc(
                 "允许开始同步自定义步数的最早时间，仅在自定义同步步数大于 0 时生效。"
             )
                 .also { earliestSyncStepTime = it }
         )
         modelFields.addField(
-            IntegerModelField("latestExchangeTime", "最晚捐步时间(24小时制)", 22, 0, 24).withDesc(
-                "旧版捐步兑换的最晚等待时间；超过该时间后即使未达到最小捐步步数也会按当前步数尝试处理。"
+            HourOfDayModelField("latestExchangeTime", "最晚捐步时间", "2200", allowDayEnd = true).withDesc(
+                "旧版捐步兑换的最晚等待时间；支持 24:00 作为日终截止，超过该时间后即使未达到最小捐步步数也会按当前步数尝试处理。"
             )
                 .also { latestExchangeTime = it }
         )
@@ -337,10 +338,9 @@ class AntSports : ModelTask() {
             }
 
             // 步数同步
-            val earliestHour = (earliestSyncStepTime.value ?: 0).coerceIn(0, 23)
             if (isSyncStepEnabled() &&
                 !Status.hasFlagToday(StatusFlags.FLAG_ANTSPORTS_SYNC_STEP_DONE) &&
-                TimeUtil.isNowAfterOrCompareTimeStr(String.format("%02d00", earliestHour))) {
+                earliestSyncStepTime.hasReachedToday()) {
                 syncStepTask()
             }
 
@@ -538,12 +538,11 @@ class AntSports : ModelTask() {
             return false
         }
 
-        val earliestHour = if (::earliestSyncStepTime.isInitialized) {
-            (earliestSyncStepTime.value ?: 0).coerceIn(0, 23)
+        return if (::earliestSyncStepTime.isInitialized) {
+            earliestSyncStepTime.hasReachedToday()
         } else {
-            8
+            HourOfDayModelField("defaultEarliestSyncStepTime", "默认最早同步时间", "0800").hasReachedToday()
         }
-        return TimeUtil.isNowAfterOrCompareTimeStr(String.format("%02d00", earliestHour))
     }
 
     private fun queryCurrentWalkStepCount(): Int? {
@@ -1602,15 +1601,12 @@ class AntSports : ModelTask() {
             var jo = JSONObject(s)
             if (ResChecker.checkRes(TAG, jo)) {
                 val produceQuantity = AntSportsRpcCall.extractWalkStepCount(jo)
-                val hour = TimeUtil.getFormatTime().split(":").first().toInt()
-
                 val minExchange = minExchangeCount.value ?: 0
-                val latestHour = (latestExchangeTime.value ?: 24).coerceIn(0, 24)
                 if (produceQuantity <= 0) {
                     Log.record(TAG, "当前暂无可捐步数")
                     return
                 }
-                if (produceQuantity < minExchange && hour < latestHour) {
+                if (produceQuantity < minExchange && latestExchangeTime.isBeforeCutoff()) {
                     return
                 }
 

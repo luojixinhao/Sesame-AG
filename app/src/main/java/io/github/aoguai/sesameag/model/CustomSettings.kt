@@ -1,26 +1,27 @@
 package io.github.aoguai.sesameag.model
 
+import android.app.TimePickerDialog
 import android.content.Context
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import io.github.aoguai.sesameag.R
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.entity.MapperEntity
 import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
-import io.github.aoguai.sesameag.model.modelFieldExt.ListModelField.ListJoinCommaToStringModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.TimeWindowListModelField
 import io.github.aoguai.sesameag.ui.widget.ListDialog
 import io.github.aoguai.sesameag.util.SesameAgUtil
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.JsonUtil
-import io.github.aoguai.sesameag.util.ListUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.ToastUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
 import java.lang.reflect.Field
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 自定义设置管理类
@@ -32,10 +33,11 @@ object CustomSettings {
     val onlyOnceDaily = BooleanModelField("onlyOnceDaily", "选中每日只运行一次的模块", false)
     val autoHandleOnceDaily = BooleanModelField("autoHandleOnceDaily", "定时自动关闭单次运行", false)
 
-    val autoHandleOnceDailyTimes = ListJoinCommaToStringModelField(
+    val autoHandleOnceDailyTimes = TimeWindowListModelField(
         "autoHandleOnceDailyTimes",
-        "自动全量时间点",
-        ListUtil.newArrayList("0600", "2000")
+        "自动全量时间段",
+        "0600-0650,2000-2050",
+        allowDisable = false
     )
 
     val onlyOnceDailyList = SelectModelField(
@@ -97,7 +99,7 @@ object CustomSettings {
     private fun resetToDefault() {
         onlyOnceDaily.setObjectValue(false)
         autoHandleOnceDaily.setObjectValue(false)
-        autoHandleOnceDailyTimes.setObjectValue(ListUtil.newArrayList("0600", "2000"))
+        autoHandleOnceDailyTimes.setObjectValue("0600-0650,2000-2050")
         val defaultSet = LinkedHashSet<String?>().apply {
             add("antOrchard")
             add("antCooperate")
@@ -203,17 +205,7 @@ object CustomSettings {
         }
 
         val now = System.currentTimeMillis()
-        val interval = (BaseModel.checkInterval.value ?: 0).toLong()
-        val isSpecialTime = (autoHandleOnceDailyTimes.value ?: emptyList()).any { timeStr ->
-            val startCal = TimeUtil.getTodayCalendarByTimeStr(timeStr)
-            if (startCal != null) {
-                val startTime = startCal.timeInMillis
-                val endTime = startTime + interval
-                now in startTime..endTime
-            } else {
-                false
-            }
-        }
+        val isSpecialTime = !autoHandleOnceDailyTimes.isDisabled() && autoHandleOnceDailyTimes.isActive(now)
 
         var isEnabled = configEnabled
 
@@ -221,14 +213,7 @@ object CustomSettings {
             isEnabled = false
             if (enableLog) Log.record("自动单次运行触发: 现在处于自动全量运行时段，本次将运行所有已开启的任务")
         } else if (enableLog && autoHandleOnceDaily.value == true) {
-            val sdf = SimpleDateFormat("HHmm", Locale.getDefault())
-            val ranges = (autoHandleOnceDailyTimes.value ?: emptyList()).mapNotNull { timeStr ->
-                TimeUtil.getTodayCalendarByTimeStr(timeStr)?.let {
-                    val endTime = it.timeInMillis + interval
-                    "$timeStr-${sdf.format(Date(endTime))}"
-                }
-            }.joinToString(", ")
-            Log.record("已设置自动全量运行，时段为：$ranges")
+            Log.record("已设置自动全量运行，时段为：${autoHandleOnceDailyTimes.value ?: ""}")
         }
 
         // 如果今日尚未完成首次全量运行，则不启用“跳过”拦截逻辑
@@ -257,6 +242,144 @@ object CustomSettings {
                 val selectedShowName = displayNames[which]
                 load(selectedUid)
                 showAccountOps(context, selectedUid, selectedShowName, onRefresh)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private data class TimeWindowRow(
+        var start: String,
+        var end: String
+    )
+
+    private fun parseTimeWindowRows(configValue: String?): MutableList<TimeWindowRow> {
+        val rows = mutableListOf<TimeWindowRow>()
+        configValue.orEmpty()
+            .split(",")
+            .map { it.trim() }
+            .filter { it.contains("-") }
+            .forEach { token ->
+                val parts = token.split("-", limit = 2)
+                if (parts.size == 2) {
+                    rows += TimeWindowRow(parts[0], parts[1])
+                }
+            }
+        if (rows.isEmpty()) {
+            rows += TimeWindowRow("0600", "0650")
+        }
+        return rows
+    }
+
+    private fun formatTimeToken(timeToken: String): String {
+        val normalized = timeToken.filter { it.isDigit() }.padStart(4, '0')
+        return "${normalized.substring(0, 2)}:${normalized.substring(2, 4)}"
+    }
+
+    private fun pickTimeToken(context: Context, initialToken: String, onPicked: (String) -> Unit) {
+        val initialCalendar = TimeUtil.getTodayCalendarByTimeStr(initialToken)
+            ?: TimeUtil.getTodayCalendarByTimeStr("0000")
+            ?: return
+        TimePickerDialog(
+            context,
+            { _, hourOfDay, minute ->
+                onPicked(String.format("%02d%02d", hourOfDay, minute))
+            },
+            initialCalendar.get(java.util.Calendar.HOUR_OF_DAY),
+            initialCalendar.get(java.util.Calendar.MINUTE),
+            true
+        ).show()
+    }
+
+    private fun showAutoHandleTimeWindowDialog(
+        context: Context,
+        uid: String,
+        showName: String,
+        onRefresh: () -> Unit
+    ) {
+        val rows = parseTimeWindowRows(autoHandleOnceDailyTimes.getConfigValue())
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 24, 24, 24)
+        }
+        val scrollView = ScrollView(context).apply {
+            addView(container)
+        }
+
+        fun renderRows() {
+            container.removeAllViews()
+
+            rows.forEachIndexed { index, row ->
+                val rowLayout = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                }
+                val startButton = Button(context).apply {
+                    text = formatTimeToken(row.start)
+                    setOnClickListener {
+                        pickTimeToken(context, row.start) { picked ->
+                            row.start = picked
+                            renderRows()
+                        }
+                    }
+                }
+                val separator = TextView(context).apply {
+                    text = "  至  "
+                }
+                val endButton = Button(context).apply {
+                    text = formatTimeToken(row.end)
+                    setOnClickListener {
+                        pickTimeToken(context, row.end) { picked ->
+                            row.end = picked
+                            renderRows()
+                        }
+                    }
+                }
+                val removeButton = Button(context).apply {
+                    text = "删除"
+                    isEnabled = rows.size > 1
+                    setOnClickListener {
+                        if (rows.size > 1) {
+                            rows.removeAt(index)
+                            renderRows()
+                        }
+                    }
+                }
+                rowLayout.addView(startButton)
+                rowLayout.addView(separator)
+                rowLayout.addView(endButton)
+                rowLayout.addView(removeButton)
+                container.addView(rowLayout)
+            }
+
+            container.addView(Button(context).apply {
+                text = "新增时间段"
+                setOnClickListener {
+                    rows += TimeWindowRow("0000", "0030")
+                    renderRows()
+                }
+            })
+
+            container.addView(TextView(context).apply {
+                text = "时间段采用开始包含、结束不包含；自动全量模式开启后，命中这些时间段时会临时放开单次运行限制。"
+            })
+        }
+
+        renderRows()
+
+        AlertDialog.Builder(context)
+            .setTitle("设置 ${showName} 非单次运行时段")
+            .setView(scrollView)
+            .setPositiveButton(R.string.ok) { _, _ ->
+                val serialized = rows
+                    .map { "${it.start}-${it.end}" }
+                    .joinToString(",")
+                if (serialized.isBlank()) {
+                    autoHandleOnceDailyTimes.reset()
+                } else {
+                    autoHandleOnceDailyTimes.setConfigValue(serialized)
+                }
+                save(uid)
+                onRefresh()
+                showAccountOps(context, uid, showName, onRefresh)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -303,19 +426,7 @@ object CustomSettings {
                     } catch (e: Exception) {
                     }
                 } else if (which == 2) {
-                    val edt = android.widget.EditText(context)
-                    edt.setText(autoHandleOnceDailyTimes.getConfigValue() ?: "")
-                    AlertDialog.Builder(context)
-                        .setTitle("设置 ${showName} 非单次运行时段")
-                        .setMessage("输入开始时间点(如0600)，多个用逗号隔开。时段为该时间点加\"设置\"中的执行间隔时间")
-                        .setView(edt)
-                        .setPositiveButton(R.string.ok) { _, _ ->
-                            autoHandleOnceDailyTimes.setConfigValue(edt.text.toString())
-                            save(uid)
-                            showAccountOps(context, uid, showName, onRefresh)
-                        }
-                        .setNegativeButton(R.string.cancel, null)
-                        .show()
+                    showAutoHandleTimeWindowDialog(context, uid, showName, onRefresh)
                 }
             }
             .setNegativeButton("返回", null)

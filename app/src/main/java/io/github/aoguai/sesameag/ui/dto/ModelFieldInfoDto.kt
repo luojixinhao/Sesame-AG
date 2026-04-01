@@ -22,11 +22,12 @@ data class ModelFieldInfoDto(
     var type: String = "",
     var expandKey: Any? = null,
     var expandValue: Any? = null,
+    var editorMeta: Any? = null,
     var configValue: String = "",
     var desc: String = ""
 ) : Serializable {
 
-    constructor() : this("", "", "", null, null, "", "")
+    constructor() : this("", "", "", null, null, null, "", "")
 
     companion object {
         /**
@@ -45,6 +46,7 @@ data class ModelFieldInfoDto(
                 type = modelField.getType(),
                 expandKey = modelField.getExpandKey(),
                 expandValue = modelField.getExpandValue(),
+                editorMeta = modelField.getEditorMeta(),
                 configValue = modelField.getConfigValue() ?: "",
                 desc = modelField.desc
             )

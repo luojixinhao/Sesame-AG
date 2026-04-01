@@ -41,29 +41,5 @@ open class ListModelField(code: String, name: String, value: MutableList<String>
         }
         return btn
     }
-
-    /**
-     * 一个子类，用于将字符串列表转换为逗号分隔的字符串，并实现相应的设置和获取功能。
-     */
-    class ListJoinCommaToStringModelField(code: String, name: String, value: MutableList<String>) : ListModelField(code, name, value) {
-
-        override fun setConfigValue(configValue: String?) {
-            if (configValue == null) {
-                reset()
-                return
-            }
-            val list = mutableListOf<String>()
-            for (str in configValue.split(",")) {
-                if (str.isNotEmpty()) {
-                    list.add(str)
-                }
-            }
-            value = list
-        }
-
-        override fun getConfigValue(): String {
-            return value?.joinToString(",") ?: ""
-        }
-    }
 }
 

@@ -26,6 +26,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectAndCountModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.TimePointModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.TimeTriggerModelField
 import io.github.aoguai.sesameag.task.AnswerAI.AnswerAI
 import io.github.aoguai.sesameag.task.ModelTask
@@ -37,7 +38,6 @@ import io.github.aoguai.sesameag.util.ActionDelayUtil
 import io.github.aoguai.sesameag.util.CoroutineUtils
 import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.JsonUtil
-import io.github.aoguai.sesameag.util.ListUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.RandomUtil
 import io.github.aoguai.sesameag.util.ResChecker
@@ -131,10 +131,10 @@ class AntFarm : ModelTask() {
     /**
      * 小鸡睡觉时间
      */
-    private var sleepTime: StringModelField? = null
+    private var sleepTime: TimePointModelField? = null
 
     // 起床时间
-    private var wakeUpTime: StringModelField? = null
+    private var wakeUpTime: TimePointModelField? = null
 
     /**
      * 小鸡睡觉时长
@@ -433,19 +433,19 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("自动领取庄园游戏中心可开启的宝箱奖励。").also { enableDdrawGameCenterAward = it })
         modelFields.addField(
-            StringModelField.TimeStringModelField(
+            TimePointModelField(
                 "sleepTime",
-                "小鸡睡觉时间(关闭:-1)",
+                "小鸡睡觉时间",
                 "2330",
                 true
-            ).withDesc("设置自动让小鸡睡觉的时间，填 -1 关闭睡觉定时。").also { sleepTime = it })
+            ).withDesc("设置自动让小鸡睡觉的时间。").also { sleepTime = it })
         modelFields.addField(
-            StringModelField.TimeStringModelField(
+            TimePointModelField(
                 "wakeupTime",
-                "小鸡起床时间(关闭:-1)",
+                "小鸡起床时间",
                 "0530",
                 true
-            ).withDesc("设置自动让小鸡起床的时间，填 -1 关闭起床定时。").also { wakeUpTime = it })
+            ).withDesc("设置自动让小鸡起床的时间。").also { wakeUpTime = it })
         modelFields.addField(
             SelectAndCountModelField(
                 "feedFriendAnimalList",
@@ -1077,38 +1077,42 @@ class AntFarm : ModelTask() {
     private fun animalSleepAndWake() {
         try {
             val now = TimeUtil.getNow()
-            val sleepTimeStr = sleepTime!!.value
-            val animalSleepTimeCalendar = if ("-1" == sleepTimeStr) {
-                Log.record(TAG, "当前已关闭小鸡睡觉")
-                null
-            } else {
-                TimeUtil.getTodayCalendarByTimeStr(sleepTimeStr)
+            val animalSleepTime = when {
+                sleepTime?.isDisabled() == true -> {
+                    Log.record(TAG, "当前已关闭小鸡睡觉")
+                    null
+                }
+                else -> sleepTime?.getTodayPointAt(now.timeInMillis)
             }
-            if (sleepTimeStr != "-1" && animalSleepTimeCalendar == null) {
-                Log.record(TAG, "小鸡睡觉时间格式错误，请重新设置")
+            if (sleepTime?.isDisabled() != true && animalSleepTime == null) {
+                Log.record(TAG, "小鸡睡觉时间解析失败，请重新设置")
             }
 
-            val wakeUpTimeStr = wakeUpTime!!.value
-            var animalWakeUpTimeCalendar = if ("-1" == wakeUpTimeStr) {
-                Log.record(TAG, "当前已关闭小鸡起床")
-                null
-            } else {
-                TimeUtil.getTodayCalendarByTimeStr(wakeUpTimeStr)
+            var animalWakeUpTime = when {
+                wakeUpTime?.isDisabled() == true -> {
+                    Log.record(TAG, "当前已关闭小鸡起床")
+                    null
+                }
+                else -> wakeUpTime?.getTodayPointAt(now.timeInMillis)
             }
-            if (wakeUpTimeStr != "-1" && animalWakeUpTimeCalendar == null) {
-                Log.record(TAG, "小鸡起床时间格式错误，请重新设置，否则默认06:00")
-                animalWakeUpTimeCalendar = TimeUtil.getTodayCalendarByTimeStr("0600")
+            if (wakeUpTime?.isDisabled() != true && animalWakeUpTime == null) {
+                Log.record(TAG, "小鸡起床时间解析失败，请重新设置，否则默认06:00")
+                animalWakeUpTime = TimePointModelField("defaultWakeupTime", "默认起床时间", "0600").getTodayPointAt(now.timeInMillis)
             }
-            if (animalSleepTimeCalendar == null && animalWakeUpTimeCalendar == null) {
+            if (animalSleepTime == null && animalWakeUpTime == null) {
                 return
             }
             val sixAmToday = TimeUtil.getTodayCalendarByTimeStr("0600") ?: return
             if (now.after(sixAmToday)) {
-                animalWakeUpTimeCalendar?.add(Calendar.DAY_OF_MONTH, 1)
+                animalWakeUpTime = animalWakeUpTime?.plus(24 * 60 * 60 * 1000L)
             }
 
-            val animalWakeUpTime = animalWakeUpTimeCalendar?.timeInMillis
-            val animalSleepTime = animalSleepTimeCalendar?.timeInMillis
+            val animalSleepTimeCalendar = animalSleepTime?.let {
+                Calendar.getInstance().apply { timeInMillis = it }
+            }
+            val animalWakeUpTimeCalendar = animalWakeUpTime?.let {
+                Calendar.getInstance().apply { timeInMillis = it }
+            }
             val afterSleepTime = animalSleepTimeCalendar?.let { now > it } ?: false
             val afterWakeUpTime = animalWakeUpTimeCalendar?.let { now > it } ?: false
             val afterSixAm = now >= sixAmToday

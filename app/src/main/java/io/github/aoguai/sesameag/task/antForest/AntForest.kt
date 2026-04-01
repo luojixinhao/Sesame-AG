@@ -31,6 +31,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectAndCountModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.TimePointModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.TimeTriggerModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
@@ -44,7 +45,6 @@ import io.github.aoguai.sesameag.ui.ObjReference
 import io.github.aoguai.sesameag.util.ActionDelayUtil
 import io.github.aoguai.sesameag.util.Average
 import io.github.aoguai.sesameag.util.GlobalThreadPools
-import io.github.aoguai.sesameag.util.ListUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.Notify.updateLastExecText
 import io.github.aoguai.sesameag.util.Notify.updateStatusText
@@ -165,7 +165,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     /** 6秒拼手速游戏局数配置 */
     var whackMoleGames: IntegerModelField? = null
     var whackMoleMoleCount: IntegerModelField? = null
-    var whackMoleTime: StringModelField? = null // 6秒拼手速执行时间
+    var whackMoleTime: TimePointModelField? = null // 6秒拼手速执行时间
 
     // 6秒拼手速模式选择
     val whackMoleModeNames = arrayOf("关闭", "兼容", "激进")
@@ -209,7 +209,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private var bubbleBoostCard: ChoiceModelField? = null //加速卡
     private var youthPrivilege: BooleanModelField? = null //青春特权 森林道具
     private var ecoLife: BooleanModelField? = null
-    private var ecoLifeTime: StringModelField? = null // 绿色行动执行时间
+    private var ecoLifeTime: TimePointModelField? = null // 绿色行动执行时间
     private var giveProp: BooleanModelField? = null
 
     private var robMultiplierCard: ChoiceModelField? = null // 收好友N倍卡
@@ -217,7 +217,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
     private var cycleinterval: IntegerModelField? = null
     private var energyRainChance: BooleanModelField? = null
-    private var energyRainTime: StringModelField? = null // 能量雨执行时间
+    private var energyRainTime: TimePointModelField? = null // 能量雨执行时间
 
     /**
      * 能量炸弹卡
@@ -370,7 +370,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 15,
             ).withDesc("兼容模式下每局目标击打数量，用于保守刷奖励。").also { whackMoleMoleCount = it })
         modelFields.addField(
-            StringModelField.TimeStringModelField(
+            TimePointModelField(
                 "whackMoleTime",
                 "🎮 6秒拼手速 | 执行时间",
                 "0820"
@@ -383,7 +383,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 false
             ).withDesc("自动进入能量雨并完成收集。").also { energyRain = it })
         modelFields.addField(
-            StringModelField.TimeStringModelField(
+            TimePointModelField(
                 "energyRainTime",
                 "能量雨 | 默认8点10分后执行",
                 "0810"
@@ -694,7 +694,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         modelFields.addField(BooleanModelField("ecoLife", "绿色行动 | 开关", false).withDesc(
             "执行绿色行动任务。"
         ).also { ecoLife = it })
-        modelFields.addField(StringModelField.TimeStringModelField("ecoLifeTime", "绿色行动 | 默认8点后执行", "0800").withDesc(
+        modelFields.addField(TimePointModelField("ecoLifeTime", "绿色行动 | 默认8点后执行", "0800").withDesc(
             "限制绿色行动开始时间。"
         ).also { ecoLifeTime = it })
         modelFields.addField(BooleanModelField("ecoLifeOpen", "绿色任务 |  自动开通", false).withDesc(
@@ -1116,7 +1116,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 }
                 if (ecoLife?.value == true) {
                     // 检查是否到达执行时间
-                    if (TaskTimeChecker.isTimeReached(ecoLifeTime?.value, "0800")) {
+                    if (ecoLifeTime?.isReachedToday() == true) {
                         EcoLife.ecoLife()
                         tc.countDebug("绿色行动")
                     } else {
@@ -1139,7 +1139,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
                 if (energyRain?.value == true) {
                     // 检查是否到达执行时间
-                    if (TaskTimeChecker.isTimeReached(energyRainTime?.value, "0810")) {
+                    if (energyRainTime?.isReachedToday() == true) {
                         if (energyRainChance?.value == true) {
                             useEnergyRainChanceCard()
                             tc.countDebug("使用能量雨卡")
@@ -1827,8 +1827,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             if (modeIndex == 0) return
 
             // 检查执行时间
-            val targetTime = whackMoleTime?.value ?: "0820"
-            if (TaskTimeChecker.isTimeReached(targetTime, "0820")) {
+            if (whackMoleTime?.isReachedToday() == true) {
 
                 val whackMoleFlag = "forest::whackMole::executed"
                 if (Status.hasFlagToday(whackMoleFlag)) return

@@ -71,6 +71,8 @@ import io.github.aoguai.sesameag.util.Notify
 import io.github.aoguai.sesameag.util.Notify.stop
 import io.github.aoguai.sesameag.util.Notify.updateStatusText
 import io.github.aoguai.sesameag.util.PermissionUtil.checkBatteryPermissions
+import io.github.aoguai.sesameag.util.TimeTriggerEvaluator
+import io.github.aoguai.sesameag.util.TimeTriggerParser
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.WorkflowRootGuard
 import io.github.aoguai.sesameag.util.maps.UserMap
@@ -912,24 +914,21 @@ class ApplicationHook {
             try {
                 checkInactiveTime()
                 val checkInterval = checkInterval.value ?: 0
-                val execAtTimeList = execAtTimeList.value
-                if (execAtTimeList != null && execAtTimeList.contains("-1")) {
-                    record(TAG, "定时执行未开启")
-                    return
-                }
+                val execScheduleField = execAtTimeList
                 var delayMillis = checkInterval.toLong()
                 var targetTime: Long = 0
-                if (execAtTimeList != null) {
-                    val lastCal = TimeUtil.getCalendarByTimeMillis(lastTime)
-                    val nextCal = TimeUtil.getCalendarByTimeMillis(lastTime + checkInterval.toLong())
-                    for (timeStr in execAtTimeList) {
-                        val execCal = TimeUtil.getTodayCalendarByTimeStr(timeStr)
-                        if (execCal != null && lastCal < execCal && nextCal > execCal) {
-                            record(TAG, "设置定时执行:$timeStr")
-                            targetTime = execCal.getTimeInMillis()
-                            delayMillis = targetTime - lastTime
-                            break
-                        }
+                if (execScheduleField.isDisabled()) {
+                    record(TAG, "定时执行已关闭，保留轮询间隔调度")
+                } else {
+                    val intervalTargetTime = lastTime + checkInterval.toLong()
+                    val nextPointAt = TimeTriggerEvaluator.nextCheckpointAt(
+                        execScheduleField.getTriggerSpec(),
+                        lastTime
+                    )
+                    if (nextPointAt != null && nextPointAt < intervalTargetTime) {
+                        record(TAG, "设置定时执行:${TimeUtil.getCommonDate(nextPointAt)}")
+                        targetTime = nextPointAt
+                        delayMillis = targetTime - lastTime
                     }
                 }
                 nextExecutionTime = if (targetTime > 0) targetTime else (lastTime + delayMillis)
@@ -1216,8 +1215,12 @@ class ApplicationHook {
             if (appContext == null) return
             ensureScheduler()
 
-            val wakenAtTimeList = wakenAtTimeList.value
-            if (wakenAtTimeList != null && wakenAtTimeList.contains("-1")) return
+            val wakeField = wakenAtTimeList
+            if (wakeField.isDisabled()) {
+                SmartSchedulerManager.cancelNamedTask("每日0点任务")
+                SmartSchedulerManager.cancelNamedTask("自定义唤醒任务")
+                return
+            }
 
             // 1. 每日0点
             val calendar = Calendar.getInstance()
@@ -1234,23 +1237,27 @@ class ApplicationHook {
                     }
                 }
 
-            // 2. 自定义时间
-            if (wakenAtTimeList != null) {
-                val now = Calendar.getInstance()
-                for (timeStr in wakenAtTimeList) {
-                    try {
-                        val target = TimeUtil.getTodayCalendarByTimeStr(timeStr)
-                        if (target != null && target > now) {
-                            val delay = target.getTimeInMillis() - System.currentTimeMillis()
-                            schedule(delay, "自定义: $timeStr") {
-                                record(TAG, "⏰ 自定义触发: $timeStr")
-                                ApplicationHookEntry.onWakeupCustom(timeStr)
-                            }
-                        }
-                    } catch (_: Exception) { /* ignore */
-                    }
-                }
+            // 2. 下一次自定义唤醒（必要时跨日）
+            SmartSchedulerManager.cancelNamedTask("自定义唤醒任务")
+            val nextWakeAt = wakeField.nextPointAt() ?: return
+            val now = System.currentTimeMillis()
+            val delay = nextWakeAt - now
+            if (delay <= 0) return
+
+            val targetCalendar = Calendar.getInstance().apply { timeInMillis = nextWakeAt }
+            val secondOfDay = targetCalendar.get(Calendar.HOUR_OF_DAY) * 3600 +
+                targetCalendar.get(Calendar.MINUTE) * 60 +
+                targetCalendar.get(Calendar.SECOND)
+            val timeToken = TimeTriggerParser.formatSecondOfDay(
+                secondOfDay,
+                useSeconds = targetCalendar.get(Calendar.SECOND) != 0
+            )
+            schedule(delay, "自定义唤醒任务") {
+                record(TAG, "? 自定义触发: $timeToken")
+                ApplicationHookEntry.onWakeupCustom(timeToken)
+                setWakenAtTimeAlarm()
             }
+            return
         }
 
         fun registerBroadcastReceiver(context: Context) {

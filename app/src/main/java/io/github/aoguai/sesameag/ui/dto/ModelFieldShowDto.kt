@@ -22,13 +22,14 @@ data class ModelFieldShowDto(
     var name: String = "",
     var type: String = "",
     var expandKey: Any? = null,
+    var editorMeta: Any? = null,
     var configValue: String = "",
     var desc: String = "",
     var todayInactive: Boolean = false,
     var todayInactiveReason: String = ""
 ) : Serializable {
 
-    constructor() : this("", "", "", null, "", "", false, "")
+    constructor() : this("", "", "", null, null, "", "", false, "")
 
     companion object {
         /**
@@ -48,6 +49,7 @@ data class ModelFieldShowDto(
                 name = modelField.name,
                 type = modelField.getType(),
                 expandKey = modelField.getExpandKey(),
+                editorMeta = modelField.getEditorMeta(),
                 configValue = modelField.getConfigValue() ?: "",
                 desc = modelField.desc,
                 todayInactive = todayState.inactive,

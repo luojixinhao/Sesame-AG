@@ -4,9 +4,9 @@ import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField.MultiplyIntegerModelField
-import io.github.aoguai.sesameag.model.modelFieldExt.ListModelField.ListJoinCommaToStringModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.TimePointListModelField
+import io.github.aoguai.sesameag.model.modelFieldExt.TimeWindowListModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
-import io.github.aoguai.sesameag.util.ListUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.maps.BeachMap
 import io.github.aoguai.sesameag.util.maps.IdMapManager
@@ -117,39 +117,43 @@ class BaseModel : Model() {
         /**
          * 定时执行的时间点列表
          */
-        val execAtTimeList: ListJoinCommaToStringModelField = ListJoinCommaToStringModelField(
-            "execAtTimeList", "定时执行(关闭:-1)", ListUtil.newArrayList(
-                "0010", "0030", "0100", "0700", "0730", "1200", "1230", "1700", "1730", "2000", "2030", "2359"
-            )
-        ).withDesc("自动执行的时间点列表，格式 HHmm；填 -1 关闭。模块会在检查窗口内命中这些时间点后执行。")
+        val execAtTimeList: TimePointListModelField = TimePointListModelField(
+            "execAtTimeList",
+            "定时执行",
+            "0010,0030,0100,0700,0730,1200,1230,1700,1730,2000,2030,2359",
+            allowDisable = true
+        ).withDesc("自动执行的时间点列表。关闭后仅保留轮询间隔调度。")
 
         /**
          * 定时唤醒的时间点列表
          */
-        val wakenAtTimeList: ListJoinCommaToStringModelField = ListJoinCommaToStringModelField(
-            "wakenAtTimeList", "定时唤醒(关闭:-1)", ListUtil.newArrayList(
-                "0010", "0030", "0100", "0650", "2350" // 添加多个0点后的时间点
-            )
-        ).withDesc("自动唤醒目标应用的时间点列表，格式 HHmm；填 -1 关闭，适合凌晨或关键时段提前拉起进程。")
+        val wakenAtTimeList: TimePointListModelField = TimePointListModelField(
+            "wakenAtTimeList",
+            "定时唤醒",
+            "0010,0030,0100,0650,2350",
+            allowDisable = true
+        ).withDesc("自动唤醒目标应用的时间点列表，适合凌晨或关键时段提前拉起进程。")
 
         /**
          * 能量收集的时间范围
          */
-        val energyTime: ListJoinCommaToStringModelField = ListJoinCommaToStringModelField(
+        val energyTime: TimeWindowListModelField = TimeWindowListModelField(
             "energyTime",
-            "只收能量时间(范围|关闭:-1)",
-            ListUtil.newArrayList("0700-0730")
-        ).withDesc("命中该时间段时，只保留蚂蚁森林等能量相关任务；格式 HHmm-HHmm，填 -1 关闭限制。")
+            "只收能量时间",
+            "0700-0730",
+            allowDisable = true
+        ).withDesc("命中该时间段时，只保留蚂蚁森林等能量相关任务。")
 
         /**
          * 模块休眠时间范围
          */
-        val modelSleepTime: ListJoinCommaToStringModelField =
-            ListJoinCommaToStringModelField(
+        val modelSleepTime: TimeWindowListModelField =
+            TimeWindowListModelField(
                 "modelSleepTime",
-                "模块休眠时间(范围|关闭:-1)",
-                ListUtil.newArrayList("0200-0201")
-            ).withDesc("命中该时间段时暂停常规任务执行；格式 HHmm-HHmm，填 -1 关闭。")
+                "模块休眠时间",
+                "0200-0201",
+                allowDisable = true
+            ).withDesc("命中该时间段时暂停常规任务执行。")
 
         /**
          * 定时任务模式选择

@@ -342,6 +342,11 @@ object TimeTriggerParser {
         }
     }
 
+    @JvmStatic
+    fun formatSecondOfDay(secondOfDay: Int, useSeconds: Boolean = false): String {
+        return formatTimeToken(secondOfDay, useSeconds)
+    }
+
     private fun expandWindow(startSecond: Int, endSecond: Int): List<TimeWindow> {
         if (endSecond > startSecond) {
             return listOf(TimeWindow(startSecond, endSecond))
@@ -430,6 +435,43 @@ object TimeTriggerEvaluator {
         consumedIndex: Int = 0
     ): Long? {
         return evaluateNow(spec, now, consumedIndex).nextTriggerAt
+    }
+
+    @JvmStatic
+    fun nextCheckpointTodayAt(
+        spec: TimeTriggerSpec,
+        now: Long = System.currentTimeMillis(),
+        includeNow: Boolean = false
+    ): Long? {
+        if (spec.disabled || spec.checkpointSeconds.isEmpty()) {
+            return null
+        }
+        val secondOfDay = getSecondOfDay(now)
+        val nextSecond = spec.checkpointSeconds.firstOrNull {
+            if (includeNow) {
+                it >= secondOfDay
+            } else {
+                it > secondOfDay
+            }
+        } ?: return null
+        return toTodayTimeMillis(now, nextSecond)
+    }
+
+    @JvmStatic
+    fun nextCheckpointAt(
+        spec: TimeTriggerSpec,
+        now: Long = System.currentTimeMillis(),
+        includeNow: Boolean = false
+    ): Long? {
+        if (spec.disabled || spec.checkpointSeconds.isEmpty()) {
+            return null
+        }
+        val todayTarget = nextCheckpointTodayAt(spec, now, includeNow)
+        if (todayTarget != null) {
+            return todayTarget
+        }
+        val firstSecond = spec.checkpointSeconds.firstOrNull() ?: return null
+        return toTodayTimeMillis(now, firstSecond) + SECONDS_PER_DAY * 1000L
     }
 
     @JvmStatic

@@ -161,6 +161,16 @@ open class ModelField<T> : Serializable {
     }
 
     /**
+     * 获取编辑器元数据。
+     *
+     * 主要用于 Web 配置页按字段语义渲染专用组件。
+     */
+    @JsonIgnore
+    open fun getEditorMeta(): Any? {
+        return null
+    }
+
+    /**
      * 将当前值转换为配置值
      *
      * @param value 当前值
