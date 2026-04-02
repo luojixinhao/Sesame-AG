@@ -1190,6 +1190,7 @@ class AntFarm : ModelTask() {
                 rewardProductNum =
                     jo.getJSONObject("dynamicGlobalConfig").getString("rewardProductNum")
                 val joFarmVO = jo.getJSONObject("farmVO")
+                val subFarmVO = joFarmVO.getJSONObject("subFarmVO")
                 val familyInfoVO = jo.getJSONObject("familyInfoVO")
                 foodStock = joFarmVO.getInt("foodStock")
                 foodStockLimit = joFarmVO.getInt("foodStockLimit")
@@ -1225,8 +1226,9 @@ class AntFarm : ModelTask() {
                     drawLotteryPlus(jo.getJSONObject("lotteryPlusInfo"))
                 }
 
-                if (acceptGift?.value == true && joFarmVO.getJSONObject("subFarmVO").has("giftRecord")
-                    && foodStockLimit - foodStock >= 10
+                if (acceptGift?.value == true &&
+                    foodStockLimit - foodStock >= 10 &&
+                    shouldAcceptGift(subFarmVO)
                 ) {
                     acceptGift()
                 }
@@ -2935,6 +2937,7 @@ class AntFarm : ModelTask() {
     }
 
     private suspend fun feedFriend() {
+        val pendingInvalidUserIds = linkedSetOf<String>()
         try {
             val feedFriendAnimalMap: Map<String?, Int?> = feedFriendAnimalList?.value ?: emptyMap()
             val useFamilyFeedForMembers =
@@ -3027,9 +3030,10 @@ class AntFarm : ModelTask() {
                         }
                     }
                 } else {
-                    pruneInvalidFriendSelection(userId, jo, "帮好友喂鸡")
-                    val username = UserMap.getMaskName(userId)
-                    Log.error(TAG, "😞进入用户 $userId[$username] 的庄园失败> $jo")
+                    if (!queueInvalidFriendSelection(userId, jo, "帮好友喂鸡", pendingInvalidUserIds)) {
+                        val username = UserMap.getMaskName(userId)
+                        Log.error(TAG, "😞进入用户 $userId[$username] 的庄园失败> $jo")
+                    }
                 }
             }
         } catch (e: CancellationException) {
@@ -3038,6 +3042,8 @@ class AntFarm : ModelTask() {
             throw e
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "feedFriendAnimal err:", t)
+        } finally {
+            flushInvalidFriendSelections(pendingInvalidUserIds, "帮好友喂鸡")
         }
     }
 
@@ -3566,20 +3572,21 @@ class AntFarm : ModelTask() {
      * 送麦子
      */
     private suspend fun visit() {
+        val pendingInvalidUserIds = linkedSetOf<String>()
         try {
             val map: Map<String?, Int?> = visitFriendList?.value ?: emptyMap()
             if (map.isEmpty()) return
             val currentUid = UserMap.currentUid
-            for (entry in map.entries) {
-                val userId: String = entry.key!!
-                val count: Int = entry.value!!
+            for (entry in map.entries.toList()) {
+                val userId = entry.key?.trim().orEmpty()
+                val count = entry.value ?: 0
                 // 跳过自己和非法数量
-                if (userId == currentUid || count <= 0) continue
+                if (userId.isBlank() || userId == currentUid || count <= 0) continue
                 // 限制最大访问次数
                 val visitCount = min(count, 3)
                 // 如果今天还可以访问
                 if (Status.canVisitFriendToday(userId, visitCount)) {
-                    val remaining = visitFriend(userId, visitCount)
+                    val remaining = visitFriend(userId, visitCount, pendingInvalidUserIds)
                     if (remaining > 0) {
                         Status.visitFriendToday(userId, remaining)
                     }
@@ -3591,11 +3598,17 @@ class AntFarm : ModelTask() {
             throw e
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "visit err:",t)
+        } finally {
+            flushInvalidFriendSelections(pendingInvalidUserIds, "送麦子")
         }
     }
 
 
-    private suspend fun visitFriend(userId: String?, count: Int): Int {
+    private suspend fun visitFriend(
+        userId: String?,
+        count: Int,
+        pendingInvalidUserIds: MutableSet<String>
+    ): Int {
         var visitedTimes = 0
         try {
             var jo = JSONObject(AntFarmRpcCall.enterFarm(userId, userId))
@@ -3624,7 +3637,9 @@ class AntFarm : ModelTask() {
                     delay(800L)
                 }
             } else {
-                pruneInvalidFriendSelection(userId, jo, "送麦子")
+                if (!queueInvalidFriendSelection(userId, jo, "送麦子", pendingInvalidUserIds)) {
+                    Log.error(TAG, "送麦子进入好友庄园失败[$userId]> $jo")
+                }
             }
         } catch (e: CancellationException) {
             // 协程取消异常必须重新抛出，不能吞掉
@@ -3636,24 +3651,58 @@ class AntFarm : ModelTask() {
         return visitedTimes
     }
 
-    private fun pruneInvalidFriendSelection(userId: String?, response: JSONObject?, sceneName: String) {
+    private fun queueInvalidFriendSelection(
+        userId: String?,
+        response: JSONObject?,
+        sceneName: String,
+        pendingInvalidUserIds: MutableSet<String>
+    ): Boolean {
         if (userId.isNullOrEmpty() || response == null || userId == UserMap.currentUid) {
-            return
+            return false
         }
         val resultCode = response.optString("resultCode")
         val memo = response.optString("memo")
         if (resultCode != "302" && !memo.contains("非好友")) {
+            return false
+        }
+        if (pendingInvalidUserIds.add(userId)) {
+            Log.record(TAG, "$sceneName 检测到[$userId]已非好友，待当前流程结束后清理相关配置")
+        }
+        return true
+    }
+
+    private fun flushInvalidFriendSelections(invalidUserIds: Set<String>, sceneName: String) {
+        if (invalidUserIds.isEmpty()) {
             return
         }
         val removedCount = Config.removeInvalidFriendSelections(
-            setOf(userId),
+            invalidUserIds,
             UserMap.currentUid,
             autoSave = false
         )
         if (removedCount > 0) {
             Config.save(UserMap.currentUid, true)
-            Log.record(TAG, "$sceneName 检测到[$userId]已非好友，已自动清理 $removedCount 项相关配置")
+            Log.record(TAG, "$sceneName 已自动清理 $removedCount 项失效好友相关配置")
         }
+    }
+
+    private fun shouldAcceptGift(subFarmVO: JSONObject): Boolean {
+        if (subFarmVO.has("giftRecord")) {
+            return true
+        }
+        val giveFoodInfo = subFarmVO.optJSONObject("giveFoodInfo")
+        if (giveFoodInfo == null) {
+            Log.record(TAG, "庄园收礼跳过：未找到 giftRecord/giveFoodInfo，当前接口结构未命中")
+            return false
+        }
+        val giveFoodSum = giveFoodInfo.optInt("giveFoodSum", 0)
+        val lastAcceptFoodNum = giveFoodInfo.optInt("lastAcceptFoodNum", 0)
+        val pendingFoodNum = giveFoodSum - lastAcceptFoodNum
+        if (pendingFoodNum <= 0) {
+            Log.record(TAG, "庄园收礼跳过：giveFoodInfo 显示当前无可领取麦子/稻子")
+            return false
+        }
+        return true
     }
 
     private fun acceptGift() {
