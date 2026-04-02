@@ -37,6 +37,7 @@ import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.task.TaskStatus
 import io.github.aoguai.sesameag.task.antFarm.AntFarmRpcCall
+import io.github.aoguai.sesameag.task.antFarm.FarmGame
 import io.github.aoguai.sesameag.task.antForest.ForestUtil.hasBombCard
 import io.github.aoguai.sesameag.task.antForest.ForestUtil.hasShield
 import io.github.aoguai.sesameag.task.antForest.Privilege.studentSignInRedEnvelope
@@ -3278,7 +3279,6 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      */
     private fun updateSelfHomePage(joHomePage: JSONObject, collectRobMultiplierEnergy: Boolean = false) {
         try {
-
             val usingUserProps: JSONArray = if (isTeam(joHomePage)) {
                 // 组队模式
                 joHomePage.optJSONObject("teamHomeResult")
@@ -5639,84 +5639,79 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         try {
             val response = AntForestRpcCall.queryGameList()
             val jo = JSONObject(response)
-            val resData = jo.optJSONObject("resData") ?: jo
-
-            // 验证请求是否成功
-            if (!ResChecker.checkRes(TAG, jo)) {
-                val msg = jo.optString("desc").ifBlank { jo.optString("resultDesc") }
+            val querySuccess = ResChecker.checkRes(TAG, jo)
+            if (!querySuccess) {
+                val msg = jo.optString("desc").ifBlank { jo.optString("resultDesc").ifBlank { jo.optString("memo") } }
                 Log.error(TAG, "queryGameList 失败: $msg")
-                return
             }
 
-            val drawRights = resData.optJSONObject("gameCenterDrawRights")
-            if (drawRights != null) {
-                val perTime = drawRights.optInt("quotaPerTime", 100).takeIf { it > 0 } ?: 100
+            val drawRightsSource = resolveForestDrawRights(jo, querySuccess) ?: return
+            val drawRights = drawRightsSource.drawRights
 
-                // 换算实际宝箱次数
-                val canUseCount = drawRights.optInt("quotaCanUse") / perTime
-                val limitCount = drawRights.optInt("quotaLimit") / perTime
-                val usedCount = drawRights.optInt("usedQuota") / perTime
+            // 换算实际宝箱次数
+            val canUseCount = getForestDrawQuotaCanUse(drawRights)
+            val limitCount = getForestDrawQuotaLimit(drawRights)
+            val usedCount = getForestDrawUsedCount(drawRights)
+            var openedCount = 0
 
-                //Log.record(TAG, "游戏中心状态: 待开 $canUseCount 个, 已得 $usedCount/$limitCount")
+            // 1. 处理待开启奖励 (批量开启)
+            if (canUseCount > 0) {
+                Log.record(TAG, "正在批量开启 $canUseCount 个宝箱...")
 
-                // 1. 处理待开启奖励 (批量开启)
-                if (canUseCount > 0) {
-                    Log.record(TAG, "正在批量开启 $canUseCount 个宝箱...")
+                var remain = canUseCount
+                var totalEnergy = 0
+                val otherAwards = mutableListOf<String>()
 
-                    var remain = canUseCount
-                    var totalEnergy = 0
-                    val otherAwards = mutableListOf<String>()
+                // 保险：服务端常见单次上限为 10，分批开箱避免一次性请求过大
+                while (remain > 0) {
+                    val batch = minOf(remain, 10)
+                    val drawResStr = AntForestRpcCall.drawGameCenterAward(batch)
+                    val drawJo = JSONObject(drawResStr)
+                    if (!ResChecker.checkRes(TAG, drawJo)) {
+                        Log.error(TAG, "开启宝箱失败: ${drawJo.optString("resultDesc").ifBlank { drawJo.optString("desc") }}")
+                        return
+                    }
 
-                    // 保险：服务端常见单次上限为 10，分批开箱避免一次性请求过大
-                    while (remain > 0) {
-                        val batch = minOf(remain, 10)
-                        val drawResStr = AntForestRpcCall.drawGameCenterAward(batch)
-                        val drawJo = JSONObject(drawResStr)
-                        if (!ResChecker.checkRes(TAG, drawJo)) {
-                            Log.error(TAG, "开启宝箱失败: ${drawJo.optString("resultDesc").ifBlank { drawJo.optString("desc") }}")
-                            return
-                        }
+                    val drawResData = drawJo.optJSONObject("resData") ?: drawJo
+                    val awardList = findForestDrawAwardList(drawResData)
+                    if (awardList != null) {
+                        for (i in 0 until awardList.length()) {
+                            val award = awardList.getJSONObject(i)
+                            val type = award.optString("awardType")
+                            val name = award.optString("awardName")
+                            val count = award.optInt("awardCount")
 
-                        val drawResData = drawJo.optJSONObject("resData") ?: drawJo
-                        val awardList = drawResData.optJSONArray("gameCenterDrawAwardList")
-                        if (awardList != null) {
-                            for (i in 0 until awardList.length()) {
-                                val award = awardList.getJSONObject(i)
-                                val type = award.optString("awardType")
-                                val name = award.optString("awardName")
-                                val count = award.optInt("awardCount")
-
-                                if (type == "ENERGY") {
-                                    totalEnergy += count
-                                } else {
-                                    otherAwards.add("${name}x${count}")
-                                }
+                            if (type == "ENERGY") {
+                                totalEnergy += count
+                            } else {
+                                otherAwards.add("${name}x${count}")
                             }
                         }
-
-                        remain -= batch
                     }
 
-                    val logMsg = StringBuilder("[开宝箱] ")
-                    if (totalEnergy > 0) logMsg.append("获得能量: ${totalEnergy}g")
-                    if (otherAwards.isNotEmpty()) {
-                        if (totalEnergy > 0) logMsg.append(", ")
-                        logMsg.append("其他: ${otherAwards.joinToString("/")}")
-                    }
-                    Log.forest(logMsg.toString())
+                    openedCount += batch
+                    remain -= batch
                 }
 
-                // 2. 判断是否需要刷任务 (接你之前的逻辑)
-                val remainToTask = limitCount - usedCount
-                if (remainToTask > 0) {
+                val logMsg = StringBuilder("[开宝箱] ")
+                if (totalEnergy > 0) logMsg.append("获得能量: ${totalEnergy}g")
+                if (otherAwards.isNotEmpty()) {
+                    if (totalEnergy > 0) logMsg.append(", ")
+                    logMsg.append("其他: ${otherAwards.joinToString("/")}")
+                }
+                Log.forest(logMsg.toString())
+            } else if (drawRightsSource.sourceName == "FOREST_PLAY_GROUND" && limitCount <= 0 && usedCount <= 0) {
+                Log.record(TAG, "FOREST_PLAY_GROUND 已返回新入口权益对象，但当前未返回可用抽奖配额")
+            } else {
+                Log.record(TAG, "森林乐园当前无待开启宝箱，已用配额 $usedCount/$limitCount")
+            }
 
-                        //Log.record(TAG, "任务进度未满，准备执行 $remainToTask 次上报...")
+            // 2. 判断是否需要刷任务
+            val remainToTask = (limitCount - usedCount - openedCount).coerceAtLeast(0)
+            if (remainToTask > 0) {
                 GameTask.Forest_slxcc.report(remainToTask)
-
-
-                } else {
-                   // Log.record(TAG, "今日游戏中心任务已满额")
-                }
+            } else if (limitCount > 0) {
+                Log.record(TAG, "森林乐园今日宝箱任务已满额")
             }
 
         } catch (e: CancellationException) {
@@ -5724,6 +5719,161 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "doforestgame 流程异常", t)
         }
+    }
+
+    private data class ForestDrawRightsSource(
+        val drawRights: JSONObject,
+        val sourceName: String
+    )
+
+    private fun resolveForestDrawRights(queryResponse: JSONObject, querySucceeded: Boolean): ForestDrawRightsSource? {
+        if (querySucceeded) {
+            val queryResData = queryResponse.optJSONObject("resData") ?: queryResponse
+            findForestGameCenterRights(queryResData)?.let {
+                return ForestDrawRightsSource(it, "queryGameList")
+            }
+        }
+        return probeForestPlaygroundDrawRights(querySucceeded)
+    }
+
+    private fun findForestGameCenterRights(source: Any?): JSONObject? {
+        return findForestObjectByKey(source, "gameCenterDrawRights", ::isUsableForestDrawRights)
+            ?: findForestObjectByKey(source, "gameDrawAwardActivity", ::isUsableForestDrawRights)
+            ?: findForestObjectByKey(source, "gameEntryInfo", ::isUsableForestDrawRights)
+    }
+
+    private fun findForestDrawAwardList(source: Any?): JSONArray? {
+        return FarmGame.findFirstArrayByKey(source, "gameCenterDrawAwardList")
+            ?: FarmGame.findFirstArrayByKey(source, "drawAwardList")
+    }
+
+    private fun findForestObjectByKey(
+        source: Any?,
+        targetKey: String,
+        predicate: (JSONObject) -> Boolean
+    ): JSONObject? {
+        return when (source) {
+            is JSONObject -> {
+                source.optJSONObject(targetKey)?.takeIf(predicate)?.let { return it }
+                val keys = source.keys()
+                while (keys.hasNext()) {
+                    val child = source.opt(keys.next())
+                    findForestObjectByKey(child, targetKey, predicate)?.let { return it }
+                }
+                null
+            }
+
+            is JSONArray -> {
+                for (index in 0 until source.length()) {
+                    findForestObjectByKey(source.opt(index), targetKey, predicate)?.let { return it }
+                }
+                null
+            }
+
+            else -> null
+        }
+    }
+
+    private fun isUsableForestDrawRights(candidate: JSONObject): Boolean {
+        if (findForestDrawAwardList(candidate) != null) {
+            return true
+        }
+        return listOf(
+            "quotaCanUse",
+            "quotaLimit",
+            "usedQuota",
+            "canUseTimes",
+            "drawRightsTimes",
+            "limit",
+            "usedTimes"
+        ).any(candidate::has)
+    }
+
+    private fun getForestDrawQuotaCanUse(drawRights: JSONObject): Int {
+        if (drawRights.has("quotaCanUse")) {
+            return normalizeForestDrawQuotaCount(
+                drawRights.optInt("quotaCanUse"),
+                drawRights.optInt("quotaPerTime")
+            )
+        }
+        return drawRights.optInt("canUseTimes", drawRights.optInt("drawRightsTimes", 0)).coerceAtLeast(0)
+    }
+
+    private fun getForestDrawQuotaLimit(drawRights: JSONObject): Int {
+        if (drawRights.has("quotaLimit")) {
+            return normalizeForestDrawQuotaCount(
+                drawRights.optInt("quotaLimit"),
+                drawRights.optInt("quotaPerTime")
+            )
+        }
+        return drawRights.optInt("limit", 0).coerceAtLeast(0)
+    }
+
+    private fun getForestDrawUsedCount(drawRights: JSONObject): Int {
+        if (drawRights.has("usedQuota")) {
+            return normalizeForestDrawQuotaCount(
+                drawRights.optInt("usedQuota"),
+                drawRights.optInt("quotaPerTime")
+            )
+        }
+        return drawRights.optInt("usedTimes", 0).coerceAtLeast(0)
+    }
+
+    private fun normalizeForestDrawQuotaCount(rawQuota: Int, quotaPerTime: Int): Int {
+        if (rawQuota <= 0) {
+            return 0
+        }
+        if (quotaPerTime <= 1) {
+            return rawQuota
+        }
+        return rawQuota / quotaPerTime
+    }
+
+    private fun probeForestPlaygroundDrawRights(querySucceeded: Boolean): ForestDrawRightsSource? {
+        val flowHubResponse = runCatching {
+            JSONObject(AntForestRpcCall.flowHubEntrance("FOREST_PLAY_GROUND"))
+        }.getOrNull()
+
+        if (flowHubResponse == null) {
+            Log.record(TAG, "森林乐园未找到开宝箱权益，且 FOREST_PLAY_GROUND 探测返回为空")
+            return null
+        }
+
+        if (!ResChecker.checkRes(TAG, flowHubResponse)) {
+            val msg = flowHubResponse.optString("desc")
+                .ifBlank { flowHubResponse.optString("resultDesc").ifBlank { flowHubResponse.optString("memo") } }
+            Log.record(TAG, "森林乐园未找到开宝箱权益，FOREST_PLAY_GROUND 探测失败: $msg")
+            return null
+        }
+
+        val resData = flowHubResponse.optJSONObject("resData") ?: flowHubResponse
+        val drawRights = findForestGameCenterRights(resData)
+        if (drawRights != null) {
+            Log.record(TAG, "森林乐园权益已从 FOREST_PLAY_GROUND 分流返回，按新入口继续处理")
+            return ForestDrawRightsSource(drawRights, "FOREST_PLAY_GROUND")
+        }
+
+        val unitList = resData.optJSONArray("unitList")
+        val unitCount = unitList?.length() ?: 0
+        val creativeCount = countForestPlaygroundCreatives(unitList)
+        val queryPrefix = if (querySucceeded) "queryGameList 未返回权益" else "queryGameList 调用失败"
+        if (creativeCount > 0) {
+            Log.record(TAG, "$queryPrefix；FOREST_PLAY_GROUND 仅返回 $unitCount 组导航入口/$creativeCount 个 creative，当前无可开奖权益对象")
+        } else {
+            Log.record(TAG, "$queryPrefix；FOREST_PLAY_GROUND 也未返回可用权益或导航入口")
+        }
+        return null
+    }
+
+    private fun countForestPlaygroundCreatives(unitList: JSONArray?): Int {
+        if (unitList == null) {
+            return 0
+        }
+        var creativeCount = 0
+        for (i in 0 until unitList.length()) {
+            creativeCount += unitList.optJSONObject(i)?.optJSONArray("creativeList")?.length() ?: 0
+        }
+        return creativeCount
     }
     /**
      * 收取状态的枚举类型

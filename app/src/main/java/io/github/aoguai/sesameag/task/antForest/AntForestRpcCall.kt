@@ -149,6 +149,24 @@ object AntForestRpcCall {
     }
 
     @JvmStatic
+    fun flowHubEntrance(flowEntranceId: String): String {
+        return try {
+            val arg = JSONObject().apply {
+                put("bizType", "ANTFOREST")
+                put("flowEntranceId", flowEntranceId)
+                put("source", "ANTFOREST")
+            }
+            RequestManager.requestString(
+                "com.alipay.antpwgrowth.flowHubEntrance",
+                JSONArray().put(arg).toString()
+            )
+        } catch (e: Exception) {
+            Log.printStackTrace("AntForestRpcCall", "flowHubEntrance 构建请求参数失败", e)
+            ""
+        }
+    }
+
+    @JvmStatic
     fun queryFriendsEnergyRanking(): String {
         return try {
             val arg = JSONObject().apply {
