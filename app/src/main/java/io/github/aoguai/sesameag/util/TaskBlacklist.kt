@@ -38,7 +38,7 @@ object TaskBlacklist {
             Log.printStackTrace(TAG, "保存黑名单失败", e)
         }
     }
-    
+
     
     
     /**
@@ -156,7 +156,7 @@ object TaskBlacklist {
                 "ILLEGAL_ARGUMENT" -> "参数错误"
                 "104", "PROMISE_HAS_PROCESSING_TEMPLATE" -> "存在进行中的生活记录"
                 "PROMISE_TEMPLATE_NOT_EXIST" -> "服务端模板不存在"
-                "TASK_ID_INVALID" -> true        // 海豚任务ID非法
+                "TASK_ID_INVALID" -> "任务ID非法"
                 else -> "未知错误"  // 理论上不会执行到此处
             }
             

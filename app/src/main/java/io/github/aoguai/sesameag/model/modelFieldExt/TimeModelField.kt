@@ -1,5 +1,6 @@
 package io.github.aoguai.sesameag.model.modelFieldExt
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import io.github.aoguai.sesameag.util.TimeTriggerEvaluator
 import io.github.aoguai.sesameag.util.TimeTriggerParseOptions
 import io.github.aoguai.sesameag.util.TimeTriggerParser
@@ -88,6 +89,7 @@ open class TimeRuleModelField(
         cachedSpec = parseSpec(rawValue)
     }
 
+    @JsonIgnore
     fun getTriggerSpec(): TimeTriggerSpec {
         val rawValue = value ?: "-1"
         val cached = cachedSpec
@@ -100,6 +102,7 @@ open class TimeRuleModelField(
         }
     }
 
+    @JsonIgnore
     fun isDisabled(): Boolean = getTriggerSpec().disabled
 }
 
@@ -145,10 +148,12 @@ class TimePointModelField(
         )
     }
 
+    @JsonIgnore
     fun isReachedToday(now: Long = System.currentTimeMillis()): Boolean {
         return TimeTriggerEvaluator.evaluateNow(getTriggerSpec(), now).allowNow
     }
 
+    @JsonIgnore
     fun getTodayPointAt(referenceTime: Long = System.currentTimeMillis()): Long? {
         val token = getPointToken() ?: return null
         val digits = token.filter { it.isDigit() }
@@ -176,6 +181,7 @@ class TimePointModelField(
         }.timeInMillis
     }
 
+    @JsonIgnore
     fun getPointToken(): String? = value?.takeUnless { it == "-1" }
 }
 
@@ -206,6 +212,7 @@ class TimePointListModelField(
         tag = code
     )
 ) {
+    @JsonIgnore
     fun getPointTokens(): List<String> {
         val spec = getTriggerSpec()
         if (spec.disabled) {
@@ -214,6 +221,7 @@ class TimePointListModelField(
         return spec.allowRules.map { it.token }
     }
 
+    @JsonIgnore
     fun nextPointAt(now: Long = System.currentTimeMillis(), includeNow: Boolean = false): Long? {
         return TimeTriggerEvaluator.nextCheckpointAt(getTriggerSpec(), now, includeNow)
     }
@@ -246,6 +254,7 @@ class TimeWindowListModelField(
         tag = code
     )
 ) {
+    @JsonIgnore
     fun isActive(now: Long = System.currentTimeMillis()): Boolean {
         return TimeTriggerEvaluator.evaluateNow(getTriggerSpec(), now).allowNow
     }
@@ -323,8 +332,10 @@ class HourOfDayModelField(
         }
     }
 
+    @JsonIgnore
     fun getHourToken(): String? = value?.takeUnless { it == "-1" }
 
+    @JsonIgnore
     fun hasReachedToday(now: Long = System.currentTimeMillis()): Boolean {
         val token = getHourToken() ?: return false
         if (token == "2400") {
@@ -342,6 +353,7 @@ class HourOfDayModelField(
         return TimeTriggerEvaluator.evaluateNow(spec, now).allowNow
     }
 
+    @JsonIgnore
     fun isBeforeCutoff(now: Long = System.currentTimeMillis()): Boolean {
         val token = getHourToken() ?: return false
         if (token == "2400") {
