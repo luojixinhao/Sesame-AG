@@ -7,9 +7,12 @@ import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 蹲点任务持久化数据类
@@ -82,6 +85,8 @@ object EnergyWaitingPersistence {
 
     // 协程作用域
     private val persistenceScope = CoroutineScope(Dispatchers.IO)
+    private val saveMutex = Mutex()
+    private val latestSaveRequestId = AtomicLong(0)
 
     /**
      * 获取当前账号的 DataStore 存储键
@@ -104,16 +109,21 @@ object EnergyWaitingPersistence {
      * @param tasks 当前活跃的蹲点任务
      */
     fun saveTasks(tasks: Map<String, EnergyWaitingManager.WaitingTask>) {
+        val persistDataList = tasks.values.map { task ->
+            WaitingTaskPersistData.fromWaitingTask(task)
+        }
+        val dataStoreKey = getDataStoreKey()
+        val requestId = latestSaveRequestId.incrementAndGet()
         persistenceScope.launch {
             try {
-                val persistDataList = tasks.values.map { task ->
-                    WaitingTaskPersistData.fromWaitingTask(task)
+                saveMutex.withLock {
+                    if (requestId != latestSaveRequestId.get()) {
+                        return@withLock
+                    }
+
+                    DataStore.put(dataStoreKey, persistDataList)
+                    Log.record(TAG, "✅ 保存${persistDataList.size}个蹲点任务到持久化存储 (key: $dataStoreKey)")
                 }
-
-                val dataStoreKey = getDataStoreKey()
-                DataStore.put(dataStoreKey, persistDataList)
-
-                Log.record(TAG, "✅ 保存${persistDataList.size}个蹲点任务到持久化存储 (key: $dataStoreKey)")
             } catch (e: Exception) {
                 Log.printStackTrace(TAG, "保存蹲点任务失败:", e)
             }

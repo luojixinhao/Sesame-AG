@@ -274,54 +274,46 @@ object EnergyRainCoroutine {
     private suspend fun checkAndDoEndGameTask(): Boolean {
         try {
             // 1. 查询当前是否有可接或已接的游戏任务
-            val response = AntForestRpcCall.queryEnergyRainEndGameList()
-            val jo = JSONObject(response)
+            var jo = JSONObject(AntForestRpcCall.queryEnergyRainEndGameList())
             if (!ResChecker.checkRes(TAG, jo)) {
                 //Log.error(TAG, "查询能量雨游戏任务失败 $jo")
                 return false
             }
+
             // 2. 先处理“有新任务可以接”的情况
             if (jo.optBoolean("needInitTask", false)) {
-                // Log.record(TAG, "检测到新任务，准备接入[森林救援队]...")
                 val initRes = JSONObject(AntForestRpcCall.initTask("GAME_DONE_SLJYD"))
                 if (!ResChecker.checkRes(TAG, initRes)) {
-                    // Log.record(TAG, "[森林救援队] 任务接入失败")
-                    // 初始化失败，直接返回false
                     return false
                 }
+                jo = JSONObject(AntForestRpcCall.queryEnergyRainEndGameList())
+                if (!ResChecker.checkRes(TAG, jo)) {
+                    return false
+                }
+            }
 
-                // 3. 核心逻辑：遍历任务列表，检查是否有处于 TO DO 状态的任务
-                val groupTask = jo.optJSONObject("energyRainEndGameGroupTask")
-                val taskInfoList = groupTask?.optJSONArray("taskInfoList")
-                if (taskInfoList != null && taskInfoList.length() > 0) {
-                    for (i in 0 until taskInfoList.length()) {
-                        val task = taskInfoList.getJSONObject(i)
-                        val baseInfo = task.optJSONObject("taskBaseInfo") ?: continue
-                        val taskType = baseInfo.optString("taskType")
-                        val taskStatus = baseInfo.optString("taskStatus") // 关键状态
-                        // 只有当任务是我们要的救援队，且状态是 to do 或还没开始触发时
-                        if (taskType == "GAME_DONE_SLJYD") {
-                            if (taskStatus == "TODO" || taskStatus == "NOT_TRIGGER") {
-                                // Log.record(TAG, "发现待完成任务[$taskType]，当前状态: $taskStatus，开始执行...")
-                                // 执行上报逻辑
-                                GameTask.Forest_sljyd.report(1)
-                                // 完成任务后，检查是否还有更多任务需要处理
-                                return true
-                            } else if (taskStatus == "FINISHED" || taskStatus == "DONE") {
-                                // Log.record(TAG, "任务[$taskType]已完成，无需重复执行")
-                                return false
-                            }
-                        }
+            // 3. 核心逻辑：遍历任务列表，检查是否有处于 TODO 状态的任务
+            val groupTask = jo.optJSONObject("energyRainEndGameGroupTask")
+            val taskInfoList = groupTask?.optJSONArray("taskInfoList")
+            if (taskInfoList != null && taskInfoList.length() > 0) {
+                for (i in 0 until taskInfoList.length()) {
+                    val task = taskInfoList.getJSONObject(i)
+                    val baseInfo = task.optJSONObject("taskBaseInfo") ?: continue
+                    val taskType = baseInfo.optString("taskType")
+                    val taskStatus = baseInfo.optString("taskStatus")
+                    if (taskType != "GAME_DONE_SLJYD") {
+                        continue
                     }
-                } else {
-                    // 如果列表为空且 needInitTask 也是 false，说明真没任务了
-                    if (!jo.optBoolean("needInitTask", false)) {
-                        //Log.error(TAG, "当前无任何能量雨附加任务[$jo]")
+                    if (taskStatus == "TODO" || taskStatus == "NOT_TRIGGER") {
+                        GameTask.Forest_sljyd.report(1)
+                        return true
+                    }
+                    if (taskStatus == "FINISHED" || taskStatus == "DONE") {
                         return false
                     }
                 }
-
             }
+
             // 4. 如果没有找到任何待处理的任务，返回false
             return false
         } catch (th: Throwable) {

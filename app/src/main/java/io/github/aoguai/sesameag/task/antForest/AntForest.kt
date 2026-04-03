@@ -146,7 +146,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private val doubleCardLockObj = Any()
 
     // 并发控制信号量，限制同时处理的好友数量，避免过多并发导致性能问题
-    private val concurrencyLimiter = Semaphore(FRIEND_PROCESS_CONCURRENCY)
+    private var concurrencyLimiter = Semaphore(FRIEND_PROCESS_CONCURRENCY)
+    private var friendProcessConcurrencyInt: Int = FRIEND_PROCESS_CONCURRENCY
 
     private var collectEnergy: BooleanModelField? = null // 收集能量开关
     private var pkEnergy: BooleanModelField? = null // PK能量开关
@@ -175,6 +176,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private var queryInterval: StringModelField? = null // 查询间隔时间
     private var collectInterval: StringModelField? = null // 收取间隔时间
     private var doubleCollectInterval: StringModelField? = null // 双击间隔时间
+    private var friendProcessConcurrency: IntegerModelField? = null // 好友处理并发数
     private var doubleCard: ChoiceModelField? = null // 双击卡类型选择
     private var doubleCardTime: TimeTriggerModelField? = null // 双击卡使用时间列表
     var doubleCountLimit: IntegerModelField? = null // 双击卡使用次数限制
@@ -716,6 +718,9 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         modelFields.addField(StringModelField.IntervalStringModelField("doubleCollectInterval", "双击间隔(毫秒或毫秒范围)", "800-2400", 10, 5000).withDesc(
             "控制双击补收时两次收取之间的间隔，可填固定值或范围。"
         ).also { doubleCollectInterval = it })
+        modelFields.addField(IntegerModelField("friendProcessConcurrency", "好友处理并发数", FRIEND_PROCESS_CONCURRENCY, 1, 20).withDesc(
+            "控制好友森林并发处理数量，范围 1-20。"
+        ).also { friendProcessConcurrency = it })
         modelFields.addField(BooleanModelField("balanceNetworkDelay", "平衡网络延迟", true).withDesc(
             "根据实际网络耗时动态平衡收取节奏，减少过快触发风控。"
         ).also { balanceNetworkDelay = it })
@@ -865,6 +870,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         // 设置其他参数
         tryCountInt = tryCount!!.value
         retryIntervalInt = retryInterval!!.value
+        friendProcessConcurrencyInt = (friendProcessConcurrency?.value ?: FRIEND_PROCESS_CONCURRENCY).coerceIn(1, 20)
+        concurrencyLimiter = Semaphore(friendProcessConcurrencyInt)
         advanceTime!!.value
 
 
@@ -2775,7 +2782,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 friendNames.add(displayName)
             }
 
-            Log.record(TAG, "📋 开始处理${friendList.length()}个${sourceName}（并发数:$FRIEND_PROCESS_CONCURRENCY）")
+            Log.record(TAG, "📋 开始处理${friendList.length()}个${sourceName}（并发数:$friendProcessConcurrencyInt）")
             Log.record(TAG, "👥 ${friendNames.joinToString(" | ")}")
             val startTime = System.currentTimeMillis()
 
@@ -5553,22 +5560,57 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
     private suspend fun useEnergyRainChanceCard() {
         try {
-            if (Status.hasFlagToday("AntForest::useEnergyRainChanceCard")) {
+            suspend fun hasPlayableEnergyRainChance(): Boolean {
+                return try {
+                    val jo = JSONObject(AntForestRpcCall.queryEnergyRainHome())
+                    ResChecker.checkRes(TAG, jo) && jo.optBoolean("canPlayToday", false)
+                } catch (t: Throwable) {
+                    Log.printStackTrace(TAG, "queryEnergyRainHome err", t)
+                    false
+                }
+            }
+
+            fun getLimitTimeEnergyRainFlag(propJsonObj: JSONObject): String? {
+                val propId = propJsonObj.optJSONArray("propIdList")?.optString(0).orEmpty()
+                if (propId.isEmpty()) {
+                    return null
+                }
+                return "AntForest::useEnergyRainChanceCard::LIMIT_TIME_ENERGY_RAIN_CHANCE::$propId"
+            }
+
+            if (hasPlayableEnergyRainChance()) {
+                Log.record(TAG, "当前已有可执行的能量雨机会，跳过重复激活")
                 return
             }
+
+            var usedAny = false
             val propTypes = arrayOf("LIMIT_TIME_ENERGY_RAIN_CHANCE", "ENERGY_RAIN_CHANCE")
             for (propType in propTypes) {
                 while (!Thread.currentThread().isInterrupted) {
                     val jo = findPropBag(queryPropList(true), propType) ?: break
+                    if (propType == "LIMIT_TIME_ENERGY_RAIN_CHANCE") {
+                        val todayFlag = getLimitTimeEnergyRainFlag(jo)
+                        if (todayFlag != null && Status.hasFlagToday(todayFlag)) {
+                            Log.record(TAG, "限时能量雨机会今日已激活，跳过重复使用")
+                            break
+                        }
+                    }
                     if (usePropBag(jo)) {
                         Log.record(TAG, "成功使用一个能量雨道具: $propType")
+                        usedAny = true
+                        if (propType == "LIMIT_TIME_ENERGY_RAIN_CHANCE") {
+                            getLimitTimeEnergyRainFlag(jo)?.let { Status.setFlagToday(it) }
+                        }
                         ActionDelayUtil.humanActionDelay(2000L)
+                        if (propType == "LIMIT_TIME_ENERGY_RAIN_CHANCE") {
+                            break
+                        }
                     } else {
                         break
                     }
                 }
 
-                if (propType == "LIMIT_TIME_ENERGY_RAIN_CHANCE") {
+                if (propType == "LIMIT_TIME_ENERGY_RAIN_CHANCE" && !hasPlayableEnergyRainChance()) {
                     val skuInfo = Vitality.findSkuInfoBySkuName("能量雨次卡")
                     if (skuInfo != null) {
                         val skuId = skuInfo.getString("skuId")
@@ -5582,6 +5624,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                                 ActionDelayUtil.humanActionDelay(1000L)
                                 val joExchanged = findPropBag(queryPropList(true), propType)
                                 if (joExchanged != null && usePropBag(joExchanged)) {
+                                    getLimitTimeEnergyRainFlag(joExchanged)?.let { Status.setFlagToday(it) }
+                                    usedAny = true
                                     ActionDelayUtil.humanActionDelay(1000L)
                                 }
                             }
@@ -5589,7 +5633,9 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     }
                 }
             }
-            Status.setFlagToday("AntForest::useEnergyRainChanceCard")
+            if (!usedAny) {
+                Log.record(TAG, "当前无可激活的能量雨道具")
+            }
             Log.record(TAG, "所有能量雨卡已处理完毕")
         } catch (e: CancellationException) {
             throw e

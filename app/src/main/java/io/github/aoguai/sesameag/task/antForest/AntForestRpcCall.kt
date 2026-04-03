@@ -17,6 +17,8 @@ object AntForestRpcCall {
     private const val DEFAULT_SOURCE = "chInfo_ch_appcenter__chsub_9patch"
     private const val PROTECT_BUBBLE_SOURCE = "chInfo_ch_appid-60000002"
     private const val PROTECT_BUBBLE_VERSION = "20230501"
+    private const val ENERGY_RAIN_SOURCE = "forest"
+    private const val ENERGY_RAIN_VERSION = "20230501"
     const val OPEN_GREEN_RIGHTS_SOURCE = "chInfo_ch_appid-60000002"
     private var VERSION = "20250818"
     private var HOME_PAGE_VERSION = "20250818"
@@ -405,7 +407,10 @@ object AntForestRpcCall {
 
     @JvmStatic
     fun queryEnergyRainHome(): String {
-        return RequestManager.requestString("alipay.antforest.forest.h5.queryEnergyRainHome", "[{\"source\":\"senlinguangchuangrukou\",\"version\":\"$VERSION\"}]")
+        return RequestManager.requestString(
+            "alipay.antforest.forest.h5.queryEnergyRainHome",
+            "[{\"source\":\"$ENERGY_RAIN_SOURCE\",\"version\":\"$ENERGY_RAIN_VERSION\"}]"
+        )
     }
 
     @JvmStatic
@@ -420,14 +425,17 @@ object AntForestRpcCall {
 
     @JvmStatic
     fun startEnergyRain(): String {
-        return RequestManager.requestString("alipay.antforest.forest.h5.startEnergyRain", "[{\"version\":\"$VERSION\"}]")
+        return RequestManager.requestString(
+            "alipay.antforest.forest.h5.startEnergyRain",
+            "[{\"version\":\"$ENERGY_RAIN_VERSION\"}]"
+        )
     }
 
     @JvmStatic
     fun energyRainSettlement(saveEnergy: Int, token: String): String {
         return RequestManager.requestString(
             "alipay.antforest.forest.h5.energyRainSettlement",
-            "[{\"activityPropNums\":0,\"saveEnergy\":$saveEnergy,\"token\":\"$token\",\"version\":\"$VERSION\"}]"
+            "[{\"activityPropNums\":0,\"saveEnergy\":$saveEnergy,\"token\":\"$token\",\"version\":\"$ENERGY_RAIN_VERSION\"}]"
         )
     }
 
