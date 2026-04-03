@@ -16,6 +16,7 @@ import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.task.TaskStatus
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.DataStore
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.maps.UserMap
 import io.github.aoguai.sesameag.util.ResChecker
@@ -61,7 +62,7 @@ class AntDodo : ModelTask() {
                 "collectToFriendList",
                 "帮抽卡 | 好友列表",
                 LinkedHashSet<String?>(),
-                AlipayUser::getListAsMapperEntity
+                AlipayUser::getFriendListAsMapperEntity
             ).withDesc("设置帮抽卡规则作用的好友名单。").also { collectToFriendList = it }
         )
         modelFields.addField(
@@ -69,7 +70,7 @@ class AntDodo : ModelTask() {
                 "sendFriendCard",
                 "送卡片好友列表(当前图鉴所有卡片)",
                 LinkedHashSet<String?>(),
-                AlipayUser::getListAsMapperEntity
+                AlipayUser::getFriendListAsMapperEntity
             ).withDesc("列表不为空时，会把当前图鉴可赠送的卡片和新抽到的三星卡送给列表中的首个有效好友。").also {
                 sendFriendCard = it
             }
@@ -197,7 +198,7 @@ class AntDodo : ModelTask() {
                         break
                     }
                 }
-                val set = sendFriendCard?.value ?: emptySet()
+                val giftTargetUserId = resolveSendFriendCardTarget()
                 if (index >= 0) {
                     val leftFreeQuota = jo.getInt("leftFreeQuota")
                     for (j in 0 until leftFreeQuota) {
@@ -213,15 +214,10 @@ class AntDodo : ModelTask() {
                             val ecosystem = animal.getString("ecosystem")
                             val name = animal.getString("name")
                             Log.forest("神奇物种🦕[$ecosystem]#$name")
-                            if (set.isNotEmpty()) {
-                                for (userId in set) {
-                                    if (userId != null && UserMap.currentUid != userId) {
-                                        val fantasticStarQuantity = animal.optInt("fantasticStarQuantity", 0)
-                                        if (fantasticStarQuantity == 3) {
-                                            sendCard(animal, userId)
-                                        }
-                                        break
-                                    }
+                            if (giftTargetUserId != null) {
+                                val fantasticStarQuantity = animal.optInt("fantasticStarQuantity", 0)
+                                if (fantasticStarQuantity == 3) {
+                                    sendCard(animal, giftTargetUserId)
                                 }
                             }
                         } else {
@@ -229,13 +225,8 @@ class AntDodo : ModelTask() {
                         }
                     }
                 }
-                if (set.isNotEmpty()) {
-                    for (userId in set) {
-                        if (userId != null && UserMap.currentUid != userId) {
-                            sendAntDodoCard(bookId, userId)
-                            break
-                        }
-                    }
+                if (giftTargetUserId != null) {
+                    sendAntDodoCard(bookId, giftTargetUserId)
                 }
             } else {
                 Log.runtime(TAG, jo.getString("resultDesc"))
@@ -332,6 +323,7 @@ class AntDodo : ModelTask() {
 
     private fun propList() {
         try {
+            val giftTargetUserId = resolveSendFriendCardTarget()
             th@ while (!Thread.currentThread().isInterrupted) {
                 val response = AntDodoRpcCall.propList()
                 if (response.isNullOrEmpty()) {
@@ -369,14 +361,10 @@ class AntDodo : ModelTask() {
                             val ecosystem = animal.getString("ecosystem")
                             val name = animal.getString("name")
                             Log.forest("使用道具🎭[$propName]#$ecosystem-$name")
-                            val map = sendFriendCard?.value ?: emptySet()
-                            for (userId in map) {
-                                if (userId != null && UserMap.currentUid != userId) {
-                                    val fantasticStarQuantity = animal.optInt("fantasticStarQuantity", 0)
-                                    if (fantasticStarQuantity == 3) {
-                                        sendCard(animal, userId)
-                                    }
-                                    break
+                            if (giftTargetUserId != null) {
+                                val fantasticStarQuantity = animal.optInt("fantasticStarQuantity", 0)
+                                if (fantasticStarQuantity == 3) {
+                                    sendCard(animal, giftTargetUserId)
                                 }
                             }
                         } else {
@@ -405,6 +393,55 @@ class AntDodo : ModelTask() {
             else -> usePropType
         }
         return usePropType
+    }
+
+    private fun resolveSendFriendCardTarget(): String? {
+        val configuredUsers = sendFriendCard?.value ?: emptySet()
+        if (configuredUsers.isEmpty()) {
+            return null
+        }
+        val availableFriends = queryDodoAvailableFriendIds()
+        if (availableFriends.isEmpty()) {
+            return null
+        }
+        for (userId in configuredUsers) {
+            val safeUserId = FriendGuard.normalizeUserId(userId) ?: continue
+            if (FriendGuard.shouldSkipFriend(safeUserId, TAG, "神奇物种送卡")) {
+                continue
+            }
+            if (availableFriends.contains(safeUserId)) {
+                return safeUserId
+            }
+            Log.record(TAG, "神奇物种送卡跳过[${UserMap.getMaskName(safeUserId) ?: safeUserId}]：对方未开通神奇物种")
+        }
+        return null
+    }
+
+    private fun queryDodoAvailableFriendIds(): Set<String> {
+        return try {
+            val response = AntDodoRpcCall.queryFriend()
+            if (response.isNullOrEmpty()) {
+                emptySet()
+            } else {
+                val jo = JSONObject(response)
+                if (!ResChecker.checkRes(TAG, jo)) {
+                    emptySet()
+                } else {
+                    val friendList = jo.getJSONObject("data").optJSONArray("friends") ?: return emptySet()
+                    val availableFriends = LinkedHashSet<String>()
+                    for (i in 0 until friendList.length()) {
+                        val userId = friendList.optJSONObject(i)?.optString("userId").orEmpty()
+                        if (userId.isNotBlank() && !FriendGuard.shouldSkipFriend(userId, TAG, "神奇物种好友校验")) {
+                            availableFriends.add(userId)
+                        }
+                    }
+                    availableFriends
+                }
+            }
+        } catch (t: Throwable) {
+            Log.printStackTrace(TAG, "queryDodoAvailableFriendIds err:", t)
+            emptySet()
+        }
     }
 
     private fun sendAntDodoCard(bookId: String, targetUser: String) {
@@ -437,6 +474,9 @@ class AntDodo : ModelTask() {
 
     private fun sendCard(animal: JSONObject, targetUser: String) {
         try {
+            if (FriendGuard.shouldSkipFriend(targetUser, TAG, "神奇物种送卡")) {
+                return
+            }
             val animalId = animal.getString("animalId")
             val ecosystem = animal.getString("ecosystem")
             val name = animal.getString("name")
@@ -486,6 +526,9 @@ class AntDodo : ModelTask() {
                         continue
                     }
                     val useId = friend.getString("userId")
+                    if (FriendGuard.shouldSkipFriend(useId, TAG, "神奇物种帮抽卡")) {
+                        continue
+                    }
                     var isCollectToFriend = collectToFriendList?.value?.contains(useId) ?: false
                     if (collectToFriendType?.value == CollectToFriendType.DONT_COLLECT) {
                         isCollectToFriend = !isCollectToFriend

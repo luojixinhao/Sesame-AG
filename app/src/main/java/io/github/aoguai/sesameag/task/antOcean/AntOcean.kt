@@ -14,6 +14,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectAndCountModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.util.DataStore
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.task.TaskStatus
@@ -205,7 +206,7 @@ class AntOcean : ModelTask() {
                 "cleanOceanList",
                 "清理 | 好友列表",
                 LinkedHashSet(),
-                AlipayUser::getListAsMapperEntity
+                AlipayUser::getFriendListAsMapperEntity
             ).withDesc("配置要参与清理规则的好友列表。").also { cleanOceanList = it }
         )
         modelFields.addField(
@@ -1100,6 +1101,9 @@ class AntOcean : ModelTask() {
         }
         try {
             val userId = fillFlag.getString("userId")
+            if (FriendGuard.shouldSkipFriend(userId, TAG, "神奇海洋好友清理")) {
+                return
+            }
             var isOceanClean = cleanOceanList?.value?.contains(userId) == true
             if (cleanOceanType?.value == CleanOceanType.DONT_CLEAN) {
                 isOceanClean = !isOceanClean
@@ -1146,7 +1150,9 @@ class AntOcean : ModelTask() {
 
         val ja = JSONArray()
         for (id in userIds) {
-            if (id.isNotBlank()) ja.put(id)
+            if (id.isNotBlank() && !FriendGuard.shouldSkipFriend(id, TAG, "神奇海洋好友清理")) {
+                ja.put(id)
+            }
         }
         if (ja.length() == 0) return
 

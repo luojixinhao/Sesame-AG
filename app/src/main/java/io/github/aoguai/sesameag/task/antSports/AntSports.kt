@@ -17,6 +17,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.util.*
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.maps.UserMap
 import org.json.JSONArray
 import org.json.JSONObject
@@ -228,7 +229,7 @@ class AntSports : ModelTask() {
                 "originBossIdList",
                 "抢好友 | 好友列表",
                 LinkedHashSet(),
-                AlipayUser::getList
+                AlipayUser::getFriendList
             ).withDesc("配置抢好友规则作用的好友名单，名单解释方式由“抢好友 | 动作”决定。").also { originBossIdList = it }
         )
 
@@ -2028,6 +2029,9 @@ class AntSports : ModelTask() {
 
                     val memberId = member.optString("memberId")
                     val originBossId = member.optString("originBossId")
+                    if (FriendGuard.shouldSkipFriend(originBossId, TAG, "训练好友")) {
+                        continue
+                    }
                     val userName = UserMap.getMaskName(originBossId) ?: originBossId
 
                     val responseData = AntSportsRpcCall.queryTrainItem()
@@ -2144,6 +2148,9 @@ class AntSports : ModelTask() {
                     val originBossId = memberModel.optString("originBossId")
                     val memberIdFromRank = memberModel.optString("memberId")
                     if (originBossId.isEmpty() || memberIdFromRank.isEmpty()) continue
+                    if (FriendGuard.shouldSkipFriend(originBossId, TAG, "抢好友")) {
+                        continue
+                    }
 
                     var isTarget = originBossIdList.value?.contains(originBossId) == true
                     if (battleForFriendType.value == BattleForFriendType.DONT_ROB) {

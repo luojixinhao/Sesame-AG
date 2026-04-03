@@ -3,6 +3,7 @@ package io.github.aoguai.sesameag.task.antForest
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.hook.Toast
 import io.github.aoguai.sesameag.util.GameTask
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.ResChecker
 import io.github.aoguai.sesameag.util.maps.UserMap
@@ -112,6 +113,9 @@ object EnergyRainCoroutine {
                             if (grantInfo.optBoolean("canGrantedStatus", false)) {
                                 val uid = grantInfo.getString("userId")
                                 if (giveEnergyRainSet.contains(uid)) {
+                                    if (FriendGuard.shouldSkipFriend(uid, TAG, "赠送能量雨")) {
+                                        continue
+                                    }
                                     val rainJsonObj = JSONObject(AntForestRpcCall.grantEnergyRainChance(uid))
                                     val maskedName = UserMap.getMaskName(uid)
                                     val resultCode = rainJsonObj.optString("resultCode")

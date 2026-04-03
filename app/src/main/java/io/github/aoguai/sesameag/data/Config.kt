@@ -13,6 +13,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.SelectAndCountModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.util.Files
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.maps.UserMap
@@ -105,6 +106,32 @@ class Config private constructor() {
 
     companion object {
         private const val TAG = "Config"
+        private val FRIEND_SELECTION_FIELD_CODES = setOf(
+            "feedFriendAnimalList",
+            "getFeedlList",
+            "visitFriendList",
+            "hireAnimalList",
+            "dontSendFriendList",
+            "notifyFriendList",
+            "notInviteList",
+            "dontCollectList",
+            "giveEnergyRainList",
+            "waterFriendList",
+            "whoYouWantToGiveTo",
+            "helpFriendCollectList",
+            "cleanOceanList",
+            "stallOpenList",
+            "stallTicketList",
+            "stallThrowManureList",
+            "stallInviteShopList",
+            "stallWhiteList",
+            "stallBlackList",
+            "stallInviteRegisterList",
+            "assistFriendList",
+            "originBossIdList",
+            "collectToFriendList",
+            "sendFriendCard"
+        )
 
         /** 单例实例 */
         @JvmField
@@ -206,6 +233,9 @@ class Config private constructor() {
 
             for ((modelCode, modelFields) in INSTANCE.modelFieldsMap) {
                 for ((fieldCode, modelField) in modelFields) {
+                    if (!FRIEND_SELECTION_FIELD_CODES.contains(fieldCode)) {
+                        continue
+                    }
                     when (modelField) {
                         is SelectModelField -> {
                             val selectedIds = modelField.value ?: continue
@@ -242,6 +272,55 @@ class Config private constructor() {
 
             if (removedCount > 0) {
                 Log.record(TAG, "共清理失效好友配置 $removedCount 项")
+                if (autoSave) {
+                    save(selfUserId, true)
+                }
+            }
+            return removedCount
+        }
+
+        /**
+         * 从已知好友配置项中移除当前账号自己，避免误选自己进入好友流程。
+         */
+        @JvmStatic
+        @Synchronized
+        fun removeSelfFriendSelections(
+            selfUserId: String? = UserMap.currentUid,
+            autoSave: Boolean = true
+        ): Int {
+            if (!INSTANCE.isInit || selfUserId.isNullOrBlank()) {
+                return 0
+            }
+
+            var removedCount = 0
+
+            for ((modelCode, modelFields) in INSTANCE.modelFieldsMap) {
+                for ((fieldCode, modelField) in modelFields) {
+                    if (!FRIEND_SELECTION_FIELD_CODES.contains(fieldCode)) {
+                        continue
+                    }
+                    when (modelField) {
+                        is SelectModelField -> {
+                            val selectedIds = modelField.value ?: continue
+                            if (selectedIds.remove(selfUserId)) {
+                                removedCount++
+                                Log.record(TAG, "移除好友配置中的自己[$modelCode.$fieldCode][$selfUserId]")
+                            }
+                        }
+
+                        is SelectAndCountModelField -> {
+                            val selectedMap = modelField.value ?: continue
+                            if (selectedMap.remove(selfUserId) != null) {
+                                removedCount++
+                                Log.record(TAG, "移除好友配置中的自己[$modelCode.$fieldCode][$selfUserId]")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (removedCount > 0) {
+                Log.record(TAG, "共清理好友配置中的自己 $removedCount 项")
                 if (autoSave) {
                     save(selfUserId, true)
                 }
@@ -348,6 +427,30 @@ class Config private constructor() {
             }
 
             INSTANCE.isInit = true
+            val actualUserId = userId?.takeIf { it.isNotEmpty() } ?: UserMap.currentUid
+            val invalidUserIds = UserMap.getUserMap().values
+                .mapNotNull { user ->
+                    val friendUserId = user.userId
+                    if (
+                        friendUserId.isNullOrBlank() ||
+                        friendUserId == actualUserId ||
+                        user.friendStatus == FriendGuard.MUTUAL_FRIEND_STATUS
+                    ) {
+                        null
+                    } else {
+                        friendUserId
+                    }
+                }
+                .toSet()
+            val removedInvalidCount = removeInvalidFriendSelections(
+                invalidUserIds,
+                actualUserId,
+                autoSave = false
+            )
+            val removedSelfCount = removeSelfFriendSelections(actualUserId, autoSave = false)
+            if (removedInvalidCount + removedSelfCount > 0) {
+                save(userId, true)
+            }
             TaskCommon.update()
             return INSTANCE
         }

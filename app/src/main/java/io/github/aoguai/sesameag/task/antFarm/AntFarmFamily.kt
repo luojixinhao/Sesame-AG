@@ -911,7 +911,7 @@ data object AntFarmFamily {
             }
 
             val familyValue: MutableSet<String?> = notInviteList.value ?: mutableSetOf()
-            val allUser: List<AlipayUser> = AlipayUser.getList()
+            val allUser: List<AlipayUser> = AlipayUser.getFriendList()
 
             if (allUser.isEmpty()) {
                 Log.error(TAG, "allUser is empty")

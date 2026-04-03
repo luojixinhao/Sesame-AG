@@ -45,6 +45,7 @@ import io.github.aoguai.sesameag.task.antForest.Privilege.youthPrivilege
 import io.github.aoguai.sesameag.ui.ObjReference
 import io.github.aoguai.sesameag.util.ActionDelayUtil
 import io.github.aoguai.sesameag.util.Average
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.Notify.updateLastExecText
@@ -430,7 +431,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "dontCollectList",
                 "不收能量 | 配置列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("这些好友不参与自动收取能量。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("这些好友不参与自动收取能量。").also {
                 dontCollectList = it
             })
         modelFields.addField(
@@ -438,7 +439,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "giveEnergyRainList",
                 "赠送能量雨 | 配置列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("能量雨机会赠送给这些好友。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("能量雨机会赠送给这些好友。").also {
                 giveEnergyRainList = it
             })
         modelFields.addField(
@@ -585,7 +586,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "waterFriendList",
                 "浇水 | 好友列表",
                 LinkedHashMap<String?, Int?>(),
-                { AlipayUser.getList() },
+                { AlipayUser.getFriendList() },
                 "记得设置浇水次数"
             ).withDesc("配置需要浇水的好友及每日浇水次数。").also { waterFriendList = it })
         modelFields.addField(
@@ -611,7 +612,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "whoYouWantToGiveTo",
                 "赠送 | 道具",
                 LinkedHashSet<String?>(),
-                { AlipayUser.getList() },
+                { AlipayUser.getFriendList() },
                 "所有可赠送的道具将全部赠"
             ).withDesc("选择允许接收森林道具的好友。").also { whoYouWantToGiveTo = it })
         modelFields.addField(
@@ -632,7 +633,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 "helpFriendCollectList",
                 "复活能量 | 好友列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("配置允许复活能量的好友名单。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("配置允许复活能量的好友名单。").also {
                 helpFriendCollectList = it
             })
         modelFields.addField(
@@ -1667,10 +1668,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
                 if (Status.canWaterFriendToday(uid, waterCount, taskUid)) {
                     try {
-                        val response = AntForestRpcCall.queryFriendHomePage(uid, null)
-                        val jo = JSONObject(response)
+                        val jo = queryFriendHome(uid, "waterFriend") ?: continue
                         if (ResChecker.checkRes(TAG, jo)) {
-                            val bizNo = jo.getString("bizNo")
+                            val bizNo = jo.optString("bizNo")
+                            if (bizNo.isBlank()) {
+                                continue
+                            }
 
                             // ✅ 关键改动：传入通知开关
                             val waterCountKVNode = returnFriendWater(
@@ -1775,8 +1778,11 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      * @return 更新后的好友主页信息，如果发生错误则返回null。
      */
     private fun queryFriendHome(userId: String?, fromAct: String?, forceRefresh: Boolean = false): JSONObject? {
-        val safeUserId = userId ?: return null
+        val safeUserId = FriendGuard.normalizeUserId(userId) ?: return null
         val actualFromAct = fromAct ?: "TAKE_LOOK_FRIEND"
+        if (FriendGuard.shouldSkipFriend(safeUserId, TAG, "查询好友森林主页[$actualFromAct]")) {
+            return null
+        }
         val cacheKey = "$safeUserId#$actualFromAct"
         if (!forceRefresh) {
             friendHomeCache[cacheKey]?.let { return it }
@@ -1790,6 +1796,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 return null
             }
             friendHomeObj = JSONObject(response)
+            val resultCode = friendHomeObj.optString("resultCode")
+            val resultDesc = friendHomeObj.optString("resultDesc")
+            if (resultCode == "FRIEND_NOT_FOREST_USER" || resultDesc.contains("未开通")) {
+                Log.record(TAG, "蚂蚁森林好友流程跳过[${UserMap.getMaskName(safeUserId) ?: safeUserId}]：对方未开通蚂蚁森林")
+                return null
+            }
             // 检查响应是否成功
             if (!ResChecker.checkRes(TAG + "查询好友主页失败:", friendHomeObj)) {
                 // 检测并记录"手速太快"错误，避免日志刷屏
@@ -2811,7 +2823,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private fun processEnergyInternal(obj: JSONObject, flag: String?) {
         if (errorWait) return
         val userId = obj.getString("userId")
-        if (userId == selfId) return  // 跳过自己
+        val isPk = "pk" == flag
+        if (FriendGuard.shouldSkipFriend(userId, TAG, if (isPk) "PK好友收能量" else "好友收能量")) {
+            return
+        }
         // 检查是否在"手速太快"冷却期
         if (ForestUtil.isUserInFrequencyCooldown(userId)) {
             return  // 跳过处理
@@ -2821,7 +2836,6 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             return
         }
 
-        val isPk = "pk" == flag
         if (isPk) {
             userName = "PK榜好友|$userName"
         }
@@ -4401,10 +4415,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         if (set.isNotEmpty()) {
             for (uid in set) {
                 val userId = uid ?: continue
-                if (selfId != userId) {
-                    giveProp(userId)
-                    break
-                }
+                if (FriendGuard.shouldSkipFriend(userId, TAG, "赠送森林道具")) continue
+                if (queryFriendHome(userId, "giveProp") == null) continue
+                giveProp(userId)
+                break
             }
         }
     }
@@ -6301,8 +6315,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     override suspend fun collectUserEnergyForWaiting(task: EnergyWaitingManager.WaitingTask): CollectResult {
         return try {
             withContext(Dispatchers.Default) {
-                // 查询好友主页
-                val friendHomeObj = queryFriendHome(task.userId, null)
+                // 主号蹲点查询自己的主页，好友蹲点走好友主页守卫。
+                val friendHomeObj = if (task.isSelf()) {
+                    querySelfHome()
+                } else {
+                    queryFriendHome(task.userId, null)
+                }
                 if (friendHomeObj != null) {
                     // 获取真实用户名
                     val realUserName = getAndCacheUserName(task.userId, friendHomeObj, task.fromTag)

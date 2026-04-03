@@ -12,6 +12,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.task.ModelTask
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
@@ -92,7 +93,7 @@ class AntStall : ModelTask() {
                     "stallOpenList",
                     "摆摊 | 好友列表",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("配置摆摊规则作用的好友村庄名单。需开启“摆摊 | 开启”。")
                     .also { stallOpenList = it })
             addField(
@@ -131,7 +132,7 @@ class AntStall : ModelTask() {
                     "stallTicketList",
                     "贴罚单 | 好友列表",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("配置贴罚单规则作用的好友名单。需开启“贴罚单 | 开启”。")
                     .also { stallTicketList = it })
             addField(
@@ -154,7 +155,7 @@ class AntStall : ModelTask() {
                     "stallThrowManureList",
                     "丢肥料 | 好友列表",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("配置丢肥料规则作用的好友名单。需开启“丢肥料 | 开启”。")
                     .also { stallThrowManureList = it })
             addField(
@@ -177,7 +178,7 @@ class AntStall : ModelTask() {
                     "stallInviteShopList",
                     "邀请摆摊 | 好友列表",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("配置允许自动邀请来摆摊的好友名单。需开启“邀请摆摊 | 开启”。")
                     .also { stallInviteShopList = it })
             addField(
@@ -201,7 +202,7 @@ class AntStall : ModelTask() {
                     "stallWhiteList",
                     "请走小摊 | 白名单(超时也不赶)",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("这些好友即使超时也不会被请走。需开启“请走小摊 | 开启”。")
                     .also { stallWhiteList = it })
             addField(
@@ -209,7 +210,7 @@ class AntStall : ModelTask() {
                     "stallBlackList",
                     "请走小摊 | 黑名单(不超时也赶)",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("这些好友即使未超时也会被立即请走。需开启“请走小摊 | 开启”。")
                     .also { stallBlackList = it })
             addField(BooleanModelField("stallAutoTask", "自动任务", false).withDesc(
@@ -244,7 +245,7 @@ class AntStall : ModelTask() {
                     "stallInviteRegisterList",
                     "邀请 | 好友列表",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("仅邀请列表中的好友开通新村。需开启“邀请 | 邀请好友开通新村”。")
                     .also { stallInviteRegisterList = it })
             addField(
@@ -257,7 +258,7 @@ class AntStall : ModelTask() {
                     "assistFriendList",
                     "助力好友列表",
                     LinkedHashSet(),
-                    AlipayUser::getList
+                    AlipayUser::getFriendList
                 ).withDesc("配置允许自动新村助力的好友列表。需开启“新村助力”。")
                     .also { assistFriendList = it })
         }
@@ -426,6 +427,9 @@ class AntStall : ModelTask() {
                 }
 
                 if (!isInviteShop || sentUserId.contains(friendUserId)) {
+                    continue
+                }
+                if (FriendGuard.shouldSkipFriend(friendUserId, TAG, "邀请摆摊")) {
                     continue
                 }
 
@@ -734,17 +738,13 @@ class AntStall : ModelTask() {
         val currentUid = UserMap.currentUid
 
         for (seat in sortedSeats) {
-            val shopId = shopIds.poll() ?: return
+            if (shopIds.isEmpty()) {
+                return
+            }
             val userId = seat.userId
 
             try {
-                val response = AntStallRpcCall.friendHome(userId)
-                val json = JSONObject(response)
-
-                if (json.optString("resultCode") != "SUCCESS") {
-                    Log.error(TAG, "新村摆摊失败: $response")
-                    return
-                }
+                val json = queryFriendHomeIfAvailable(userId, "新村摆摊") ?: continue
 
                 val seatsMap = json.getJSONObject("seatsMap")
 
@@ -759,17 +759,45 @@ class AntStall : ModelTask() {
                     continue
                 }
 
-                // 尝试在第一个摊位开店
-                if (guest1.getBoolean("canOpenShop")) {
-                    openShop(guest1.getString("seatId"), userId, shopId)
-                } else if (guest2.getBoolean("canOpenShop")) {
-                    openShop(guest2.getString("seatId"), userId, shopId)
+                val targetSeatId = when {
+                    guest1.getBoolean("canOpenShop") -> guest1.getString("seatId")
+                    guest2.getBoolean("canOpenShop") -> guest2.getString("seatId")
+                    else -> null
                 }
+                if (targetSeatId == null) {
+                    continue
+                }
+                val shopId = shopIds.poll() ?: return
+                openShop(targetSeatId, userId, shopId)
 
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, t)
             }
         }
+    }
+
+    private fun queryFriendHomeIfAvailable(userId: String, sceneName: String): JSONObject? {
+        if (FriendGuard.shouldSkipFriend(userId, TAG, sceneName)) {
+            return null
+        }
+        val response = AntStallRpcCall.friendHome(userId)
+        val json = JSONObject(response)
+        val reason = json.optString("resultDesc")
+            .ifEmpty { json.optString("errorMessage") }
+            .ifEmpty { json.optString("memo") }
+        if (
+            json.optString("resultCode") == "NEED_UPGRADE_VILLAGE" ||
+            reason.contains("未开通") ||
+            reason.contains("未注册")
+        ) {
+            Log.record(TAG, "$sceneName 跳过[${UserMap.getMaskName(userId) ?: userId}]：${reason.ifEmpty { "对方未开通蚂蚁新村或当前不可访问" }}")
+            return null
+        }
+        if (!ResChecker.checkRes(TAG, json)) {
+            Log.record(TAG, "$sceneName 跳过[${UserMap.getMaskName(userId) ?: userId}]：${reason.ifEmpty { "对方未开通蚂蚁新村或当前不可访问" }}")
+            return null
+        }
+        return json
     }
 
     /**
@@ -1017,6 +1045,9 @@ class AntStall : ModelTask() {
                 }
 
                 val userId = friend.getString("userId")
+                if (FriendGuard.shouldSkipFriend(userId, TAG, "邀请开通新村")) {
+                    continue
+                }
                 if (stallInviteRegisterList.value?.contains(userId) != true) {
                     continue
                 }
@@ -1080,6 +1111,9 @@ class AntStall : ModelTask() {
 
             for (uid in friendSet) {
                 val safeUid = uid ?: continue
+                if (FriendGuard.shouldSkipFriend(safeUid, TAG, "新村助力")) {
+                    continue
+                }
                 val shareId = Base64.encodeToString(
                     "$safeUid-${RandomUtil.getRandomInt(5)}ANUTSALTML_2PA_SHARE".toByteArray(),
                     Base64.NO_WRAP
@@ -1393,16 +1427,7 @@ class AntStall : ModelTask() {
                     if (!isStallTicket) continue
 
                     // 访问好友主页
-                    val homeResponse = AntStallRpcCall.friendHome(friendId)
-                    val homeJson = JSONObject(homeResponse)
-
-                    if (!homeJson.optBoolean("success")) {
-                        Log.error(
-                            TAG,
-                            "pasteTicket.friendHome err: ${homeJson.optString("resultDesc")}"
-                        )
-                        return
-                    }
+                    val homeJson = queryFriendHomeIfAvailable(friendId, "新村贴罚单") ?: continue
 
                     val seatsMap = homeJson.getJSONObject("seatsMap")
                     val keys = seatsMap.keys()

@@ -3,6 +3,7 @@ package io.github.aoguai.sesameag.task.antForest
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.core.type.TypeReference
 import io.github.aoguai.sesameag.util.DataStore
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
@@ -204,17 +205,6 @@ object EnergyWaitingPersistence {
 
         tasks.forEach { task ->
             try {
-                // 重新查询用户主页以获取最新保护罩状态
-                val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, null)
-
-                if (userHomeResponse.isNullOrEmpty()) {
-                    Log.record(TAG, "  验证[${task.userName}]：无法获取主页信息，跳过恢复")
-                    skippedCount++
-                    return@forEach
-                }
-
-                val userHomeObj = org.json.JSONObject(userHomeResponse)
-
                 // 自己的账号：无论是否有保护罩都要恢复（到时间后直接收取）
                 if (task.isSelf()) {
                     val success = addTaskCallback(task)
@@ -229,6 +219,28 @@ object EnergyWaitingPersistence {
                     }
                     return@forEach
                 }
+
+                val safeUserId = FriendGuard.normalizeUserId(task.userId)
+                if (safeUserId == null) {
+                    Log.record(TAG, "  验证[${task.userName}]：userId为空，跳过恢复")
+                    skippedCount++
+                    return@forEach
+                }
+                if (FriendGuard.shouldSkipFriend(safeUserId, TAG, "恢复蚂蚁森林蹲点任务")) {
+                    skippedCount++
+                    return@forEach
+                }
+
+                // 重新查询用户主页以获取最新保护罩状态
+                val userHomeResponse = AntForestRpcCall.queryFriendHomePage(safeUserId, null)
+
+                if (userHomeResponse.isNullOrEmpty()) {
+                    Log.record(TAG, "  验证[${task.userName}]：无法获取主页信息，跳过恢复")
+                    skippedCount++
+                    return@forEach
+                }
+
+                val userHomeObj = org.json.JSONObject(userHomeResponse)
 
                 // 好友账号：如果保护罩覆盖能量成熟期则跳过
                 if (ForestUtil.shouldSkipWaitingDueToProtection(userHomeObj, task.produceTime)) {

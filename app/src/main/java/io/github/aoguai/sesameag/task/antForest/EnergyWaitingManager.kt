@@ -1,6 +1,7 @@
 package io.github.aoguai.sesameag.task.antForest
 
 import android.annotation.SuppressLint
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeUtil
 import kotlinx.coroutines.CancellationException
@@ -404,7 +405,14 @@ object EnergyWaitingManager {
                         // 倒计时2分钟验证：查询好友保护罩状态
                         Log.record(TAG, "🔍 倒计时2分钟验证[${task.getUserTypeTag()}${task.userName}]保护罩状态...")
                         try {
-                            val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, null)
+                            val safeUserId = FriendGuard.normalizeUserId(task.userId)
+                            if (safeUserId == null || FriendGuard.shouldSkipFriend(safeUserId, TAG, "验证蚂蚁森林蹲点好友")) {
+                                Log.record(TAG, "❌ 验证失败[${task.getUserTypeTag()}${task.userName}]：好友关系无效，取消蹲点")
+                                waitingTasks.remove(task.taskId)
+                                EnergyWaitingPersistence.saveTasks(waitingTasks)
+                                return@launch
+                            }
+                            val userHomeResponse = AntForestRpcCall.queryFriendHomePage(safeUserId, null)
                             if (!userHomeResponse.isNullOrEmpty()) {
                                 val userHomeObj = JSONObject(userHomeResponse)
                                 if (ForestUtil.shouldSkipWaitingDueToProtection(userHomeObj, task.produceTime)) {
@@ -924,7 +932,14 @@ object EnergyWaitingManager {
                         }
 
                         // 好友账号：重新查询用户主页以获取最新的保护罩状态
-                        val userHomeResponse = AntForestRpcCall.queryFriendHomePage(task.userId, null)
+                        val safeUserId = FriendGuard.normalizeUserId(task.userId)
+                        if (safeUserId == null || FriendGuard.shouldSkipFriend(safeUserId, TAG, "复核蚂蚁森林蹲点好友")) {
+                            Log.record(TAG, "  ❌ 移除[${task.getUserTypeTag()}${task.userName}]球[${task.bubbleId}]：好友关系无效")
+                            tasksToRemove.add(task.taskId)
+                            return@forEach
+                        }
+
+                        val userHomeResponse = AntForestRpcCall.queryFriendHomePage(safeUserId, null)
 
                         if (userHomeResponse.isNullOrEmpty()) {
                              Log.record(TAG, "  验证[${task.getUserTypeTag()}${task.userName}]：无法获取主页信息，保留任务")

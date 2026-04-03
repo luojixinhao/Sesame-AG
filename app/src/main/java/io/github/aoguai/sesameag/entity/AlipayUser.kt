@@ -22,12 +22,28 @@ class AlipayUser(id: String, name: String) : MapperEntity() {
     }
 
     companion object {
+        private const val MUTUAL_FRIEND_STATUS = 1
+
         /**
          * 获取所有用户列表（无过滤）
          */
         @JvmStatic
         fun getList(): List<AlipayUser> {
             return getList { true }
+        }
+
+        /**
+         * 获取仅互关且排除当前账号的好友列表。
+         */
+        @JvmStatic
+        fun getFriendList(): List<AlipayUser> {
+            val currentUid = UserMap.currentUid
+            return getList { user ->
+                val userId = user.userId
+                !userId.isNullOrBlank() &&
+                    userId != currentUid &&
+                    user.friendStatus == MUTUAL_FRIEND_STATUS
+            }
         }
 
         /**
@@ -39,6 +55,14 @@ class AlipayUser(id: String, name: String) : MapperEntity() {
         @JvmStatic
         fun getListAsMapperEntity(): List<MapperEntity> {
             return getList()
+        }
+
+        /**
+         * 获取仅互关且排除当前账号的好友列表（作为MapperEntity列表）。
+         */
+        @JvmStatic
+        fun getFriendListAsMapperEntity(): List<MapperEntity> {
+            return getFriendList()
         }
 
         /**

@@ -15,6 +15,7 @@ import io.github.aoguai.sesameag.model.withDesc
 import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.TaskCommon
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.GlobalThreadPools
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
@@ -371,6 +372,9 @@ class GreenFinance : ModelTask() {
             }
             val friendId = obj.optString("uid")
             if (friendId.isEmpty()) {
+                continue
+            }
+            if (FriendGuard.shouldSkipFriend(friendId, TAG, "绿色经营好友金币")) {
                 continue
             }
             collectFromFriend(friendId, obj.optString("nickName"))

@@ -14,6 +14,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.IntegerModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.util.CoroutineUtils
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.GameTask
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.RandomUtil
@@ -103,7 +104,7 @@ class AntOrchard : ModelTask() {
         )
 
         modelFields.addField(
-            SelectModelField("assistFriendList", "助力好友列表", LinkedHashSet(), AlipayUser::getList).withDesc(
+            SelectModelField("assistFriendList", "助力好友列表", LinkedHashSet(), AlipayUser::getFriendList).withDesc(
                 "仅对选中的好友执行助力流程。"
             ).also { assistFriendList = it }
         )
@@ -1847,6 +1848,9 @@ class AntOrchard : ModelTask() {
                 return
             }
             for (uid in friendSet) {
+                if (FriendGuard.shouldSkipFriend(uid, TAG, "农场助力")) {
+                    continue
+                }
                 if (Status.hasFlagToday("orchard::assistRelationInvalid::$uid")) {
                     Log.record(TAG, "农场助力⏭️[${UserMap.getMaskName(uid)}]今日关系已判定无效，跳过")
                     continue

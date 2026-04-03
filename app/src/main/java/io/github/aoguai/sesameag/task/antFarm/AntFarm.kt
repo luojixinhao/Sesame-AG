@@ -37,6 +37,7 @@ import io.github.aoguai.sesameag.task.antFarm.FarmGame.drawGameCenterAward
 import io.github.aoguai.sesameag.util.ActionDelayUtil
 import io.github.aoguai.sesameag.util.CoroutineUtils
 import io.github.aoguai.sesameag.util.DataStore
+import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.RandomUtil
@@ -451,7 +452,7 @@ class AntFarm : ModelTask() {
                 "feedFriendAnimalList",
                 "帮喂小鸡 | 好友列表",
                 LinkedHashMap<String?, Int?>(),
-                { AlipayUser.getList() },
+                { AlipayUser.getFriendList() },
                 "记得设置帮喂次数.."
             ).withDesc("配置帮喂好友及每日次数；列表中的数量表示可帮喂次数。").also {
                 feedFriendAnimalList = it
@@ -479,7 +480,7 @@ class AntFarm : ModelTask() {
                 "getFeedlList",
                 "一起拿饲料 | 好友列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("仅对选中的好友执行一起拿饲料。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("仅对选中的好友执行一起拿饲料。").also {
                 getFeedlList = it
             })
         modelFields.addField(BooleanModelField("acceptGift", "收麦子", false).withDesc(
@@ -492,7 +493,7 @@ class AntFarm : ModelTask() {
                 "visitFriendList",
                 "送麦子好友列表",
                 LinkedHashMap<String?, Int?>(),
-                { AlipayUser.getList() },
+                { AlipayUser.getFriendList() },
                 "设置赠送次数？？"
             ).withDesc("配置送麦子好友及每日赠送次数。需开启“到访小鸡送礼”。").also {
                 visitFriendList = it
@@ -517,7 +518,7 @@ class AntFarm : ModelTask() {
                 "hireAnimalList",
                 "雇佣小鸡 | 好友列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("仅在选中的好友列表内尝试雇佣小鸡。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("仅在选中的好友列表内尝试雇佣小鸡。").also {
                 hireAnimalList = it
             })
         modelFields.addField(
@@ -563,7 +564,7 @@ class AntFarm : ModelTask() {
                 "dontSendFriendList",
                 "遣返 | 好友列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("设置遣返规则作用的好友名单。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("设置遣返规则作用的好友名单。").also {
                 sendBackAnimalList = it
             })
         modelFields.addField(
@@ -586,7 +587,7 @@ class AntFarm : ModelTask() {
                 "notifyFriendList",
                 "通知赶鸡 | 好友列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("设置通知规则作用的好友名单。需开启“通知赶鸡 | 开启”。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("设置通知规则作用的好友名单。需开启“通知赶鸡 | 开启”。").also {
                 notifyFriendList = it
             })
         modelFields.addField(
@@ -679,7 +680,7 @@ class AntFarm : ModelTask() {
                 "notInviteList",
                 "家庭 | 好友分享排除列表",
                 LinkedHashSet<String?>()
-            ) { AlipayUser.getList() }.withDesc("家庭分享或邀请时排除这些好友。").also {
+            ) { AlipayUser.getFriendList() }.withDesc("家庭分享或邀请时排除这些好友。").also {
                 notInviteList = it
             })
         //        modelFields.addField(giftFamilyDrawFragment = new StringModelField("giftFamilyDrawFragment", "家庭 | 扭蛋碎片赠送用户ID(配置目录查看)", ""));
@@ -2956,19 +2957,14 @@ class AntFarm : ModelTask() {
                     continue
                 }
 
-                // 自动修正配置冲突：开启“自动喂小鸡”时，自己的喂食固定走蹲点机制
+                // 自己不应出现在好友喂鸡配置中，发现后直接移除并跳过
                 if (userId == UserMap.currentUid) {
-                    if (feedAnimal?.value == true) {
-                        if (feedFriendAnimalList?.contains(userId) == true) {
-                            feedFriendAnimalList?.remove(userId)
-                            Config.save(UserMap.currentUid, true)
-                            Log.record(TAG, "检测到“帮喂小鸡 | 好友列表”包含自己，已自动移除，自动喂小鸡继续使用蹲点机制")
-                        }
-                        continue
-                    } else {
-                        // 未开启"自动喂小鸡" → 使用好友列表机制（尊重次数限制）
-                        // 继续执行后续逻辑
+                    if (feedFriendAnimalList?.contains(userId) == true) {
+                        feedFriendAnimalList?.remove(userId)
+                        Config.save(UserMap.currentUid, true)
+                        Log.record(TAG, "检测到“帮喂小鸡 | 好友列表”包含自己，已自动移除")
                     }
+                    continue
                 }
 
                 // 家庭成员优先走家庭接口，普通帮喂仅处理非家庭好友
@@ -2977,8 +2973,8 @@ class AntFarm : ModelTask() {
                 }
 
                 if (!Status.canFeedFriendToday(userId, maxDailyCount)) continue
-                val jo = JSONObject(AntFarmRpcCall.enterFarm(userId, userId))
-                if (ResChecker.checkRes(TAG, jo)) {
+                val jo = enterFriendFarmIfAvailable(userId, "帮好友喂鸡", pendingInvalidUserIds)
+                if (jo != null) {
                     val subFarmVOjo = jo.getJSONObject("farmVO").getJSONObject("subFarmVO")
                     val friendFarmId = subFarmVOjo.getString("farmId")
                     val jaAnimals = subFarmVOjo.getJSONArray("animals")
@@ -3029,11 +3025,6 @@ class AntFarm : ModelTask() {
                             break
                         }
                     }
-                } else {
-                    if (!queueInvalidFriendSelection(userId, jo, "帮好友喂鸡", pendingInvalidUserIds)) {
-                        val username = UserMap.getMaskName(userId)
-                        Log.error(TAG, "😞进入用户 $userId[$username] 的庄园失败> $jo")
-                    }
                 }
             }
         } catch (e: CancellationException) {
@@ -3082,12 +3073,11 @@ class AntFarm : ModelTask() {
                         val starve =
                             jo.has("actionType") && "starve_action" == jo.getString("actionType")
                         if (jo.getBoolean("stealingAnimal") && !starve) {
-                            s = AntFarmRpcCall.enterFarm(userId, userId)
-                            // 循环内的空响应检查：静默跳过该好友，继续处理下一个
-                            if (s.isNullOrEmpty()) {
+                            val friendFarmJo = enterFriendFarmIfAvailable(userId, "通知赶鸡")
+                            if (friendFarmJo == null) {
                                 continue // 跳过当前好友，处理下一个
                             }
-                            jo = JSONObject(s)
+                            jo = friendFarmJo
                             memo = jo.getString("memo")
                             if (ResChecker.checkRes(TAG, jo)) {
                                 jo = jo.getJSONObject("farmVO").getJSONObject("subFarmVO")
@@ -3603,6 +3593,31 @@ class AntFarm : ModelTask() {
         }
     }
 
+    private fun enterFriendFarmIfAvailable(
+        userId: String?,
+        sceneName: String,
+        pendingInvalidUserIds: MutableSet<String>? = null
+    ): JSONObject? {
+        val safeUserId = FriendGuard.normalizeUserId(userId) ?: return null
+        if (FriendGuard.shouldSkipFriend(safeUserId, TAG, sceneName)) {
+            return null
+        }
+        val jo = JSONObject(AntFarmRpcCall.enterFarm(safeUserId, safeUserId))
+        val memo = jo.optString("memo")
+        if (jo.optString("resultCode") == "304" || memo.contains("查询庄园不存在")) {
+            Log.record(TAG, "$sceneName 跳过[${UserMap.getMaskName(safeUserId) ?: safeUserId}]：对方未开通蚂蚁庄园")
+            return null
+        }
+        if (pendingInvalidUserIds != null && queueInvalidFriendSelection(safeUserId, jo, sceneName, pendingInvalidUserIds)) {
+            return null
+        }
+        if (ResChecker.checkRes(TAG, jo)) {
+            return jo
+        }
+        Log.error(TAG, "$sceneName 进入好友庄园失败[$safeUserId]> $jo")
+        return null
+    }
+
 
     private suspend fun visitFriend(
         userId: String?,
@@ -3611,8 +3626,8 @@ class AntFarm : ModelTask() {
     ): Int {
         var visitedTimes = 0
         try {
-            var jo = JSONObject(AntFarmRpcCall.enterFarm(userId, userId))
-            if (ResChecker.checkRes(TAG, jo)) {
+            var jo = enterFriendFarmIfAvailable(userId, "送麦子", pendingInvalidUserIds)
+            if (jo != null) {
                 val farmVO = jo.getJSONObject("farmVO")
                 foodStock = farmVO.getInt("foodStock")
                 val subFarmVO = farmVO.getJSONObject("subFarmVO")
@@ -3635,10 +3650,6 @@ class AntFarm : ModelTask() {
                         }
                     }
                     delay(800L)
-                }
-            } else {
-                if (!queueInvalidFriendSelection(userId, jo, "送麦子", pendingInvalidUserIds)) {
-                    Log.error(TAG, "送麦子进入好友庄园失败[$userId]> $jo")
                 }
             }
         } catch (e: CancellationException) {
@@ -4111,11 +4122,7 @@ class AntFarm : ModelTask() {
 
     private fun hireAnimalAction(userId: String?): Boolean {
         try {
-            val s = AntFarmRpcCall.enterFarm(userId, userId)
-            if (s.isBlank()) {
-                return false
-            }
-            var jo = JSONObject(s)
+            var jo = enterFriendFarmIfAvailable(userId, "雇佣小鸡") ?: return false
             if (ResChecker.checkRes(TAG, jo)) {
                 val farmVO = jo.getJSONObject("farmVO")
                 val subFarmVO = farmVO.getJSONObject("subFarmVO")
@@ -4195,7 +4202,7 @@ class AntFarm : ModelTask() {
                         return false
                     }
                     Log.record(memo)
-                    Log.record(s)
+                    Log.record(jo.toString())
                 }
             } else {
                 Log.record(jo.getString("memo"))
@@ -4463,7 +4470,7 @@ class AntFarm : ModelTask() {
                     val personDetail = p2pCanInvitePersonDetailList.getJSONObject(i)
                     val inviteStatus = personDetail.getString("inviteStatus")
                     val userId = personDetail.getString("userId")
-                    if (inviteStatus == "CAN_INVITE") {
+                    if (inviteStatus == "CAN_INVITE" && !FriendGuard.shouldSkipFriend(userId, TAG, "一起拿饲料")) {
                         userIdList.add(userId)
                         canInviteCount++
                     } else if (inviteStatus == "HAS_INVITED") {
