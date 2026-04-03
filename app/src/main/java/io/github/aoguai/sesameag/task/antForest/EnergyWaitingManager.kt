@@ -300,9 +300,12 @@ object EnergyWaitingManager {
                 // 检查等待时间是否过长
                 val waitTime = produceTime - currentTime
                 if (waitTime > MAX_WAIT_TIME_MS) {
-                     Log.record(TAG, "能量球[$bubbleId][taskId=$taskId][user=$userName]等待时间过长(${waitTime/1000/60}分钟)，跳过蹲点")
                     // 移除过长的任务
                     waitingTasks.remove(taskId)
+                    Log.record(
+                        TAG,
+                        "能量球[$bubbleId][taskId=$taskId][user=$userName]等待时间过长(${waitTime / 1000 / 60}分钟 > ${MAX_WAIT_TIME_MS / 1000 / 60}分钟)，本次不加入蹲点队列，当前有效任务${waitingTasks.size}个"
+                    )
                     EnergyWaitingPersistence.saveTasks(waitingTasks)
                     return@withLock
                 }

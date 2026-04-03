@@ -7,6 +7,7 @@ import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +88,7 @@ object EnergyWaitingPersistence {
     private val persistenceScope = CoroutineScope(Dispatchers.IO)
     private val saveMutex = Mutex()
     private val latestSaveRequestId = AtomicLong(0)
+    private val lastPersistedTaskCount = AtomicInteger(-1)
 
     /**
      * 获取当前账号的 DataStore 存储键
@@ -122,7 +124,22 @@ object EnergyWaitingPersistence {
                     }
 
                     DataStore.put(dataStoreKey, persistDataList)
-                    Log.record(TAG, "✅ 保存${persistDataList.size}个蹲点任务到持久化存储 (key: $dataStoreKey)")
+                    val currentCount = persistDataList.size
+                    val previousCount = lastPersistedTaskCount.getAndSet(currentCount)
+                    val statusText = when {
+                        previousCount < 0 ->
+                            "持久化同步：当前有效蹲点任务${currentCount}个"
+
+                        currentCount > previousCount ->
+                            "持久化同步：当前有效蹲点任务由${previousCount}个增加到${currentCount}个"
+
+                        currentCount < previousCount ->
+                            "持久化同步：当前有效蹲点任务由${previousCount}个减少到${currentCount}个"
+
+                        else ->
+                            "持久化同步：当前有效蹲点任务仍为${currentCount}个"
+                    }
+                    Log.record(TAG, "$statusText (key: $dataStoreKey)")
                 }
             } catch (e: Exception) {
                 Log.printStackTrace(TAG, "保存蹲点任务失败:", e)
@@ -142,6 +159,7 @@ object EnergyWaitingPersistence {
             val persistDataList = DataStore.getOrCreate(dataStoreKey, typeRef)
 
             if (persistDataList.isEmpty()) {
+                lastPersistedTaskCount.set(0)
                 Log.record(TAG, "持久化存储中无蹲点任务 (key: $dataStoreKey)")
                 return emptyList()
             }
@@ -172,6 +190,7 @@ object EnergyWaitingPersistence {
             }
 
             Log.record(TAG, "📥 从持久化存储恢复${validTasks.size}个有效任务（跳过${expiredCount}个过期，${tooOldCount}个过旧）")
+            lastPersistedTaskCount.set(validTasks.size)
 
             validTasks
         } catch (e: Exception) {
@@ -187,6 +206,7 @@ object EnergyWaitingPersistence {
         try {
             val dataStoreKey = getDataStoreKey()
             DataStore.put(dataStoreKey, emptyList<WaitingTaskPersistData>())
+            lastPersistedTaskCount.set(0)
             Log.record(TAG, "清空持久化存储 (key: $dataStoreKey)")
         } catch (e: Exception) {
             Log.error(TAG, "清空持久化存储失败: ${e.message}")
