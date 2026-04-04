@@ -143,6 +143,10 @@ object ModelFieldTodayStateResolver {
             "AntFarm.useAccelerateToolWhenMaxEmotion" ->
                 flag(StatusFlags.FLAG_FARM_ACCELERATE_LIMIT, "今日加速卡已达上限")
 
+            "AntFarm.useSpecialFood",
+            "AntFarm.useSpecialFoodCount" ->
+                specialFoodLimitState(modelFields)
+
             "AntFarm.signRegardless" ->
                 flag(StatusFlags.FLAG_FARM_SIGNED, "今日庄园签到已处理")
 
@@ -160,6 +164,17 @@ object ModelFieldTodayStateResolver {
         } else {
             ModelFieldTodayState()
         }
+    }
+
+    private fun specialFoodLimitState(modelFields: ModelFields): ModelFieldTodayState {
+        if (Status.hasFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_LIMIT)) {
+            return inactive("今日特殊食品使用已达上限")
+        }
+        return limitReached(
+            current = Status.getIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT),
+            limit = intValue(modelFields["useSpecialFoodCount"]),
+            reason = "今日特殊食品使用已达上限"
+        )
     }
 
     private fun familyOptionsState(modelField: ModelField<*>): ModelFieldTodayState {

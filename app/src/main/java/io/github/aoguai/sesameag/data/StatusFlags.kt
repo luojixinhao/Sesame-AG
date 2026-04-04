@@ -125,6 +125,12 @@ object StatusFlags {
     /** 庄园：加速卡每日次数上限标记 */
     const val FLAG_FARM_ACCELERATE_LIMIT = "antFarm::accelerateLimit"
 
+    /** 庄园：特殊食品今日已使用数量 */
+    const val FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT = "antFarm::specialFoodDailyCount"
+
+    /** 庄园：特殊食品今日已达自定义上限 */
+    const val FLAG_FARM_SPECIAL_FOOD_LIMIT = "antFarm::specialFoodLimit"
+
     /** 庄园：今日是否已签到 */
     const val FLAG_FARM_SIGNED = "antFarm::signed"
 

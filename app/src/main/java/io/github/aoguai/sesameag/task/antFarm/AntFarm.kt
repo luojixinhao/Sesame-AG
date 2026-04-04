@@ -203,6 +203,7 @@ class AntFarm : ModelTask() {
      * 使用特殊食品
      */
     private var useSpecialFood: BooleanModelField? = null
+    private var useSpecialFoodCount: IntegerModelField? = null
     private var useNewEggCard: BooleanModelField? = null
     private var harvestProduce: BooleanModelField? = null
     private var donation: BooleanModelField? = null
@@ -609,6 +610,16 @@ class AntFarm : ModelTask() {
                 "使用特殊食品",
                 false
             ).withDesc("自动使用特殊食物，加快爱心鸡蛋进度。").also { useSpecialFood = it })
+        modelFields.addField(
+            IntegerModelField(
+                "useSpecialFoodCount",
+                "使用特殊食品 | 每日次数限制(-1为无限制)",
+                -1,
+                -1,
+                null
+            ).withDesc("控制今日最多自动使用多少个特殊食品；-1 表示不限制。数量达到 10 个及以上时会优先按连续投喂批次处理。").also {
+                useSpecialFoodCount = it
+            })
         modelFields.addField(
             BooleanModelField(
                 "useNewEggCard",
@@ -1218,9 +1229,20 @@ class AntFarm : ModelTask() {
                 }
                 if (useSpecialFood?.value == true) { //使用特殊食品
                     val cuisineList = jo.getJSONArray("cuisineList")
-                    if (AnimalFeedStatus.SLEEPY.name != ownerAnimal.animalFeedStatus) useSpecialFood(
-                        cuisineList
-                    )
+                    if (AnimalFeedStatus.SLEEPY.name != ownerAnimal.animalFeedStatus) {
+                        val dailyLimit = useSpecialFoodCount?.value ?: -1
+                        val usedToday =
+                            Status.getIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT) ?: 0
+                        if (dailyLimit > 0 &&
+                            (Status.hasFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_LIMIT) || usedToday >= dailyLimit)
+                        ) {
+                            Status.setFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_LIMIT)
+                            Log.record(TAG, "特殊食品今日已使用${usedToday}个，达到每日上限${dailyLimit}个，跳过")
+                        } else {
+                            val remainingDailyQuota = if (dailyLimit > 0) dailyLimit - usedToday else -1
+                            useSpecialFood(cuisineList, remainingDailyQuota)
+                        }
+                    }
                 }
 
                 if (jo.has("lotteryPlusInfo")) { //彩票附加信息
@@ -3430,7 +3452,8 @@ class AntFarm : ModelTask() {
      * @param cuisineList 待使用的美食列表
      * @param maxUsage 本次运行总计使用的美食数量。-1 为尝试吃完传入列表中的指定数量。
      */
-    internal fun useSpecialFood(cuisineList: JSONArray, maxUsage: Int = -1) {
+    internal fun useSpecialFood(cuisineList: JSONArray, maxUsage: Int = -1): Int {
+        var usedCount = 0
         try {
             val foodList = mutableListOf<JSONObject>()
             var totalInventory = 0 // 统计所有美食库存总和
@@ -3453,7 +3476,7 @@ class AntFarm : ModelTask() {
 
             // 2. 确定本次实际消耗量
             var remainingToEat = if (maxUsage == -1) totalToEat else min(maxUsage, totalToEat)
-            if (remainingToEat <= 0) return
+            if (remainingToEat <= 0) return 0
 
             Log.record(TAG, "美食处理：待消耗总量 $remainingToEat")
 
@@ -3461,6 +3484,7 @@ class AntFarm : ModelTask() {
                 val batchTarget = min(remainingToEat, 10) // 每次最多吃10个
                 val currentBatchArray = JSONArray()
                 val usedNames = StringBuilder()
+                var currentBatchCount = 0
 
                 // 2. 策略判断：优先查找是否有单种食物满足本次 Batch 数量
                 val singleFood = foodList.find { it.optInt("count", 0) >= batchTarget }
@@ -3476,6 +3500,7 @@ class AntFarm : ModelTask() {
                     currentBatchArray.put(snack)
 
                     usedNames.append(singleFood.getString("name")).append("x").append(countToUse)
+                    currentBatchCount = countToUse
 
                     // 更新状态
                     val newCount = singleFood.getInt("count") - countToUse
@@ -3503,6 +3528,7 @@ class AntFarm : ModelTask() {
                         val left = food.getInt("count") - canTake
                         if (left <= 0) iterator.remove() else food.put("count", left)
                     }
+                    currentBatchCount = currentBatchSum
                     remainingToEat -= currentBatchSum
                 }
 
@@ -3514,6 +3540,7 @@ class AntFarm : ModelTask() {
                         val delta = joRes.optJSONObject("foodEffect")?.optDouble("deltaProduce", 0.0) ?: 0.0
                         val formattedDelta = "%.2f".format(java.util.Locale.US, delta)
                         Log.farm("批量使用美食🍱[$usedNames]#加速${formattedDelta}颗爱心鸡蛋")
+                        usedCount += currentBatchCount
                     } else {
                         Log.record(TAG, "美食使用失败，停止后续操作: ${joRes.optString("memo")}")
                         break
@@ -3524,6 +3551,18 @@ class AntFarm : ModelTask() {
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "useSpecialFood 批量模式 err:", t)
         }
+        if (usedCount > 0) {
+            val usedToday = Status.getIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT) ?: 0
+            val newUsedToday = usedToday + usedCount
+            Status.setIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT, newUsedToday)
+
+            val dailyLimit = useSpecialFoodCount?.value ?: -1
+            if (dailyLimit > 0 && newUsedToday >= dailyLimit) {
+                Status.setFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_LIMIT)
+            }
+            Log.record(TAG, "特殊食品今日已累计使用${newUsedToday}个")
+        }
+        return usedCount
     }
 
     private fun drawLotteryPlus(lotteryPlusInfo: JSONObject) {
