@@ -2033,7 +2033,9 @@ class AntFarm : ModelTask() {
                 val taskStatus = task.getString("taskStatus")
                 val bizKey = task.getString("bizKey")
 
-                // 1. 预检查：黑名单与每日上限
+                // 1. 预检查：每日上限与黑名单
+                if (Status.hasFlagToday("farm::task::limit::$bizKey")) continue
+
                 // 检查任务标题和业务键是否在黑名单中
                 val titleInBlacklist = TaskBlacklist.isTaskInBlacklist(title)
                 val bizKeyInBlacklist = TaskBlacklist.isTaskInBlacklist(bizKey)
@@ -2042,8 +2044,6 @@ class AntFarm : ModelTask() {
                     Log.record(TAG, "跳过黑名单任务: $title ($bizKey)")
                     continue
                 }
-
-                if (Status.hasFlagToday("farm::task::limit::$bizKey")) continue
                 // 2. 执行 TODO 任务
                 when (taskStatus) {
                     TaskStatus.TODO.name -> {
@@ -2276,14 +2276,14 @@ class AntFarm : ModelTask() {
                 val bizKey = task.optString("bizKey")
                 val taskStatus = task.optString("taskStatus")
 
-                if (TaskBlacklist.isTaskInBlacklist(title) || TaskBlacklist.isTaskInBlacklist(bizKey)) {
-                    continue
-                }
                 if (bizKey == "tab3_gyg" && enableChouchoule?.value != true) {
                     Log.record(TAG, "抽抽乐任务[$title]已关闭，跳过饲料任务收敛检查")
                     continue
                 }
                 if (Status.hasFlagToday("farm::task::limit::$bizKey")) {
+                    continue
+                }
+                if (TaskBlacklist.isTaskInBlacklist(title) || TaskBlacklist.isTaskInBlacklist(bizKey)) {
                     continue
                 }
                 if (taskStatus == TaskStatus.FINISHED.name || taskStatus == TaskStatus.RECEIVED.name) {

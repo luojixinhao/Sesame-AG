@@ -1272,19 +1272,19 @@ class AntOcean : ModelTask() {
                     val sceneCode = task.getString("sceneCode")
                     val taskType = task.getString("taskType")
                     val taskStatus = task.getString("taskStatus")
-                    // 在处理任何任务前，先检查黑名单
+                    // 在处理任何任务前，先检查当日限制，再检查黑名单
+                    if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG) &&
+                        (taskTitle.contains("帮好友清理") || taskType.contains("HELP_CLEAN"))
+                    ) {
+                        Log.record(TAG, "海洋任务🌊[$taskTitle]帮助清理次数已达上限，跳过处理")
+                        continue
+                    }
                     if (badTaskSet.contains(taskTitle) ||
                         badTaskSet.contains(taskType) ||
                         TaskBlacklist.isTaskInBlacklist(taskTitle) ||
                         TaskBlacklist.isTaskInBlacklist(taskType)
                     ) {
                         Log.record(TAG, "海洋任务🌊[$taskTitle]已在黑名单中，跳过处理")
-                        continue
-                    }
-                    if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG) &&
-                        (taskTitle.contains("帮好友清理") || taskType.contains("HELP_CLEAN"))
-                    ) {
-                        Log.record(TAG, "海洋任务🌊[$taskTitle]帮助清理次数已达上限，跳过处理")
                         continue
                     }
 

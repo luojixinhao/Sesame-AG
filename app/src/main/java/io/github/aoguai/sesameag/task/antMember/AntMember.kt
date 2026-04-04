@@ -4170,6 +4170,16 @@ class AntMember : ModelTask() {
                     continue
                 }
 
+                var recordId = task.optString("recordId", "")
+                if (recordId.isEmpty() && joinLimitReached) {
+                    if (!joinLimitLogged) {
+                        record(TAG, "芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
+                        joinLimitLogged = true
+                    }
+                    skippedCount++
+                    continue
+                }
+
                 if (isTaskInBlacklist(taskTitle)) {
                     record(TAG, "芝麻信用💳[跳过黑名单任务]#$taskTitle")
                     skippedCount++
@@ -4207,7 +4217,6 @@ class AntMember : ModelTask() {
                     continue
                 }
                 var s: String?
-                var recordId = task.optString("recordId", "")
                 var responseObj: JSONObject?
 
                 val actionUrl = task.optString("actionUrl", "")
@@ -4219,14 +4228,6 @@ class AntMember : ModelTask() {
 
                 var taskCompleted = false
                 if (recordId.isEmpty()) {
-                    if (joinLimitReached) {
-                        if (!joinLimitLogged) {
-                            record(TAG, "芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
-                            joinLimitLogged = true
-                        }
-                        skippedCount++
-                        continue
-                    }
                     val joinResult = joinSesameTaskWithFallback(
                         taskTemplateId,
                         taskTitle,
