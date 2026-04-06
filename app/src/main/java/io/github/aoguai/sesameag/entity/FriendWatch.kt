@@ -3,7 +3,6 @@ package io.github.aoguai.sesameag.entity
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
-import io.github.aoguai.sesameag.util.StringUtil
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
 import org.json.JSONException
