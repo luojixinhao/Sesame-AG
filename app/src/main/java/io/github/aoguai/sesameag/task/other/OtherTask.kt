@@ -81,7 +81,7 @@ class OtherTask : ModelTask() {
         try {
             if (credit2101?.value == true) {
                 val optionField = creditOptions ?: run {
-                    Log.record(TAG, "信用2101配置未初始化，跳过执行")
+                    Log.sesame(TAG, "信用2101配置未初始化，跳过执行")
                     return
                 }
                 Credit2101.doCredit2101(autoOpenChest?.value == true, optionField)

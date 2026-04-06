@@ -267,19 +267,19 @@ class AntStall : ModelTask() {
     override fun runJava() {
         try {
             val tc = TimeCounter(TAG)
-            Log.record(TAG, "执行开始-${getName()}")
+            Log.stall(TAG, "执行开始-${getName()}")
 
             val homeResponse = AntStallRpcCall.home()
             val homeJson = JSONObject(homeResponse)
 
             if (!ResChecker.checkRes(TAG, homeJson)) {
-                Log.record(TAG, "home err: $homeResponse")
+                Log.stall(TAG, "home err: $homeResponse")
                 return
             }
 
             // 检查是否已注册
             if (!homeJson.getBoolean("hasRegister") || homeJson.getBoolean("hasQuit")) {
-                Log.farm("蚂蚁新村⛪请先开启蚂蚁新村")
+                Log.stall("蚂蚁新村⛪请先开启蚂蚁新村")
                 return
             }
 
@@ -358,7 +358,7 @@ class AntStall : ModelTask() {
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "home err:", t)
         } finally {
-            Log.record(TAG, "执行结束-${getName()}")
+            Log.stall(TAG, "执行结束-${getName()}")
         }
     }
 
@@ -389,7 +389,7 @@ class AntStall : ModelTask() {
 
             if (ResChecker.checkRes(TAG, sendBackJson)) {
                 val amountText = if (amount > 0) "获得金币$amount" else ""
-                Log.farm("蚂蚁新村⛪请走[${UserMap.getMaskName(shopUserId)}]的小摊$amountText")
+                Log.stall("蚂蚁新村⛪请走[${UserMap.getMaskName(shopUserId)}]的小摊$amountText")
             } else {
                 Log.error(TAG, "sendBack err: $sendBackResponse")
             }
@@ -436,17 +436,17 @@ class AntStall : ModelTask() {
                 if (friend.getBoolean("canInviteOpenShop")) {
                     val inviteResponse = AntStallRpcCall.oneKeyInviteOpenShop(friendUserId, seatId)
                     if (inviteResponse.isEmpty()) {
-                        Log.record(TAG, "邀请[${UserMap.getMaskName(friendUserId)}]开店返回空,跳过")
+                        Log.stall(TAG, "邀请[${UserMap.getMaskName(friendUserId)}]开店返回空,跳过")
                         continue
                     }
 
                     val inviteJson = JSONObject(inviteResponse)
                     if (ResChecker.checkRes(TAG, inviteJson)) {
-                        Log.farm("蚂蚁新村⛪邀请[${UserMap.getMaskName(friendUserId)}]开店成功")
+                        Log.stall("蚂蚁新村⛪邀请[${UserMap.getMaskName(friendUserId)}]开店成功")
                         sentUserId.add(friendUserId)
                         return
                     } else {
-                        Log.record(
+                        Log.stall(
                             TAG,
                             "邀请[${UserMap.getMaskName(friendUserId)}]开店失败: ${
                                 inviteJson.optString("errorMessage")
@@ -486,7 +486,7 @@ class AntStall : ModelTask() {
                 // 摊位空闲时尝试邀请
                 if (seat.getString("status") == "FREE") {
                     if (stallInviteShop.value == true) {
-                        Log.record(TAG, "摊位[$i]空闲,尝试邀请好友...")
+                        Log.stall(TAG, "摊位[$i]空闲,尝试邀请好友...")
                         inviteOpen(seatId, sentUserId)
                     }
                     continue
@@ -503,7 +503,7 @@ class AntStall : ModelTask() {
 
                 // 白名单跳过
                 if (stallWhiteList.value?.contains(rentLastUser) == true) {
-                    Log.record(
+                    Log.stall(
                         TAG,
                         "好友[${UserMap.getMaskName(rentLastUser)}]在白名单中,跳过请走。"
                     )
@@ -515,7 +515,7 @@ class AntStall : ModelTask() {
 
                 // 黑名单直接赶走
                 if (stallBlackList.value?.contains(rentLastUser) == true) {
-                    Log.record(
+                    Log.stall(
                         TAG,
                         "好友[${UserMap.getMaskName(rentLastUser)}]在黑名单中,立即请走。"
                     )
@@ -529,7 +529,7 @@ class AntStall : ModelTask() {
                 val endTime = bizStartTime + allowMinutes * 60 * 1000L
 
                 if (System.currentTimeMillis() > endTime) {
-                    Log.record(TAG, "好友[${UserMap.getMaskName(rentLastUser)}]摆摊超时,立即请走。")
+                    Log.stall(TAG, "好友[${UserMap.getMaskName(rentLastUser)}]摆摊超时,立即请走。")
                     sendBack(rentLastBill, seatId, rentLastShop, rentLastUser, sentUserId)
                 } else {
                     val taskId = "SB|$seatId"
@@ -545,7 +545,7 @@ class AntStall : ModelTask() {
                                 )
                             }
                         }, endTime))
-                        Log.record(TAG, "添加蹲点请走⛪在[${TimeUtil.getCommonDate(endTime)}]执行")
+                        Log.stall(TAG, "添加蹲点请走⛪在[${TimeUtil.getCommonDate(endTime)}]执行")
                     }
                 }
             }
@@ -572,7 +572,7 @@ class AntStall : ModelTask() {
                 val response = AntStallRpcCall.settle(assetId, settleCoin)
                 val json = JSONObject(response)
                 if (ResChecker.checkRes(TAG, json)) {
-                    Log.farm("蚂蚁新村⛪[收取金币]#$settleCoin")
+                    Log.stall("蚂蚁新村⛪[收取金币]#$settleCoin")
                 } else {
                     Log.error(TAG, "settle err: $response")
                 }
@@ -597,11 +597,11 @@ class AntStall : ModelTask() {
 
             val astUserShopList = json.getJSONArray("astUserShopList")
             if (astUserShopList.length() == 0) {
-                Log.record(TAG, "没有正在摆摊的小摊可收。")
+                Log.stall(TAG, "没有正在摆摊的小摊可收。")
                 return
             }
 
-            Log.record(TAG, "检查 ${astUserShopList.length()} 个小摊的收摊时间...")
+            Log.stall(TAG, "检查 ${astUserShopList.length()} 个小摊的收摊时间...")
 
             for (i in 0 until astUserShopList.length()) {
                 val shop = astUserShopList.getJSONObject(i)
@@ -616,7 +616,7 @@ class AntStall : ModelTask() {
                 val rentLastUser = shop.getString("rentLastUser")
 
                 if (System.currentTimeMillis() > shopTime) {
-                    Log.record(TAG, "小摊[$shopId]摆摊时间已到,执行收摊。")
+                    Log.stall(TAG, "小摊[$shopId]摆摊时间已到,执行收摊。")
                     shopClose(shopId, rentLastBill, rentLastUser)
                 } else {
                     val taskId = "SH|$shopId"
@@ -630,7 +630,7 @@ class AntStall : ModelTask() {
                                 openShop()
                             }
                         }, shopTime))
-                        Log.record(TAG, "添加蹲点收摊⛪在[${TimeUtil.getCommonDate(shopTime)}]执行")
+                        Log.stall(TAG, "添加蹲点收摊⛪在[${TimeUtil.getCommonDate(shopTime)}]执行")
                     }
                 }
             }
@@ -663,11 +663,11 @@ class AntStall : ModelTask() {
             }
 
             if (shopIds.isEmpty()) {
-                Log.record(TAG, "没有空闲的小摊可用于摆摊。")
+                Log.stall(TAG, "没有空闲的小摊可用于摆摊。")
                 return
             }
 
-            Log.record(TAG, "找到 ${shopIds.size} 个空闲小摊,开始寻找好友村庄...")
+            Log.stall(TAG, "找到 ${shopIds.size} 个空闲小摊,开始寻找好友村庄...")
             rankCoinDonate(shopIds)
 
         } catch (t: Throwable) {
@@ -723,7 +723,7 @@ class AntStall : ModelTask() {
             val json = JSONObject(response)
 
             if (json.optString("resultCode") == "SUCCESS") {
-                Log.farm("蚂蚁新村⛪在[${UserMap.getMaskName(userId)}]家摆摊")
+                Log.stall("蚂蚁新村⛪在[${UserMap.getMaskName(userId)}]家摆摊")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "openShop err:", t)
@@ -755,7 +755,7 @@ class AntStall : ModelTask() {
                 val rentUser2 = guest2.optString("rentLastUser")
 
                 if (currentUid == rentUser1 || currentUid == rentUser2) {
-                    Log.record(TAG, "已在[${UserMap.getMaskName(userId)}]家摆摊,跳过")
+                    Log.stall(TAG, "已在[${UserMap.getMaskName(userId)}]家摆摊,跳过")
                     continue
                 }
 
@@ -790,11 +790,11 @@ class AntStall : ModelTask() {
             reason.contains("未开通") ||
             reason.contains("未注册")
         ) {
-            Log.record(TAG, "$sceneName 跳过[${UserMap.getMaskName(userId) ?: userId}]：${reason.ifEmpty { "对方未开通蚂蚁新村或当前不可访问" }}")
+            Log.stall(TAG, "$sceneName 跳过[${UserMap.getMaskName(userId) ?: userId}]：${reason.ifEmpty { "对方未开通蚂蚁新村或当前不可访问" }}")
             return null
         }
         if (!ResChecker.checkRes(TAG, json)) {
-            Log.record(TAG, "$sceneName 跳过[${UserMap.getMaskName(userId) ?: userId}]：${reason.ifEmpty { "对方未开通蚂蚁新村或当前不可访问" }}")
+            Log.stall(TAG, "$sceneName 跳过[${UserMap.getMaskName(userId) ?: userId}]：${reason.ifEmpty { "对方未开通蚂蚁新村或当前不可访问" }}")
             return null
         }
         return json
@@ -818,7 +818,7 @@ class AntStall : ModelTask() {
             val closeJson = JSONObject(closeResponse)
 
             if (ResChecker.checkRes(TAG, closeJson)) {
-                Log.farm(
+                Log.stall(
                     "蚂蚁新村⛪收取在[${UserMap.getMaskName(userId)}]的摊位获得${
                         income.getString(
                             "amount"
@@ -850,12 +850,12 @@ class AntStall : ModelTask() {
             // 签到
             val signListModel = json.getJSONObject("signListModel")
             if (!signListModel.getBoolean("currentKeySigned")) {
-                Log.record(TAG, "开始执行每日签到...")
+                Log.stall(TAG, "开始执行每日签到...")
                 signToday()
             }
 
             val taskModels = json.getJSONArray("taskModels")
-            Log.record(TAG, "开始检查 ${taskModels.length()} 个新村任务...")
+            Log.stall(TAG, "开始检查 ${taskModels.length()} 个新村任务...")
 
             for (i in 0 until taskModels.length()) {
                 try {
@@ -865,7 +865,7 @@ class AntStall : ModelTask() {
 
                     // 已完成的任务领取奖励
                     if (taskStatus == "FINISHED") {
-                        Log.record(TAG, "任务[$taskType]已完成,尝试领取奖励...")
+                        Log.stall(TAG, "任务[$taskType]已完成,尝试领取奖励...")
                         receiveTaskAward(taskType)
                         continue
                     }
@@ -879,7 +879,7 @@ class AntStall : ModelTask() {
                     // 自动完成任务
                     if (actionType == "VISIT_AUTO_FINISH" || taskType in TASK_TYPE_LIST) {
                         if (finishTask(taskType)) {
-                            Log.farm("蚂蚁新村💣任务[$title]完成")
+                            Log.stall("蚂蚁新村💣任务[$title]完成")
                             GlobalThreadPools.sleepCompat(200L)
                         }
                         continue
@@ -941,7 +941,7 @@ class AntStall : ModelTask() {
                 try {
                     val eventInfo = eventList.getJSONObject(j)
                     val finishResponse = AntStallRpcCall.finish(pid, eventInfo)
-                    Log.record("延时5S 木兰市集")
+                    Log.stall("延时5S 木兰市集")
                     GlobalThreadPools.sleepCompat(5000)
 
                     val finishJson = JSONObject(finishResponse)
@@ -966,7 +966,7 @@ class AntStall : ModelTask() {
             val json = JSONObject(response)
 
             if (ResChecker.checkRes(TAG, json)) {
-                Log.farm("蚂蚁新村⛪[签到成功]")
+                Log.stall("蚂蚁新村⛪[签到成功]")
             } else {
                 Log.error(TAG, "signToday err: $response")
             }
@@ -986,7 +986,7 @@ class AntStall : ModelTask() {
             val json = JSONObject(response)
 
             if (json.optBoolean("success")) {
-                Log.farm("蚂蚁新村⛪[领取奖励]")
+                Log.stall("蚂蚁新村⛪[领取奖励]")
             } else {
                 Log.error(TAG, "receiveTaskAward err: $response")
             }
@@ -1012,7 +1012,7 @@ class AntStall : ModelTask() {
                 val errorCode = json.optString("code", json.optString("resultCode", ""))
                 val desc = json.optString("desc", json.optString("memo", ""))
                 if (errorCode == "400000040" || desc.contains("不支持rpc调用")) {
-                    Log.record(TAG, "任务[$taskType]不支持RPC完成，跳过finishTask，等待服务端状态回写")
+                    Log.stall(TAG, "任务[$taskType]不支持RPC完成，跳过finishTask，等待服务端状态回写")
                     return false
                 }
                 Log.error(TAG, "finishTask err: $response")
@@ -1062,7 +1062,7 @@ class AntStall : ModelTask() {
                 val inviteJson = JSONObject(inviteResponse)
 
                 if (ResChecker.checkRes(TAG, inviteJson)) {
-                    Log.farm("蚂蚁新村⛪邀请好友[${UserMap.getMaskName(userId)}]#开通新村")
+                    Log.stall("蚂蚁新村⛪邀请好友[${UserMap.getMaskName(userId)}]#开通新村")
                     return true
                 } else {
                     Log.error(TAG, "friendInviteRegister err: $inviteJson")
@@ -1084,7 +1084,7 @@ class AntStall : ModelTask() {
 
             if (json.optBoolean("success")) {
                 val shareId = json.getString("shareId")
-                Log.record(TAG, "蚂蚁新村⛪[分享助力]")
+                Log.stall(TAG, "蚂蚁新村⛪[分享助力]")
                 return shareId
             } else {
                 Log.error(TAG, "shareP2P err: $response")
@@ -1103,17 +1103,17 @@ class AntStall : ModelTask() {
             if (stallAssistFriend.value != true) return
 
             if (!Status.canAntStallAssistFriendToday()) {
-                Log.record(TAG, "今日新村助力次数已用完。")
+                Log.stall(TAG, "今日新村助力次数已用完。")
                 return
             }
 
             val friendSet = assistFriendList.value ?: emptySet()
             if (friendSet.isEmpty()) {
-                Log.record(TAG, "未设置新村助力好友列表。")
+                Log.stall(TAG, "未设置新村助力好友列表。")
                 return
             }
 
-            Log.record(TAG, "开始为 ${friendSet.size} 位好友进行新村助力...")
+            Log.stall(TAG, "开始为 ${friendSet.size} 位好友进行新村助力...")
 
             for (uid in friendSet) {
                 val safeUid = uid ?: continue
@@ -1132,12 +1132,12 @@ class AntStall : ModelTask() {
                 if (!json.optBoolean("success")) {
                     when (json.getString("code")) {
                         "600000028" -> {
-                            Log.record(TAG, "新村助力🮐被助力次数上限[$name]")
+                            Log.stall(TAG, "新村助力🮐被助力次数上限[$name]")
                             continue
                         }
 
                         "600000027" -> {
-                            Log.record(TAG, "新村助力💪今日助力他人次数上限")
+                            Log.stall(TAG, "新村助力💪今日助力他人次数上限")
                             Status.antStallAssistFriendToday()
                             return
                         }
@@ -1149,7 +1149,7 @@ class AntStall : ModelTask() {
                     }
                 }
 
-                Log.farm("新村助力🎉成功[$name]")
+                Log.stall("新村助力🎉成功[$name]")
                 GlobalThreadPools.sleepCompat(5000)
             }
 
@@ -1204,7 +1204,7 @@ class AntStall : ModelTask() {
                             val title = astProjectVO.optString("title", "未知项目")
 
                             if (donateJson.optString("resultCode", "") == "SUCCESS") {
-                                Log.farm("蚂蚁新村⛪[捐赠:$title]")
+                                Log.stall("蚂蚁新村⛪[捐赠:$title]")
                                 Status.setStallDonateToday()
                             }
                         }
@@ -1239,17 +1239,17 @@ class AntStall : ModelTask() {
                 val flagKey = "stall::roadmap::$villageName"
 
                 if (Status.hasFlagToday(flagKey)) {
-                    Log.record(TAG, "今日已进入[$villageName],跳过重复打卡。")
+                    Log.stall(TAG, "今日已进入[$villageName],跳过重复打卡。")
                     continue
                 }
 
-                Log.farm("蚂蚁新村⛪[进入:$villageName]成功")
+                Log.stall("蚂蚁新村⛪[进入:$villageName]成功")
                 Status.setFlagToday(flagKey)
                 break
             }
 
             if (!hasNewVillage) {
-                Log.record(TAG, "所有村庄都已解锁,无需进入下一村。")
+                Log.stall(TAG, "所有村庄都已解锁,无需进入下一村。")
             }
 
         } catch (t: Throwable) {
@@ -1277,10 +1277,10 @@ class AntStall : ModelTask() {
                 val collectJson = JSONObject(collectResponse)
 
                 if (ResChecker.checkRes(TAG, collectJson)) {
-                    Log.farm("蚂蚁新村⛪获得肥料${manure}g")
+                    Log.stall("蚂蚁新村⛪获得肥料${manure}g")
                 }
             } else {
-                Log.record(TAG, "没有可收取的肥料。")
+                Log.stall(TAG, "没有可收取的肥料。")
             }
 
         } catch (t: Throwable) {
@@ -1304,14 +1304,14 @@ class AntStall : ModelTask() {
             // 先于ResChecker判断特定业务错误码
             val resultCode = json.optString("resultCode")
             if (resultCode == "B_OVER_LIMIT_COUNT_OF_THROW_TO_FRIEND") {
-                Log.record(TAG, "检测到今日丢肥料次数已达上限,停止后续尝试")
+                Log.stall(TAG, "检测到今日丢肥料次数已达上限,停止后续尝试")
                 Status.setFlagToday(StatusFlags.FLAG_ANTSTALL_THROW_MANURE_LIMIT)
                 return
             }
 
             // 正常的响应检查
             if (ResChecker.checkRes(TAG, json)) {
-                Log.farm("蚂蚁新村⛪打肥料成功")
+                Log.stall("蚂蚁新村⛪打肥料成功")
             }
 
         } catch (t: Throwable) {
@@ -1381,7 +1381,7 @@ class AntStall : ModelTask() {
             val json = JSONObject(response)
 
             if (ResChecker.checkRes(TAG, json)) {
-                Log.farm("蚂蚁新村⛪收取应收金币")
+                Log.stall("蚂蚁新村⛪收取应收金币")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "settleReceivable err:", t)
@@ -1394,11 +1394,11 @@ class AntStall : ModelTask() {
     private fun pasteTicket() {
         try {
             if (!Status.canPasteTicketTime()) {
-                Log.record(TAG, "未到贴罚单时间或今日已贴完。")
+                Log.stall(TAG, "未到贴罚单时间或今日已贴完。")
                 return
             }
 
-            Log.record(TAG, "开始巡逻,寻找可贴罚单的好友...")
+            Log.stall(TAG, "开始巡逻,寻找可贴罚单的好友...")
 
             while (!Thread.currentThread().isInterrupted) {
                 try {
@@ -1414,14 +1414,14 @@ class AntStall : ModelTask() {
                     }
 
                     if (json.getInt("canPasteTicketCount") == 0) {
-                        Log.record(TAG, "蚂蚁新村👍[今日罚单已贴完]")
+                        Log.stall(TAG, "蚂蚁新村👍[今日罚单已贴完]")
                         Status.pasteTicketTime()
                         return
                     }
 
                     val friendId = json.optString("friendUserId")
                     if (friendId.isEmpty()) {
-                        Log.record(TAG, "没有更多可贴罚单的好友了。")
+                        Log.stall(TAG, "没有更多可贴罚单的好友了。")
                         return
                     }
 
@@ -1473,7 +1473,7 @@ class AntStall : ModelTask() {
                                 return
                             }
 
-                            Log.farm("蚂蚁新村🚫在[${UserMap.getMaskName(friendId)}]贴罚单")
+                            Log.stall("蚂蚁新村🚫在[${UserMap.getMaskName(friendId)}]贴罚单")
 
                         } finally {
                             GlobalThreadPools.sleepCompat(1000)

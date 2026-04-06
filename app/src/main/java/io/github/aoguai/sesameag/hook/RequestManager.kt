@@ -248,7 +248,7 @@ object RequestManager {
             // 2. 发送通知 (根据用户配置)
             if (BaseModel.errNotify.value == true) {
                 val msg = "${TimeUtil.getTimeStr()} | 网络异常次数超过阈值[$maxCount]"
-                Notify.sendNewNotification(msg, "RPC 连续失败，脚本已暂停")
+                Notify.sendAlert(msg, "RPC 连续失败，脚本已暂停")
             }
             // 3. 立即尝试一次恢复
             handleOfflineRecovery()

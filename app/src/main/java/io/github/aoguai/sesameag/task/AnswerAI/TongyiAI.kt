@@ -61,8 +61,8 @@ class TongyiAI(token: String?) : AnswerAIInterface {
             val responseBody = response.body ?: return result
             val json = responseBody.string()
             if (!response.isSuccessful) {
-                Log.other("Tongyi请求失败")
-                Log.record(TAG, "Tongyi接口异常：$json")
+                Log.common("Tongyi请求失败")
+                Log.runtime(TAG, "Tongyi接口异常：$json")
                 return result
             }
             val jsonObject = JSONObject(json)
@@ -96,7 +96,7 @@ class TongyiAI(token: String?) : AnswerAIInterface {
                     return index
                 }
             } catch (e: Exception) {
-                Log.record(TAG, "AI🧠回答，返回数据：$answerResult")
+                Log.debug(TAG, "AI🧠回答，返回数据：$answerResult")
             }
             for (i in 0 until size) {
                 if (answerResult.contains(answerList[i])) {

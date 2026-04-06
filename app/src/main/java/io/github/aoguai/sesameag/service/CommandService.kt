@@ -38,10 +38,10 @@ class CommandService : Service() {
         private const val NOTIFICATION_ID = 1001
 
         // 统一 ID 和 名称
-        private const val CHANNEL_ID = "SesameCommandChannel"
-        private const val CHANNEL_NAME = "后台命令服务"
-        private const val NOTIFICATION_TITLE = "后台命令服务"
-        private const val NOTIFICATION_CONTENT = "服务正在运行，等待执行指令..."
+        private const val CHANNEL_ID = "SesameCommandService"
+        private const val CHANNEL_NAME = "Sesame-AG 命令服务"
+        private const val NOTIFICATION_TITLE = "Sesame-AG 命令服务"
+        private const val NOTIFICATION_CONTENT = "服务正在运行，等待执行命令..."
 
         // 设置命令执行超时时间，例如 15 秒
         private const val COMMAND_TIMEOUT_MS = 15000L
@@ -267,7 +267,7 @@ class CommandService : Service() {
             CHANNEL_NAME,
             NotificationManager.IMPORTANCE_LOW // 低优先级，不发出声音
         ).apply {
-            description = "用于维持后台命令执行服务的运行"
+            description = "用于维持模块命令执行服务的运行"
             setShowBadge(false)
         }
         val notificationManager = getSystemService(NotificationManager::class.java)

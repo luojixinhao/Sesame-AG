@@ -72,7 +72,7 @@ class GeminiAI(token: String?) : AnswerAIInterface {
                 val responseBody = response.body ?: return result
                 val json = responseBody.string()
                 if (!response.isSuccessful) {
-                    Log.other("Gemini请求失败")
+                    Log.common("Gemini请求失败")
                     Log.runtime(TAG, "Gemini接口异常：$json")
                     return result
                 }
@@ -108,7 +108,7 @@ class GeminiAI(token: String?) : AnswerAIInterface {
                         return index
                     }
                 } catch (e: NumberFormatException) {
-                    Log.other("AI🧠回答，非序号格式：$answerResult")
+                    Log.common("AI🧠回答，非序号格式：$answerResult")
                 }
 
                 for (i in answerList.indices) {

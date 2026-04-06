@@ -68,8 +68,8 @@ import io.github.aoguai.sesameag.util.Log.printStackTrace
 import io.github.aoguai.sesameag.util.Log.record
 import io.github.aoguai.sesameag.util.ModuleStatus
 import io.github.aoguai.sesameag.util.Notify
-import io.github.aoguai.sesameag.util.Notify.stop
-import io.github.aoguai.sesameag.util.Notify.updateStatusText
+import io.github.aoguai.sesameag.util.Notify.stopRunning
+import io.github.aoguai.sesameag.util.Notify.updateRunningStatus
 import io.github.aoguai.sesameag.util.PermissionUtil.checkBatteryPermissions
 import io.github.aoguai.sesameag.util.TimeTriggerEvaluator
 import io.github.aoguai.sesameag.util.TimeTriggerParser
@@ -313,7 +313,7 @@ class ApplicationHook {
                                         "login_timeout" -> "✅ 登录已恢复，继续执行"
                                         else -> "✅ 离线已解除，恢复执行"
                                     }
-                                    updateStatusText(statusMsg)
+                                    updateRunningStatus(statusMsg)
 
                                     val triggerReason =
                                         if (reason == "auth_like") "auth_like_recovered"
@@ -451,7 +451,7 @@ class ApplicationHook {
                                 "login_timeout" -> "✅ 登录已恢复，继续执行"
                                 else -> "✅ 离线已解除，恢复执行"
                             }
-                            updateStatusText(statusMsg)
+                            updateRunningStatus(statusMsg)
 
                             val triggerReason =
                                 if (reason == "auth_like") "auth_like_recovered"
@@ -525,7 +525,7 @@ class ApplicationHook {
                         // 如果直接 restartByBroadcast()/reOpenApp()，会把“用户主动退出”误判成“异常退出需要恢复”，
                         // 进而出现支付宝/模块后台被反复复活的问题。后续可增加独立配置开关，
                         // 由用户决定“宿主前台服务销毁后是否自动恢复目标应用/执行链路”。
-                        updateStatusText("目标应用前台服务被销毁")
+                        updateRunningStatus("目标应用前台服务被销毁")
                         destroyHandler()
                         service = null
                         mainTask = null
@@ -1025,7 +1025,7 @@ class ApplicationHook {
                 }
 
                 HookUtil.hookUser(classLoader!!)
-                record(TAG, "芝麻粒-AG 开始初始化...")
+                record(TAG, "Sesame-AG 开始初始化...")
                 if (!ensureRootAccessForWorkflow(reason)) {
                     return false
                 }
@@ -1050,7 +1050,7 @@ class ApplicationHook {
                     }
                 } catch (_: Throwable) { /* ignore */ }
 
-                Notify.start(service!!)
+                Notify.startRunning(service!!)
                 setWakenAtTimeAlarm()
 
                 synchronized(rpcBridgeLock) {
@@ -1118,7 +1118,7 @@ class ApplicationHook {
                     stopHandler()
                     destroyData()
                     Status.unload()
-                    stop()
+                    stopRunning()
                     clearIntervalLimit()
                     Config.unload()
                     UserMap.unload()
@@ -1164,7 +1164,7 @@ class ApplicationHook {
                 try {
                     val granted = WorkflowRootGuard.hasRoot(forceRefresh = true, reason = reason)
                     if (!granted) {
-                        updateStatusText("未检测到可用执行权限，已禁止工作流")
+                        updateRunningStatus("未检测到可用执行权限，已禁止工作流")
                         ApplicationHookConstants.clearPendingTriggers("root_denied")
                         return@execute
                     }
@@ -1200,7 +1200,7 @@ class ApplicationHook {
             pendingInitReason = null
             val message = "未勾选已阅读 LICENSE 与 LEGAL 说明，已禁止工作流"
             record(TAG, "⛔ $message")
-            updateStatusText(message)
+            updateRunningStatus(message)
             ApplicationHookConstants.clearPendingTriggers("legal_unaccepted")
             return false
         }

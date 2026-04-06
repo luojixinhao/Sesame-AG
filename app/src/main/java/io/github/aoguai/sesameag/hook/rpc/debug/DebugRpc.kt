@@ -90,7 +90,7 @@ class DebugRpc {
                 
                 Log.debug(TAG, "新树上苗🌱[$region-$treeName]#${currentBudget}株-$tips")
             } else {
-                Log.record("${jo.optString("resultDesc", "Error")} projectId: $projectId")
+                Log.debug("${jo.optString("resultDesc", "Error")} projectId: $projectId")
             }
         } catch (e: JSONException) {
             Log.runtime(TAG, "JSON解析错误:")
@@ -147,7 +147,7 @@ class DebugRpc {
                 val region = exchangeableTree.optString("region", "")
                 Log.debug(TAG, "树苗查询🌱[$region-$treeName]#剩余:$currentBudget")
             } else {
-                Log.record("${jo.optString("resultDesc", "Error")} projectId: $projectId")
+                Log.debug("${jo.optString("resultDesc", "Error")} projectId: $projectId")
             }
         } catch (e: JSONException) {
             Log.runtime(TAG, "JSON解析错误:")
@@ -194,7 +194,7 @@ class DebugRpc {
                                     val queryResultStr = DebugRpcCall.queryAdFinished(adBizNo, "NEVERLAND_DOUBLE_AWARD_AD") ?: return
                                     val queryResult = JSONObject(queryResultStr)
                                     if (queryResult.getBoolean("success")) {
-                                        Log.farm("完成双倍奖励🎁")
+                                        Log.debug("完成双倍奖励🎁")
                                     }
                                 }
                             }
@@ -208,7 +208,7 @@ class DebugRpc {
                     walkGrid() // 递归调用，继续行走
                 }
             } else {
-                Log.record("${jo.optString("errorMsg", "Error")}$s")
+                Log.debug("${jo.optString("errorMsg", "Error")}$s")
             }
         } catch (e: JSONException) {
             Log.runtime(TAG, "JSON解析错误:")

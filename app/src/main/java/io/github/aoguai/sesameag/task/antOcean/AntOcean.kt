@@ -246,14 +246,14 @@ class AntOcean : ModelTask() {
     override fun check(): Boolean {
         return when {
             TaskCommon.IS_ENERGY_TIME -> {
-                Log.record(
+                Log.ocean(
                     TAG,
                     "⏸ 当前为只收能量时间【" + BaseModel.energyTime.value + "】，停止执行" + getName() + "任务！"
                 )
                 false
             }
             TaskCommon.IS_MODULE_SLEEP_TIME -> {
-                Log.record(
+                Log.ocean(
                     TAG,
                     "💤 模块休眠时间【" + BaseModel.modelSleepTime.value + "】停止执行" + getName() + "任务！"
                 )
@@ -265,7 +265,7 @@ class AntOcean : ModelTask() {
 
     override suspend fun runSuspend() {
         try {
-            Log.record(TAG, "执行开始-" + getName())
+            Log.ocean(TAG, "执行开始-" + getName())
             oceanTaskTryCount.clear()
             currentOceanUserId = null
             lastKnownRubbishNumber = -1
@@ -315,7 +315,7 @@ class AntOcean : ModelTask() {
             Log.runtime(TAG, "start.run err:")
             Log.printStackTrace(TAG, t)
         } finally {
-            Log.record(TAG, "执行结束-" + getName())
+            Log.ocean(TAG, "执行结束-" + getName())
         }
     }
 
@@ -383,7 +383,7 @@ class AntOcean : ModelTask() {
             if (ResChecker.checkRes(TAG, jo)) {
                 if (!jo.getBoolean("opened")) {
                     enableField.setObjectValue(false)
-                    Log.record("请先开启神奇海洋，并完成引导教程")
+                    Log.ocean("请先开启神奇海洋，并完成引导教程")
                     false
                 } else {
                     initBeach()
@@ -448,7 +448,7 @@ class AntOcean : ModelTask() {
             return
         }
         Status.setFlagToday(HELP_CLEAN_LIMIT_FLAG)
-        Log.record(TAG, "神奇海洋🌊帮助清理次数已达上限：${extractOceanResultDesc(jo)}，已记录为当日限制，本轮剩余好友清理全部跳过")
+        Log.ocean(TAG, "神奇海洋🌊帮助清理次数已达上限：${extractOceanResultDesc(jo)}，已记录为当日限制，本轮剩余好友清理全部跳过")
     }
 
     private fun isSelfCleanTask(taskType: String, taskTitle: String): Boolean {
@@ -621,7 +621,7 @@ class AntOcean : ModelTask() {
         if (refreshedRubbishNumber <= 0) {
             return false
         }
-        Log.record(TAG, "神奇海洋🌊[$taskTitle]触发自清理补偿刷新：$refreshedRubbishNumber 次")
+        Log.ocean(TAG, "神奇海洋🌊[$taskTitle]触发自清理补偿刷新：$refreshedRubbishNumber 次")
         cleanOcean(refreshedUserId, refreshedRubbishNumber)
         return true
     }
@@ -667,7 +667,7 @@ class AntOcean : ModelTask() {
                 val miscHandlerVOMap = jo.optJSONObject("miscHandlerVOMap") ?: return
                 val emergency = miscHandlerVOMap.optJSONObject("EMERGENCY")
                 if (emergency?.optBoolean("showEmergency") == true || emergency?.optBoolean("showIntroduceBubble") == true) {
-                    Log.record(TAG, "神奇海洋🌊[检测到海洋活动入口]")
+                    Log.ocean(TAG, "神奇海洋🌊[检测到海洋活动入口]")
                 }
             } else {
                 Log.runtime(TAG, jo.getString("resultDesc"))
@@ -697,7 +697,7 @@ class AntOcean : ModelTask() {
                                 val retBubble = retBubbles.optJSONObject(j)
                                 if (retBubble != null) {
                                     val collectedEnergy = retBubble.getInt("collectedEnergy")
-                                    Log.forest("神奇海洋🌊收取[${UserMap.getMaskName(userId)}]#${collectedEnergy}g")
+                                    Log.ocean("神奇海洋🌊收取[${UserMap.getMaskName(userId)}]#${collectedEnergy}g")
                                     Toast.show("海洋能量🌊收取[${UserMap.getMaskName(userId)}]#${collectedEnergy}g")
                                 }
                             }
@@ -725,7 +725,7 @@ class AntOcean : ModelTask() {
                 if (ResChecker.checkRes(TAG, jo)) {
                     val cleanRewardVOS = jo.getJSONArray("cleanRewardVOS")
                     checkReward(cleanRewardVOS)
-                    Log.forest("神奇海洋🌊[清理:${UserMap.getMaskName(userId)}海域]")
+                    Log.ocean("神奇海洋🌊[清理:${UserMap.getMaskName(userId)}海域]")
                     cleanedTimes += 1
                 } else {
                     Log.runtime(TAG, extractOceanResultDesc(jo))
@@ -764,7 +764,7 @@ class AntOcean : ModelTask() {
             if (ResChecker.checkRes(TAG, jo)) {
                 val fishDetailVO = jo.getJSONObject("fishDetailVO")
                 val name = fishDetailVO.getString("name")
-                Log.forest("神奇海洋🌊[$name]合成成功")
+                Log.ocean("神奇海洋🌊[$name]合成成功")
             } else {
                 Log.runtime(TAG, jo.getString("resultDesc"))
             }
@@ -781,7 +781,7 @@ class AntOcean : ModelTask() {
                 val name = reward.getString("name")
                 val attachReward = reward.getJSONArray("attachRewardBOList")
                 if (attachReward.length() > 0) {
-                    Log.forest("神奇海洋🌊[获得:" + name + "碎片]")
+                    Log.ocean("神奇海洋🌊[获得:" + name + "碎片]")
                     var canCombine = true
                     for (j in 0 until attachReward.length()) {
                         val detail = attachReward.getJSONObject(j)
@@ -811,7 +811,7 @@ class AntOcean : ModelTask() {
                 val s = AntOceanRpcCall.collectReplicaAsset()
                 val jo = JsonUtil.parseJSONObjectOrNull(s) ?: continue
                 if (ResChecker.checkRes(TAG, jo)) {
-                    Log.forest("神奇海洋🌊[学习海洋科普知识]#潘多拉能量+1")
+                    Log.ocean("神奇海洋🌊[学习海洋科普知识]#潘多拉能量+1")
                 } else {
                     Log.runtime(TAG, jo.getString("resultDesc"))
                 }
@@ -828,7 +828,7 @@ class AntOcean : ModelTask() {
             val jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
             if (ResChecker.checkRes(TAG, jo)) {
                 val name = jo.getJSONObject("currentPhaseInfo").getJSONObject("extInfo").getString("name")
-                Log.forest("神奇海洋🌊迎回[$name]")
+                Log.ocean("神奇海洋🌊迎回[$name]")
             } else {
                 Log.runtime(TAG, jo.getString("resultDesc"))
             }
@@ -888,7 +888,7 @@ class AntOcean : ModelTask() {
             if (resultCode == "SEA_AREA_EXTRA_COLLECT_COLLECTING" ||
                 resultDesc.contains("先结束正在进行的限时挑战")
             ) {
-                Log.record(TAG, "神奇海洋[限时挑战进行中，跳过开启下一海域]")
+                Log.ocean(TAG, "神奇海洋[限时挑战进行中，跳过开启下一海域]")
                 return
             }
             if (ResChecker.checkRes(TAG, jo)) {
@@ -897,9 +897,9 @@ class AntOcean : ModelTask() {
                     ?: jo.optJSONObject("seaAreaInfoVO")?.optString("name")
                     ?: jo.optString("seaAreaName")
                 if (seaAreaName.isNotBlank()) {
-                    Log.forest("神奇海洋🌊[开启修复:$seaAreaName]")
+                    Log.ocean("神奇海洋🌊[开启修复:$seaAreaName]")
                 } else {
-                    Log.forest("神奇海洋🌊[开启新海域修复]")
+                    Log.ocean("神奇海洋🌊[开启新海域修复]")
                 }
             } else {
                 Log.runtime(TAG, resultDesc.ifBlank { jo.toString() })
@@ -918,7 +918,7 @@ class AntOcean : ModelTask() {
                 val extraCollectName = extraCollectVO?.optJSONObject("seaAreaVO")?.optString("name")
                     ?: extraCollectVO?.optString("name")
                     ?: "限时挑战"
-                Log.forest("神奇海洋🌊[开启限时挑战:$extraCollectName]")
+                Log.ocean("神奇海洋🌊[开启限时挑战:$extraCollectName]")
             } else {
                 Log.runtime(TAG, jo.optString("resultDesc").ifBlank { jo.toString() })
             }
@@ -963,7 +963,7 @@ class AntOcean : ModelTask() {
                     val switchS = AntOceanRpcCall.switchOceanChapter(dstChapterCode)
                     jo = JsonUtil.parseJSONObjectOrNull(switchS) ?: return
                     if (ResChecker.checkRes(TAG, jo)) {
-                        Log.forest("神奇海洋🌊切换到[$dstChapterName]系列")
+                        Log.ocean("神奇海洋🌊切换到[$dstChapterName]系列")
                     } else {
                         Log.runtime(TAG, jo.getString("resultDesc"))
                     }
@@ -1121,7 +1121,7 @@ class AntOcean : ModelTask() {
                 jo = JsonUtil.parseJSONObjectOrNull(s) ?: return
                 if (ResChecker.checkRes(TAG, jo)) {
                     val maskName = UserMap.getMaskName(userId) ?: userId
-                    Log.forest("神奇海洋🌊[帮助:${maskName}清理海域]")
+                    Log.ocean("神奇海洋🌊[帮助:${maskName}清理海域]")
                     val cleanRewardVOS = jo.getJSONArray("cleanRewardVOS")
                     checkReward(cleanRewardVOS)
                 } else {
@@ -1256,7 +1256,7 @@ class AntOcean : ModelTask() {
                 val s = AntOceanRpcCall.queryTaskList()
                 val jo = JsonUtil.parseJSONObjectOrNull(s) ?: break
                 if (!ResChecker.checkRes(TAG, jo)) {
-                    Log.record(TAG, "查询任务列表失败：" + jo.getString("resultDesc"))
+                    Log.ocean(TAG, "查询任务列表失败：" + jo.getString("resultDesc"))
                     break
                 }
                 val jaTaskList = jo.optJSONArray("antOceanTaskVOList") ?: break
@@ -1276,7 +1276,7 @@ class AntOcean : ModelTask() {
                     if (Status.hasFlagToday(HELP_CLEAN_LIMIT_FLAG) &&
                         (taskTitle.contains("帮好友清理") || taskType.contains("HELP_CLEAN"))
                     ) {
-                        Log.record(TAG, "海洋任务🌊[$taskTitle]帮助清理次数已达上限，跳过处理")
+                        Log.ocean(TAG, "海洋任务🌊[$taskTitle]帮助清理次数已达上限，跳过处理")
                         continue
                     }
                     if (badTaskSet.contains(taskTitle) ||
@@ -1284,7 +1284,7 @@ class AntOcean : ModelTask() {
                         TaskBlacklist.isTaskInBlacklist(taskTitle) ||
                         TaskBlacklist.isTaskInBlacklist(taskType)
                     ) {
-                        Log.record(TAG, "海洋任务🌊[$taskTitle]已在黑名单中，跳过处理")
+                        Log.ocean(TAG, "海洋任务🌊[$taskTitle]已在黑名单中，跳过处理")
                         continue
                     }
 
@@ -1303,7 +1303,7 @@ class AntOcean : ModelTask() {
                         val awardResponse = AntOceanRpcCall.receiveTaskAward(sceneCode, taskType)
                         val joAward = JsonUtil.parseJSONObjectOrNull(awardResponse) ?: continue
                         if (ResChecker.checkRes(TAG, joAward)) {
-                            Log.forest("海洋奖励🌊[" + taskTitle + "]# " + awardCount + "拼图")
+                            Log.ocean("海洋奖励🌊[" + taskTitle + "]# " + awardCount + "拼图")
                             done = true
                         } else {
                             Log.error(TAG, "海洋奖励🌊领取失败：$joAward")
@@ -1316,7 +1316,7 @@ class AntOcean : ModelTask() {
                         } else {
                             val waitSeconds = resolveOceanTaskWaitSeconds(taskTitle, bizInfo)
                             if (waitSeconds > 0) {
-                                Log.record(TAG, "海洋任务🌊[$taskTitle]需等待${waitSeconds}s，跳过处理")
+                                Log.ocean(TAG, "海洋任务🌊[$taskTitle]需等待${waitSeconds}s，跳过处理")
                                 continue
                             }
 
@@ -1361,7 +1361,7 @@ class AntOcean : ModelTask() {
                             val finishResult = joFinishTask ?: continue
                             if (finishOk) {
                                 oceanTaskTryCount.remove(bizKey)
-                                Log.forest("海洋任务🌊完成[$taskTitle]")
+                                Log.ocean("海洋任务🌊完成[$taskTitle]")
                                 done = true
                             } else {
                                 Log.error(TAG, "海洋任务🌊完成失败：$finishResult")
@@ -1420,14 +1420,14 @@ class AntOcean : ModelTask() {
                         val taskCanReceiveRewardNum = extendInfo?.optInt("taskCanReceiveRewardNum", 0) ?: 0
                         if (haveNotice || todoTaskNum > 0 || taskCanReceiveRewardNum > 0) {
                             noticeLinkedRefreshNeeded = true
-                            Log.record(TAG, "海洋任务🌊[待完成:$todoTaskNum,待领取:$taskCanReceiveRewardNum]")
+                            Log.ocean(TAG, "海洋任务🌊[待完成:$todoTaskNum,待领取:$taskCanReceiveRewardNum]")
                         }
                     }
 
                     "CULTIVATION_LIST_ENTRANCE" -> {
                         if (haveNotice) {
                             needQueryPopup = true
-                            Log.record(TAG, "神奇海洋🌊[检测到海洋活动入口]")
+                            Log.ocean(TAG, "神奇海洋🌊[检测到海洋活动入口]")
                         }
                     }
 
@@ -1435,7 +1435,7 @@ class AntOcean : ModelTask() {
                         if (haveNotice) {
                             val todoTaskNum = extendInfo?.optInt("todoTaskNum", 0) ?: 0
                             noticeLinkedRefreshNeeded = true
-                            Log.record(TAG, "海洋任务🌊[游戏入口待处理:$todoTaskNum]")
+                            Log.ocean(TAG, "海洋任务🌊[游戏入口待处理:$todoTaskNum]")
                             needQueryPopup = true
                         }
                     }
@@ -1443,7 +1443,7 @@ class AntOcean : ModelTask() {
                     "INTERACT_RECEIVE_PIECE" -> {
                         if (haveNotice) {
                             noticeLinkedRefreshNeeded = true
-                            Log.record(TAG, "海洋拼图🌊[存在可领取互动拼图]")
+                            Log.ocean(TAG, "海洋拼图🌊[存在可领取互动拼图]")
                         }
                     }
                 }
@@ -1469,7 +1469,7 @@ class AntOcean : ModelTask() {
                 val renderValue = item.optJSONObject("renderValue")
                 val jumpUrl = renderValue?.optString("jumpUrl").orEmpty()
                 if (jumpUrl.contains("cultivationDetail") || jumpUrl.contains("projectCode")) {
-                    Log.forest("神奇海洋🌊[检测到海洋活动入口]")
+                    Log.ocean("神奇海洋🌊[检测到海洋活动入口]")
                     return
                 }
             }
@@ -1487,7 +1487,7 @@ class AntOcean : ModelTask() {
             }
             val userDynamicsVOList = jo.optJSONArray("userDynamicsVOList") ?: return
             if (userDynamicsVOList.length() > 0) {
-                Log.record(TAG, "海洋动态🌊[检测到${userDynamicsVOList.length()}条精炼物料动态]")
+                Log.ocean(TAG, "海洋动态🌊[检测到${userDynamicsVOList.length()}条精炼物料动态]")
             }
         } catch (t: Throwable) {
             Log.runtime(TAG, "queryRefinedMaterial err:")
@@ -1511,7 +1511,7 @@ class AntOcean : ModelTask() {
                 val submitResponse = AntOceanRpcCall.submitAnswer(answer, questionId)
                 val submitJson = JsonUtil.parseJSONObjectOrNull(submitResponse) ?: return false
                 if (submitJson.getInt("resultCode") == 200) {
-                    Log.forest(TAG, "🌊海洋答题成功")
+                    Log.ocean(TAG, "🌊海洋答题成功")
                     return true
                 } else {
                     Log.error(TAG, "海洋答题失败：$submitJson")
@@ -1548,17 +1548,17 @@ class AntOcean : ModelTask() {
                         val receiveTaskResponse = AntOceanRpcCall.PDLreceiveTaskAward(taskType)
                         val receiveTaskJson = JsonUtil.parseJSONObjectOrNull(receiveTaskResponse) ?: continue
                         if (ResChecker.checkRes(TAG, receiveTaskJson) || receiveTaskJson.optInt("code") == 100000000) {
-                            Log.forest("海洋奖励🌊[领取:$taskTitle]获得潘多拉能量x$awardCount")
+                            Log.ocean("海洋奖励🌊[领取:$taskTitle]获得潘多拉能量x$awardCount")
                         } else {
                             val message = receiveTaskJson.optString("message")
                                 .ifBlank { receiveTaskJson.optString("resultDesc") }
                                 .ifBlank { "领取任务奖励失败，未返回错误信息" }
-                            Log.record(TAG, "领取任务奖励失败: $message")
+                            Log.ocean(TAG, "领取任务奖励失败: $message")
                         }
                     }
                 }
             } else {
-                Log.record(TAG, "PDLqueryReplicaHome调用失败: ${homeJson.optString("message")}")
+                Log.ocean(TAG, "PDLqueryReplicaHome调用失败: ${homeJson.optString("message")}")
             }
         } catch (t: Throwable) {
             Log.runtime(TAG, "doOceanPDLTask err:")
@@ -1621,7 +1621,7 @@ class AntOcean : ModelTask() {
                         award.append(awardItem.getString("name")).append("*").append(awardItem.getInt("num"))
                     }
                     val str = "保护海洋生态🏖️[$itemName]#第${appliedTimes}次-获得奖励$award"
-                    Log.forest(str)
+                    Log.ocean(str)
                     delay(300)
                 } else {
                     Log.error("保护海洋生态🏖️[$itemName]#发生未知错误，停止申请")
@@ -1660,13 +1660,13 @@ class AntOcean : ModelTask() {
                             appliedTimes = certNum + 1
                         }
                     } else {
-                        Log.forest("保护海洋🏖️[${cultivationDetailVO.getString("cultivationName")}]#能量不足停止申请")
+                        Log.ocean("保护海洋🏖️[${cultivationDetailVO.getString("cultivationName")}]#能量不足停止申请")
                     }
                 } else {
-                    Log.forest("保护海洋🏖️[${cultivationDetailVO.getString("cultivationName")}]#似乎没有了")
+                    Log.ocean("保护海洋🏖️[${cultivationDetailVO.getString("cultivationName")}]#似乎没有了")
                 }
             } else {
-                Log.record(jo.getString("resultDesc"))
+                Log.ocean(jo.getString("resultDesc"))
                 Log.runtime(s)
             }
         } catch (t: Throwable) {
@@ -1701,7 +1701,7 @@ class AntOcean : ModelTask() {
                     // 检查道具兑换操作是否成功
                     if (ResChecker.checkRes(TAG, exchangeResultObj)) {
                         // 输出日志信息
-                        Log.forest("神奇海洋🏖️[万能拼图]制作${exchangeNum}张,剩余${exchangedPieceNum}张碎片")
+                        Log.ocean("神奇海洋🏖️[万能拼图]制作${exchangeNum}张,剩余${exchangedPieceNum}张碎片")
                         // 制作完成后休眠1秒钟
                         delay(1000)
                     }
@@ -1831,7 +1831,7 @@ class AntOcean : ModelTask() {
                         break
                     }
                     holdsNum -= useCount
-                    Log.forest("神奇海洋🏖️[$propName]使用${useCount}张，获得[${target.name}]剩余${holdsNum}张")
+                    Log.ocean("神奇海洋🏖️[$propName]使用${useCount}张，获得[${target.name}]剩余${holdsNum}张")
                     delay(1000)
                 }
             }

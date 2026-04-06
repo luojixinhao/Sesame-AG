@@ -128,7 +128,7 @@ object Vitality {
     @JvmStatic
     fun handleVitalityExchange(skuId: String): Boolean {
         if (Status.hasFlagToday("forest::VitalityExchangeLimit::$skuId")) {
-            Log.record(TAG, "活力兑换🍃[$skuId]今日已达上限，跳过兑换")
+            Log.forest(TAG, "活力兑换🍃[$skuId]今日已达上限，跳过兑换")
             return false
         }
 
@@ -138,7 +138,7 @@ object Vitality {
         
         val sku = skuInfo[skuId]
         if (sku == null) {
-            Log.record(TAG, "活力兑换🍃找不到要兑换的权益！")
+            Log.forest(TAG, "活力兑换🍃找不到要兑换的权益！")
             return false
         }
         
@@ -149,7 +149,7 @@ object Vitality {
                 val itemStatus = itemStatusList.optString(i)
                 val status = runCatching { ExchangeStatus.valueOf(itemStatus) }.getOrNull() ?: continue
                 if (status.name == itemStatus) {
-                    Log.record(TAG, "活力兑换🍃[$skuName]停止:${status.nickName}")
+                    Log.forest(TAG, "活力兑换🍃[$skuName]停止:${status.nickName}")
                     if (ExchangeStatus.REACH_LIMIT.name == itemStatus) {
                         Status.setFlagToday("forest::VitalityExchangeLimit::$skuId")
                         Log.forest("活力兑换🍃[$skuName]已达上限,停止兑换！")

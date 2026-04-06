@@ -15,6 +15,7 @@ import io.github.aoguai.sesameag.task.antOrchard.AntOrchard
 import io.github.aoguai.sesameag.task.antSports.AntSports
 import io.github.aoguai.sesameag.task.customTasks.ManualTask
 import io.github.aoguai.sesameag.util.Log
+import io.github.aoguai.sesameag.util.Notify.updateRunningNextExec
 import io.github.aoguai.sesameag.util.TimeUtil
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -289,6 +290,7 @@ class CoroutineTaskRunner(allModels: List<Model>) {
     private fun scheduleNext() {
         try {
             ApplicationHook.scheduleNextExecutionInternal(ApplicationHook.lastExecTime)
+            updateRunningNextExec(ApplicationHook.nextExecutionTime)
             Log.record(TAG, "📅 已调度下次执行")
         } catch (e: Exception) {
             Log.printStackTrace(TAG, "调度失败", e)
@@ -307,18 +309,18 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         val totalTime = endTime - startTime
         val avgTime = if (taskExecutionTimes.isNotEmpty()) taskExecutionTimes.values.average() else 0.0
 
-        Log.record(TAG, "📈 === 执行统计 (并发模式) ===")
-        Log.record(TAG, "⏱️ 总耗时: ${totalTime}ms")
-        Log.record(TAG, "✅ 成功: ${successCount.get()} | ❌ 失败: ${failureCount.get()} | ⏭️ 跳过: ${skippedCount.get()}")
+        Log.summary(TAG, "=== 执行统计 (并发模式) ===")
+        Log.summary(TAG, "总耗时: ${totalTime}ms")
+        Log.summary(TAG, "成功: ${successCount.get()} | 失败: ${failureCount.get()} | 跳过: ${skippedCount.get()}")
         if (taskExecutionTimes.isNotEmpty()) {
-            Log.record(TAG, "⚡ 平均耗时: %.0fms".format(avgTime))
+            Log.summary(TAG, "平均耗时: %.0fms".format(avgTime))
         }
 
         val nextTime = ApplicationHook.nextExecutionTime
         if (nextTime > 0) {
-            Log.record(TAG, "📅 下次: ${TimeUtil.getCommonDate(nextTime)}")
+            Log.summary(TAG, "下次: ${TimeUtil.getCommonDate(nextTime)}")
         }
-        Log.record(TAG, "============================")
+        Log.summary(TAG, "============================")
     }
 }
 

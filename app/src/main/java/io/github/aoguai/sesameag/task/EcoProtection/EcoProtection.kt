@@ -67,13 +67,13 @@ class EcoProtection : ModelTask() {
 
     override suspend fun runSuspend() {
         try {
-            Log.record(TAG, "开始执行${getName() ?: ""}")
+            Log.forest(TAG, "开始执行${getName() ?: ""}")
             val cityCodes = ancientTreeCityCodeList?.value?.filterNotNull()?.toMutableList() ?: mutableListOf()
             ancientTree(cityCodes)
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "start.run err:",t)
         } finally {
-            Log.record(TAG, "结束执行${getName() ?: ""}")
+            Log.forest(TAG, "结束执行${getName() ?: ""}")
         }
     }
 
@@ -159,13 +159,13 @@ class EcoProtection : ModelTask() {
                                                 + "]#" + age + "年" + name + ",消耗能量" + protectExpense + "g")
                                     )
                                 } else {
-                                    Log.record(jo.getString("resultDesc"))
-                                    Log.record(jo.toString())
+                                    Log.forest(jo.getString("resultDesc"))
+                                    Log.forest(jo.toString())
                                 }
                             }
                         } else {
-                            Log.record(jo.getString("resultDesc"))
-                            Log.record(ancientTreeDetail.toString())
+                            Log.forest(jo.getString("resultDesc"))
+                            Log.forest(ancientTreeDetail.toString())
                         }
                         sleepCompat(500L)
                     }

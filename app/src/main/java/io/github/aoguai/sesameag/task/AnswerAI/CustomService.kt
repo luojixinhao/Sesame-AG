@@ -67,7 +67,7 @@ class CustomService(apiKey: String?, baseUrl: String?) : AnswerAIInterface {
             val responseBody = response.body ?: return ""
             val json = responseBody.string()
             if (!response.isSuccessful) {
-                Log.other("CustomService请求失败")
+                Log.common("CustomService请求失败")
                 Log.runtime(TAG, "CustomService接口异常：$json")
                 return ""
             }

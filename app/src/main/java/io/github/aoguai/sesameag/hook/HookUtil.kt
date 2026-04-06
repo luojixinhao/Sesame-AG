@@ -105,14 +105,14 @@ object HookUtil {
                                     Log.capture(prettyRecord)
                                 }
                             } catch (e: Exception) {
-                                Log.record(TAG, "JSON 构建失败: ${e.message}")
+                                Log.runtime(TAG, "JSON 构建失败: ${e.message}")
                             }
                         }
                     }
                 }
                 result
             }
-            Log.record(TAG, "Hook RpcBridgeExtension#rpc 成功")
+            Log.runtime(TAG, "Hook RpcBridgeExtension#rpc 成功")
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "Hook RpcBridgeExtension#rpc 失败", t)
         }
@@ -150,7 +150,7 @@ object HookUtil {
                 }
                 chain.proceed()
             }
-            Log.record(TAG, "Hook DefaultBridgeCallback#sendJSONResponse 成功")
+            Log.runtime(TAG, "Hook DefaultBridgeCallback#sendJSONResponse 成功")
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "Hook DefaultBridgeCallback#sendJSONResponse 失败", t)
         }
@@ -161,7 +161,7 @@ object HookUtil {
      * @param classLoader 类加载器
      */
     fun bypassAccountLimit(classLoader: ClassLoader) {
-        Log.record(TAG, "Hook AccountManagerListAdapter#getCount")
+        Log.runtime(TAG, "Hook AccountManagerListAdapter#getCount")
         try {
             val adapterClass = loadClass(classLoader, "com.alipay.mobile.security.accountmanager.data.AccountManagerListAdapter")
             val getCountMethod = findMethod(adapterClass, "getCount")
@@ -188,7 +188,7 @@ object HookUtil {
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "Hook AccountManagerListAdapter#getCount 失败", t)
         }
-        Log.record(TAG, "Hook AccountManagerListAdapter#getCount END")
+        Log.runtime(TAG, "Hook AccountManagerListAdapter#getCount END")
     }
 
     fun getMicroApplicationContext(classLoader: ClassLoader): Any? {
@@ -240,7 +240,7 @@ object HookUtil {
                 ?: error("AliAccountDaoOp 缓存对象为空")
             val allFriends = callMethod(aliAccountDaoOp, "getAllFriends") as? List<*> ?: emptyList<Any>()
             if (allFriends.isEmpty()) {
-                Log.record(TAG, "好友缓存为空，跳过刷新并保留旧映射")
+                Log.runtime(TAG, "好友缓存为空，跳过刷新并保留旧映射")
                 return
             }
             UserMap.unload()
@@ -272,7 +272,7 @@ object HookUtil {
                     if (userId == selfId) selfEntity = userEntity
                     UserMap.add(userEntity)
                 }.onFailure {
-                    Log.record(TAG, "addUserObject err:")
+                    Log.runtime(TAG, "addUserObject err:")
                     Log.printStackTrace(it)
                 }
             }
@@ -295,7 +295,7 @@ object HookUtil {
             if (removedSelectionCount > 0) {
                 Config.save(selfId, true)
             }
-            Log.record(TAG, "userCache load scuess !")
+            Log.runtime(TAG, "userCache load scuess !")
         }.onFailure {
             Log.printStackTrace(TAG, "hookUser 失败", it)
         }

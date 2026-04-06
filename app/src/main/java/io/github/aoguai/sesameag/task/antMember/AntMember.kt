@@ -275,7 +275,7 @@ class AntMember : ModelTask() {
         // 使用协程上下文运行
         runBlocking {
             try {
-                record(TAG, "执行开始-${getName()}")
+                Log.member(TAG, "执行开始-${getName()}")
                 // 异步获取位置信息-for 2101
                 requestLocationSuspend()
                 // 芝麻信用相关检测
@@ -290,7 +290,7 @@ class AntMember : ModelTask() {
 
                 if (memberSign?.value == true) {
                     if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_SIGN_DONE)) {
-                        record(TAG, "⏭️ 今天已处理过会员签到，跳过执行")
+                        Log.member(TAG, "⏭️ 今天已处理过会员签到，跳过执行")
                     } else {
                         deferredTasks.add(async(Dispatchers.IO) { doMemberSign() })
                     }
@@ -298,9 +298,9 @@ class AntMember : ModelTask() {
 
                 if (memberTask?.value == true) {
                     if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_RISK_STOP_TODAY)) {
-                        record(TAG, "⏭️ 今天会员任务已因风控/离线止损，停止执行")
+                        Log.member(TAG, "⏭️ 今天会员任务已因风控/离线止损，停止执行")
                     } else if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY)) {
-                        record(TAG, "⏭️ 今天会员任务已判定无需继续刷新，停止执行")
+                        Log.member(TAG, "⏭️ 今天会员任务已判定无需继续刷新，停止执行")
                     } else {
                         deferredTasks.add(async(Dispatchers.IO) { doAllMemberAvailableTaskCompat() })
                     }
@@ -318,31 +318,31 @@ class AntMember : ModelTask() {
                     if (sesameTask?.value == true || collectSesame?.value == true) {
                         // 芝麻粒福利签到（每日兜底：避免重复请求触发风控）
                         if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_ZML_CHECKIN_DONE)) {
-                            record(TAG, "⏭️ 今天已处理过芝麻粒福利签到，跳过执行")
+                            Log.sesame(TAG, "⏭️ 今天已处理过芝麻粒福利签到，跳过执行")
                         } else {
                             doSesameZmlCheckIn()
                         }
                         if (sesameTask?.value == true) {
                             if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_DO_ALL_SESAME_TASK)) {
-                                record(TAG, "⏭️ 今天已完成过芝麻信用任务，跳过执行")
+                                Log.sesame(TAG, "⏭️ 今天已完成过芝麻信用任务，跳过执行")
                             } else {
                                 needSesameProgressCollectAfterTasks = true
-                                record(TAG, "🎮 开始执行芝麻信用任务")
+                                Log.sesame(TAG, "🎮 开始执行芝麻信用任务")
                                 val sesameTaskSummary = doAllAvailableSesameTask()
                                 if (sesameTaskSummary.interrupted || ApplicationHookConstants.isOffline()) {
-                                    record(TAG, "芝麻信用任务被离线或验证状态中断，保留后续重试机会")
+                                    Log.sesame(TAG, "芝麻信用任务被离线或验证状态中断，保留后续重试机会")
                                 } else {
                                     handleGrowthGuideTasks()
-                                    record(TAG, "芝麻信用任务已执行，稍后统一领取涨分进度球")
+                                    Log.sesame(TAG, "芝麻信用任务已执行，稍后统一领取涨分进度球")
                                 }
                             }
                         }
                         if (collectSesame?.value == true) {
                             if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_COLLECT_SESAME_DONE)) {
-                                record(TAG, "⏭️ 今天已处理过芝麻粒领取，跳过执行")
+                                Log.sesame(TAG, "⏭️ 今天已处理过芝麻粒领取，跳过执行")
                             } else {
                                 needSesameCollectAfterTasks = true
-                                record(TAG, "🎯 芝麻相关任务执行中，稍后统一领取芝麻粒")
+                                Log.sesame(TAG, "🎯 芝麻相关任务执行中，稍后统一领取芝麻粒")
                             }
                         }
                     }
@@ -354,7 +354,7 @@ class AntMember : ModelTask() {
                             // ===== 次日奖励：只有今天还没领过才执行 =====
                             if (!hasFlagToday(StatusFlags.FLAG_ZMXY_ALCHEMY_NEXT_DAY_AWARD)) {
                                 doSesameAlchemyNextDayAward()
-                            } else record(TAG, "✅ 芝麻粒次日奖励已领取，今天不再执行")
+                            } else Log.sesame(TAG, "✅ 芝麻粒次日奖励已领取，今天不再执行")
                         })
                     }
 
@@ -415,7 +415,7 @@ class AntMember : ModelTask() {
                             merchantMoreTask?.value == true
 
                         if (!(needKmdkSignIn || needKmdkSignUp || needMerchantSign || needMerchantMoreTask)) {
-                            record(TAG, "⏭️ 今天已处理过商家服务相关任务，跳过执行")
+                            Log.member(TAG, "⏭️ 今天已处理过商家服务相关任务，跳过执行")
                             return@async
                         }
 
@@ -462,36 +462,36 @@ class AntMember : ModelTask() {
 
                 if (needMemberTaskAwardClaimAfterTasks) {
                     if (ApplicationHookConstants.isOffline()) {
-                        record(TAG, "⏭️ 当前处于离线模式，跳过会员阶段奖励领取")
+                        Log.member(TAG, "⏭️ 当前处于离线模式，跳过会员阶段奖励领取")
                     } else {
                         val claimedRewardCount = collectMemberTaskProcessAwards()
                         if (claimedRewardCount > 0) {
-                            record(TAG, "🎯 会员阶段奖励领取完成，共${claimedRewardCount}项")
+                            Log.member(TAG, "🎯 会员阶段奖励领取完成，共${claimedRewardCount}项")
                         }
                     }
                 }
 
                 if (needMemberPointClaimAfterTasks) {
                     if (ApplicationHookConstants.isOffline()) {
-                        record(TAG, "⏭️ 当前处于离线模式，跳过统一领取会员积分")
+                        Log.member(TAG, "⏭️ 当前处于离线模式，跳过统一领取会员积分")
                     } else {
-                        record(TAG, "🎯 会员流程执行完成，开始统一领取会员积分")
+                        Log.member(TAG, "🎯 会员流程执行完成，开始统一领取会员积分")
                         queryPointCert(1, 20)
                     }
                 }
                 if (needSesameCollectAfterTasks) {
                     if (ApplicationHookConstants.isOffline()) {
-                        record(TAG, "⏭️ 当前处于离线模式，跳过统一领取芝麻粒")
+                        Log.sesame(TAG, "⏭️ 当前处于离线模式，跳过统一领取芝麻粒")
                     } else {
-                        record(TAG, "🎯 芝麻相关流程执行完成，开始统一领取芝麻粒")
+                        Log.sesame(TAG, "🎯 芝麻相关流程执行完成，开始统一领取芝麻粒")
                         collectSesame(collectSesameWithOneClick?.value == true)
                     }
                 }
                 if (needSesameProgressCollectAfterTasks) {
                     if (ApplicationHookConstants.isOffline()) {
-                        record(TAG, "⏭️ 当前处于离线模式，跳过统一领取涨分进度球")
+                        Log.sesame(TAG, "⏭️ 当前处于离线模式，跳过统一领取涨分进度球")
                     } else {
-                        record(TAG, "🎯 芝麻信用流程执行完成，开始统一领取涨分进度球")
+                        Log.sesame(TAG, "🎯 芝麻信用流程执行完成，开始统一领取涨分进度球")
                         queryAndCollect()
                     }
                 }
@@ -499,7 +499,7 @@ class AntMember : ModelTask() {
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, t)
             } finally {
-                record(TAG, "执行结束-${getName()}")
+                Log.member(TAG, "执行结束-${getName()}")
             }
         }
     }
@@ -507,10 +507,10 @@ class AntMember : ModelTask() {
     private fun handleGrowthGuideTasks() {
         try {
             if (ApplicationHookConstants.isOffline()) {
-                record("$TAG.handleGrowthGuideTasks", "信誉任务领取因离线模式跳过，保留后续重试机会")
+                Log.sesame("$TAG.handleGrowthGuideTasks", "信誉任务领取因离线模式跳过，保留后续重试机会")
                 return
             }
-            record("$TAG.", "开始执行信誉任务领取")
+            Log.sesame("$TAG.", "开始执行信誉任务领取")
             var resp: String?
             try {
                 resp = AntMemberRpcCall.Zmxy.queryGrowthGuideToDoList()
@@ -520,7 +520,7 @@ class AntMember : ModelTask() {
             }
 
             if (resp.isNullOrEmpty()) {
-                record("$TAG.handleGrowthGuideTasks", "信誉任务列表返回空")
+                Log.sesame("$TAG.handleGrowthGuideTasks", "信誉任务列表返回空")
                 return
             }
 
@@ -533,7 +533,7 @@ class AntMember : ModelTask() {
             }
 
             if (!ResChecker.checkRes(TAG, root)) {
-                record(
+                Log.sesame(
                     "$TAG.handleGrowthGuideTasks", "信誉任务列表获取失败: " + root.optString("resultView", resp)
                 )
                 return
@@ -576,9 +576,9 @@ class AntMember : ModelTask() {
                     try {
                         val openJo = JSONObject(openResp)
                         if (ResChecker.checkRes(TAG, openJo)) {
-                            Log.other("信誉任务[领取成功] $title")
+                            Log.sesame("信誉任务[领取成功] $title")
                         } else {
-                            record(
+                            Log.sesame(
                                 "$TAG.handleGrowthGuideTasks", ("信誉任务[领取失败] behaviorId=" + behaviorId + " title=" + title + " resp=" + openResp)
                             )
                         }
@@ -594,7 +594,7 @@ class AntMember : ModelTask() {
                 if ("meiriwenda" == behaviorId && "wait_doing" == status) { //如果等待去做才执行，一般不会进入下面的今日已参与判断
 
                     if (subTitle.contains("今日已参与")) {
-                        Log.other("信誉任务[每日问答] $subTitle（跳过答题）")
+                        Log.sesame("信誉任务[每日问答] $subTitle（跳过答题）")
                         continue
                     }
 
@@ -660,7 +660,7 @@ class AntMember : ModelTask() {
                         }
 
                         if (ResChecker.checkRes(TAG, pushJo)) {
-                            Log.other(
+                            Log.sesame(
                                 TAG,
                                 ("信誉任务[每日答题成功] " + questionContent + " | 答案=" + answerContent + "(" + answerId + ")" + (if (subTitle.isEmpty()) "" else " | $subTitle"))
                             )
@@ -696,7 +696,7 @@ class AntMember : ModelTask() {
                     }
 
                     if (ResChecker.checkRes(TAG, jo)) {
-                        Log.other("信誉任务[视频问答提交成功] → ")
+                        Log.sesame("信誉任务[视频问答提交成功] → ")
                     } else {
                         Log.error("$TAG.handleGrowthGuideTasks", "视频问答[提交失败] → $pushResp")
                     }
@@ -708,7 +708,7 @@ class AntMember : ModelTask() {
                         // 假设getWua()方法存在，返回wua（为空即可）
                         val wua = getSecurityBodyData(4) // 传入空字符串
                         val source = "DNHZ_NC_zhimajingnangSF" // 从buttonUrl提取的source
-                        record(TAG, "set Wua $wua")
+                        Log.debug(TAG, "信誉任务[芭芭农场施肥] set Wua $wua")
 
                         val spreadManureDataStr = orchardSpreadManure(
                             Objects.requireNonNull(wua).toString(), source, false
@@ -724,7 +724,7 @@ class AntMember : ModelTask() {
                         }
 
                         if ("100" != spreadManureData.optString("resultCode")) {
-                            record(
+                            Log.sesame(
                                 TAG, "农场 orchardSpreadManure 错误：" + spreadManureData.optString("resultDesc")
                             )
                             continue
@@ -758,7 +758,7 @@ class AntMember : ModelTask() {
 
                         Log.farm("今日农场已施肥💩 $dailyAppWateringCount 次 [$stageText]")
 
-                        Log.other(
+                        Log.sesame(
                             TAG, "信誉任务[芭芭农场施肥成功] $title | 已施肥 $dailyAppWateringCount 次"
                         )
                     } catch (e: Throwable) {
@@ -787,11 +787,11 @@ class AntMember : ModelTask() {
      */
     private suspend fun doAnnualReview(): Unit = CoroutineUtils.run {
         try {
-            record("$TAG.doAnnualReview", "年度回顾🎞[开始执行]")
+            Log.member("$TAG.doAnnualReview", "年度回顾🎞[开始执行]")
 
             val resp = AntMemberRpcCall.annualReviewQueryTasks()
             if (resp == null || resp.isEmpty()) {
-                record("$TAG.doAnnualReview", "年度回顾[查询返回空]")
+                Log.member("$TAG.doAnnualReview", "年度回顾[查询返回空]")
                 return
             }
 
@@ -804,13 +804,13 @@ class AntMember : ModelTask() {
             }
 
             if (!root.optBoolean("isSuccess", false)) {
-                record("$TAG.doAnnualReview", "年度回顾[查询失败]#$resp")
+                Log.member("$TAG.doAnnualReview", "年度回顾[查询失败]#$resp")
                 return
             }
 
             val components = root.optJSONObject("components")
             if (components == null || components.length() == 0) {
-                record("$TAG.doAnnualReview", "年度回顾[components 为空]")
+                Log.member("$TAG.doAnnualReview", "年度回顾[components 为空]")
                 return
             }
 
@@ -826,23 +826,23 @@ class AntMember : ModelTask() {
                 }
             }
             if (queryComp == null) {
-                record("$TAG.doAnnualReview", "年度回顾[未找到查询组件]")
+                Log.member("$TAG.doAnnualReview", "年度回顾[未找到查询组件]")
                 return
             }
             if (!queryComp.optBoolean("isSuccess", true)) {
-                record("$TAG.doAnnualReview", "年度回顾[查询组件返回失败]")
+                Log.member("$TAG.doAnnualReview", "年度回顾[查询组件返回失败]")
                 return
             }
 
             val content = queryComp.optJSONObject("content")
             if (content == null) {
-                record("$TAG.doAnnualReview", "年度回顾[content 为空]")
+                Log.member("$TAG.doAnnualReview", "年度回顾[content 为空]")
                 return
             }
 
             val taskList = content.optJSONArray("playTaskOrderInfoList")
             if (taskList == null || taskList.length() == 0) {
-                record("$TAG.doAnnualReview", "年度回顾[当前无可处理任务]")
+                Log.member("$TAG.doAnnualReview", "年度回顾[当前无可处理任务]")
                 return
             }
 
@@ -887,7 +887,7 @@ class AntMember : ModelTask() {
                 // ========== Step 1: 领取任务 (apply) ==========
                 val applyResp = AntMemberRpcCall.annualReviewApplyTask(code)
                 if (applyResp == null || applyResp.isEmpty()) {
-                    record("$TAG.doAnnualReview", "年度回顾[领任务失败]$taskName#响应为空")
+                    Log.member("$TAG.doAnnualReview", "年度回顾[领任务失败]$taskName#响应为空")
                     failed++
                     continue
                 }
@@ -901,7 +901,7 @@ class AntMember : ModelTask() {
                     continue
                 }
                 if (!applyRoot.optBoolean("isSuccess", false)) {
-                    record("$TAG.doAnnualReview", "年度回顾[领任务失败]$taskName#$applyResp")
+                    Log.member("$TAG.doAnnualReview", "年度回顾[领任务失败]$taskName#$applyResp")
                     failed++
                     continue
                 }
@@ -946,7 +946,7 @@ class AntMember : ModelTask() {
                 // ========== Step 2: 提交任务完成 (process) ==========
                 val processResp = AntMemberRpcCall.annualReviewProcessTask(code, recordNo)
                 if (processResp == null || processResp.isEmpty()) {
-                    record("$TAG.doAnnualReview", "年度回顾[提交任务失败]$taskName#响应为空")
+                    Log.member("$TAG.doAnnualReview", "年度回顾[提交任务失败]$taskName#响应为空")
                     failed++
                     continue
                 }
@@ -960,7 +960,7 @@ class AntMember : ModelTask() {
                     continue
                 }
                 if (!processRoot.optBoolean("isSuccess", false)) {
-                    record("$TAG.doAnnualReview", "年度回顾[提交任务失败]$taskName#$processResp")
+                    Log.member("$TAG.doAnnualReview", "年度回顾[提交任务失败]$taskName#$processResp")
                     failed++
                     continue
                 }
@@ -1042,10 +1042,10 @@ class AntMember : ModelTask() {
                 }
 
                 processed++
-                Log.other("年度回顾🎞[任务完成]$taskName#状态=$newStatus 奖励状态=$rewardStatus")
+                Log.member("年度回顾🎞[任务完成]$taskName#状态=$newStatus 奖励状态=$rewardStatus")
             }
 
-            record(
+            Log.member(
                 "$TAG.doAnnualReview", "年度回顾🎞[执行结束] 待处理=$candidate 已领取=$applied 已提交=$processed 失败=$failed"
             )
         } catch (t: Throwable) {
@@ -1069,13 +1069,13 @@ class AntMember : ModelTask() {
             ?.toSet()
             ?: emptySet()
         if (whiteList.isNotEmpty() && whiteList.all { !canMemberPointExchangeBenefitToday(it) }) {
-            record(TAG, "会员积分🎐兑换列表今日已全部处理，跳过执行")
+            Log.member(TAG, "会员积分🎐兑换列表今日已全部处理，跳过执行")
             setFlagToday("memberBenefit::refresh")
             return
         }
         try {
             val userId = UserMap.currentUid
-            record(TAG, "会员积分商品加载..")
+            Log.member(TAG, "会员积分商品加载..")
             val remainingWhiteList: MutableSet<String>? = if (whiteList.isNotEmpty()) whiteList.toMutableSet() else null
             // 1. 分类配置直接放在函数内部
             val categoryMap = mapOf(
@@ -1117,7 +1117,7 @@ class AntMember : ModelTask() {
                         val itemId = benefit.optString("itemId")
                         val pointNeeded = benefit.optJSONObject("pricePresentation")?.optString("point") ?: "0"
                         if (benefitId.isEmpty()) {
-                            record(TAG, "商品[$name] 没有 benefitId，跳过")
+                            Log.member(TAG, "商品[$name] 没有 benefitId，跳过")
                             continue
                         }
                         // 记录 benefitId 映射关系
@@ -1131,15 +1131,15 @@ class AntMember : ModelTask() {
                         remainingWhiteList?.remove(benefitId)
                         // 校验频率限制
                         if (!canMemberPointExchangeBenefitToday(benefitId)) {
-                            record(TAG, "跳过[$name]: 今日已兑换过")
+                            Log.member(TAG, "跳过[$name]: 今日已兑换过")
                             continue
                         }
                         // 5. 执行兑换
-                        record(TAG, "准备兑换[$name], ID: $benefitId, 需积分: $pointNeeded")
+                        Log.member(TAG, "准备兑换[$name], ID: $benefitId, 需积分: $pointNeeded")
                         if (exchangeBenefit(benefitId, itemId, userId)) {
-                            Log.other("会员积分🎐兑换[$name]#花费[$pointNeeded 积分]")
+                            Log.member("会员积分🎐兑换[$name]#花费[$pointNeeded 积分]")
                         } else {
-                            record(TAG, "兑换失败: $name (ItemId: $itemId)")
+                            Log.member(TAG, "兑换失败: $name (ItemId: $itemId)")
                         }
                     }
                     val nextPageNum = jo.optInt("nextPageNum", 0)
@@ -1151,21 +1151,21 @@ class AntMember : ModelTask() {
 
                     if (remainingWhiteList != null && remainingWhiteList.isEmpty()) {
                         IdMapManager.getInstance(MemberBenefitsMap::class.java).save(userId)
-                        record(TAG, "会员积分🎐兑换列表已全部扫描到，提前结束")
+                        Log.member(TAG, "会员积分🎐兑换列表已全部扫描到，提前结束")
                         setFlagToday("memberBenefit::refresh")
                         return
                     }
                 }
                 IdMapManager.getInstance(MemberBenefitsMap::class.java).save(userId)
-                record(TAG, "分类[$catName]处理完毕，已执行中间保存")
+                Log.member(TAG, "分类[$catName]处理完毕，已执行中间保存")
             }
             // 7. 保存映射表
             IdMapManager.getInstance(MemberBenefitsMap::class.java).save(userId)
-            record(TAG, "会员积分🎐全部分类任务处理完毕")
+            Log.member(TAG, "会员积分🎐全部分类任务处理完毕")
             setFlagToday("memberBenefit::refresh")
 
         } catch (t: Throwable) {
-            record(TAG, "memberPointExchangeBenefit 运行异常: ${t.message}")
+            Log.member(TAG, "memberPointExchangeBenefit 运行异常: ${t.message}")
             Log.printStackTrace(TAG, t)
         }
     }
@@ -1177,7 +1177,7 @@ class AntMember : ModelTask() {
             val resultCode = jo.optString("resultCode")
 
             if (resultCode == "BEYOND_BUYING_TIMES") {
-                record(TAG, "会员权益兑换已达上限，标记任务今日完成")
+                Log.member(TAG, "会员权益兑换已达上限，标记任务今日完成")
                 memberPointExchangeBenefitToday(benefitId)
                 return true
             }
@@ -1215,11 +1215,11 @@ class AntMember : ModelTask() {
                             val signPoint = jo.optString("signinPoint", "0")
                             val signDays = jo.optString("signinSumDay", "-")
                             val signStatus = if (jo.optBoolean("autoSignInSuccess")) "签到成功" else "已签到"
-                            Log.other("会员签到📅[${signPoint}积分]#$signStatus${signDays}天")
+                            Log.member("会员签到📅[${signPoint}积分]#$signStatus${signDays}天")
                             memberSignInToday(uid)
                             signDoneToday = true
                         } else {
-                            record(TAG, "会员签到📅[今日未自动签到]#$s")
+                            Log.member(TAG, "会员签到📅[今日未自动签到]#$s")
                         }
                     } else {
                         val resultDesc = jo.optString("resultDesc", "")
@@ -1227,8 +1227,8 @@ class AntMember : ModelTask() {
                             memberSignInToday(uid)
                             signDoneToday = true
                         }
-                        record(TAG, "会员签到📅[$resultDesc]")
-                        record(s)
+                        Log.member(TAG, "会员签到📅[$resultDesc]")
+                        Log.member(s)
                     }
                 }
             }
@@ -1248,7 +1248,7 @@ class AntMember : ModelTask() {
             val stopReason = resolveMemberTaskQueryStopReason(currentTaskObject)
             if (stopReason != null) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_RISK_STOP_TODAY)
-                record(
+                Log.member(
                     TAG,
                     "会员任务[amic]#${buildMemberTaskQueryStopMessage(stopReason, currentTaskObject)}"
                 )
@@ -1259,14 +1259,14 @@ class AntMember : ModelTask() {
                     "$TAG.doAllMemberAvailableTaskCompat",
                     "会员任务新链路响应失败: " + currentTaskObject.optString("resultDesc", currentTaskResponse)
                 )
-                record(TAG, "会员任务[amic]#新链路响应异常，回退legacy")
+                Log.member(TAG, "会员任务[amic]#新链路响应异常，回退legacy")
                 doAllMemberAvailableTask()
                 return@run
             }
 
             val currentTasks = buildCurrentMemberTasks(currentTaskObject)
             if (currentTasks.isEmpty()) {
-                record(TAG, "会员任务[amic]#未发现可执行任务，回退legacy")
+                Log.member(TAG, "会员任务[amic]#未发现可执行任务，回退legacy")
                 doAllMemberAvailableTask()
                 return@run
             }
@@ -1278,14 +1278,14 @@ class AntMember : ModelTask() {
                 }
                 if (ApplicationHookConstants.isOffline()) {
                     setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_RISK_STOP_TODAY)
-                    record(TAG, "会员任务[amic]#检测到离线模式，今日停止继续刷新")
+                    Log.member(TAG, "会员任务[amic]#检测到离线模式，今日停止继续刷新")
                     return@run
                 }
             }
 
             if (processedCount == 0) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY)
-                record(TAG, "会员任务[amic]#当前列表无可安全执行任务，今日停止继续刷新")
+                Log.member(TAG, "会员任务[amic]#当前列表无可安全执行任务，今日停止继续刷新")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "doAllMemberAvailableTaskCompat err:", t)
@@ -1338,7 +1338,7 @@ class AntMember : ModelTask() {
             val response = AntMemberRpcCall.queryMemberTaskProcessList()
             val taskListObject = JSONObject(response)
             if (!ResChecker.checkRes(TAG + "查询会员阶段奖励失败:", taskListObject)) {
-                record(
+                Log.member(
                     TAG,
                     "会员任务[阶段奖励]#查询失败:" + taskListObject.optString("resultDesc", response)
                 )
@@ -1354,7 +1354,7 @@ class AntMember : ModelTask() {
                 )
                 val awardObject = JSONObject(awardResponse)
                 if (!ResChecker.checkRes(TAG + "领取会员阶段奖励失败:", awardObject)) {
-                    record(
+                    Log.member(
                         TAG,
                         "会员任务[${award.title}]#阶段奖励领取失败:" + awardObject.optString("resultDesc", awardResponse)
                     )
@@ -1362,9 +1362,9 @@ class AntMember : ModelTask() {
                 }
                 val stageSuffix = if (award.stageIndex > 0) "-阶段${award.stageIndex}" else ""
                 if (award.awardPoint > 0) {
-                    Log.other("会员任务[${award.title}$stageSuffix]#获得积分${award.awardPoint}")
+                    Log.member("会员任务[${award.title}$stageSuffix]#获得积分${award.awardPoint}")
                 } else {
-                    Log.other("会员任务[${award.title}$stageSuffix]#领取阶段奖励")
+                    Log.member("会员任务[${award.title}$stageSuffix]#领取阶段奖励")
                 }
                 claimedCount++
                 delay(300)
@@ -1387,7 +1387,7 @@ class AntMember : ModelTask() {
             val stopReason = resolveMemberTaskQueryStopReason(legacyTaskObject)
             if (stopReason != null) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_RISK_STOP_TODAY)
-                record(
+                Log.member(
                     TAG,
                     "会员任务🎖️[legacy]#${buildMemberTaskQueryStopMessage(stopReason, legacyTaskObject)}"
                 )
@@ -1403,7 +1403,7 @@ class AntMember : ModelTask() {
             val taskList = legacyTaskObject.optJSONArray("availableTaskList") ?: JSONArray()
             if (taskList.length() <= 0) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY)
-                record(TAG, "会员任务🎖️[legacy]#任务列表数量为0，今日停止继续刷新")
+                Log.member(TAG, "会员任务🎖️[legacy]#任务列表数量为0，今日停止继续刷新")
                 return@run
             }
 
@@ -1421,14 +1421,14 @@ class AntMember : ModelTask() {
                 }
                 if (ApplicationHookConstants.isOffline()) {
                     setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_RISK_STOP_TODAY)
-                    record(TAG, "会员任务🎖️[legacy]#检测到离线模式，今日停止继续刷新")
+                    Log.member(TAG, "会员任务🎖️[legacy]#检测到离线模式，今日停止继续刷新")
                     return@run
                 }
             }
 
             if (processedCount == 0) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_MEMBER_TASK_EMPTY_TODAY)
-                record(
+                Log.member(
                     TAG,
                     if (safeCandidateCount > 0) {
                         "会员任务🎖️[legacy]#当前列表无可安全执行任务，今日停止继续刷新"
@@ -1552,7 +1552,7 @@ class AntMember : ModelTask() {
     @Throws(JSONException::class)
     private suspend fun processCurrentMemberTask(task: CurrentMemberTask): Boolean = CoroutineUtils.run {
         if (isMemberTaskInBlacklist(task.taskConfigId, task.title)) {
-            record(TAG, "会员任务[${task.title}]#黑名单任务，停止执行")
+            Log.member(TAG, "会员任务[${task.title}]#黑名单任务，停止执行")
             return@run false
         }
         val targetBusinessArray = task.targetBusiness.split("#".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
@@ -1566,7 +1566,7 @@ class AntMember : ModelTask() {
         val executeResponse = AntMemberRpcCall.executeMemberTask(bizParam, bizSubType, bizType)
         val executeObject = JSONObject(executeResponse)
         if (isSkippableMemberTaskRejection(executeObject)) {
-            record(TAG, "会员任务[${task.title}]#不满足营销规则，跳过执行")
+            Log.member(TAG, "会员任务[${task.title}]#不满足营销规则，跳过执行")
             return@run false
         }
         if (!ResChecker.checkRes(TAG + "执行会员任务失败:", executeObject)) {
@@ -1576,15 +1576,15 @@ class AntMember : ModelTask() {
         when (checkCurrentMemberTaskFinished(task)) {
             CurrentMemberTaskVerifyState.CONFIRMED -> {
                 if (task.awardPoint.isNotEmpty()) {
-                    Log.other("会员任务[${task.title}]#获得积分${task.awardPoint}")
+                    Log.member("会员任务[${task.title}]#获得积分${task.awardPoint}")
                 } else {
-                    Log.other("会员任务[${task.title}]#任务完成")
+                    Log.member("会员任务[${task.title}]#任务完成")
                 }
                 true
             }
 
             CurrentMemberTaskVerifyState.UNCONFIRMED -> {
-                record(
+                Log.member(
                     TAG,
                     if (task.taskProcessId.isNotEmpty()) {
                         "会员任务[${task.title}]#执行成功，跳过高风险全量刷新确认，状态待后续页面确认"
@@ -1746,7 +1746,7 @@ class AntMember : ModelTask() {
 
                 val taskObj = jo.optJSONObject("data")
                 if (taskObj == null) {
-                    record(TAG, "芝麻信用💳[第${round}轮]#任务数据为空，停止刷新")
+                    Log.sesame(TAG, "芝麻信用💳[第${round}轮]#任务数据为空，停止刷新")
                     finishedAllRounds = true
                     break
                 }
@@ -1761,7 +1761,7 @@ class AntMember : ModelTask() {
                     if (dailyTaskListVO.has("waitCompleteTaskVOS")) {
                         val waitCompleteTaskVOS = dailyTaskListVO.getJSONArray("waitCompleteTaskVOS")
                         roundTotalTasks += waitCompleteTaskVOS.length()
-                        record(
+                        Log.sesame(
                             TAG,
                             "芝麻信用💳[第${round}轮待完成任务]#开始处理(" + waitCompleteTaskVOS.length() + "个)"
                         )
@@ -1779,7 +1779,7 @@ class AntMember : ModelTask() {
                     if (dailyTaskListVO.has("waitJoinTaskVOS")) {
                         val waitJoinTaskVOS = dailyTaskListVO.getJSONArray("waitJoinTaskVOS")
                         roundTotalTasks += waitJoinTaskVOS.length()
-                        record(
+                        Log.sesame(
                             TAG,
                             "芝麻信用💳[第${round}轮待加入任务]#开始处理(" + waitJoinTaskVOS.length() + "个)"
                         )
@@ -1798,7 +1798,7 @@ class AntMember : ModelTask() {
                 if (taskObj.has("toCompleteVOS")) {
                     val toCompleteVOS = taskObj.getJSONArray("toCompleteVOS")
                     roundTotalTasks += toCompleteVOS.length()
-                    record(
+                    Log.sesame(
                         TAG,
                         "芝麻信用💳[第${round}轮toCompleteVOS任务]#开始处理(" + toCompleteVOS.length() + "个)"
                     )
@@ -1815,20 +1815,20 @@ class AntMember : ModelTask() {
 
                 overallCompletedTasks += roundCompletedTasks
                 overallSkippedTasks += roundSkippedTasks
-                record(
+                Log.sesame(
                     TAG,
                     "芝麻信用💳[第${round}轮处理完成]#总任务:${roundTotalTasks}个, 完成:${roundCompletedTasks}个, 跳过:${roundSkippedTasks}个"
                 )
 
                 if (roundTotalTasks == 0) {
                     finishedAllRounds = true
-                    record(TAG, "芝麻信用💳[当前轮无可做任务，今日停止刷新]")
+                    Log.sesame(TAG, "芝麻信用💳[当前轮无可做任务，今日停止刷新]")
                     break
                 }
 
                 if (roundCompletedTasks <= 0) {
                     finishedAllRounds = true
-                    record(TAG, "芝麻信用💳[当前轮无新增完成任务，今日停止刷新]")
+                    Log.sesame(TAG, "芝麻信用💳[当前轮无新增完成任务，今日停止刷新]")
                     break
                 }
 
@@ -1837,7 +1837,7 @@ class AntMember : ModelTask() {
                 }
             }
 
-            record(
+            Log.sesame(
                 TAG,
                 "芝麻信用💳[任务总计]#轮次:$round, 完成:${overallCompletedTasks}个, 跳过:${overallSkippedTasks}个"
             )
@@ -1852,7 +1852,7 @@ class AntMember : ModelTask() {
 
             if (finishedAllRounds) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_DO_ALL_SESAME_TASK)
-                record(
+                Log.sesame(
                     TAG,
                     if (overallCompletedTasks > 0) {
                         "芝麻信用💳[当前可执行任务已处理完成，今日跳过]"
@@ -1861,7 +1861,7 @@ class AntMember : ModelTask() {
                     }
                 )
             } else {
-                record(
+                Log.sesame(
                     TAG,
                     "芝麻信用💳[达到最大刷新轮次]#$sesameTaskRefreshRoundLimit，保留后续重试机会"
                 )
@@ -1920,7 +1920,7 @@ class AntMember : ModelTask() {
                         val prizeObj = prize.optJSONObject("prize")
                         prize.optInt("zmlNum", prizeObj?.optInt("num", 0) ?: 0)
                     }
-                    Log.other("芝麻信用💳[芝麻粒福利签到成功]#获得" + num + "粒")
+                    Log.sesame("芝麻信用💳[芝麻粒福利签到成功]#获得" + num + "粒")
                 } else {
                     Log.error("$TAG.doSesameZmlCheckIn", "芝麻粒福利签到失败:$completeRes")
                 }
@@ -1956,7 +1956,7 @@ class AntMember : ModelTask() {
                 }
             }
             if (nextDayAward == null) {
-                record(TAG, "芝麻炼金⚗️[次日奖励入口缺失] 视为今日无可领奖励")
+                Log.sesame(TAG, "芝麻炼金⚗️[次日奖励入口缺失] 视为今日无可领奖励")
                 setFlagToday(StatusFlags.FLAG_ZMXY_ALCHEMY_NEXT_DAY_AWARD)
                 return@run
             }
@@ -1965,7 +1965,7 @@ class AntMember : ModelTask() {
             val awardId = nextDayAward.optString("awardId")
             val pointValue = nextDayAward.optInt("pointValue", 0)
             if (!awardAvailable) {
-                record(
+                Log.sesame(
                     TAG,
                     "芝麻炼金⚗️[次日奖励暂无可领] 预计奖励=${pointValue}粒${if (awardId.isNotEmpty()) " awardId=$awardId" else ""}"
                 )
@@ -1998,9 +1998,9 @@ class AntMember : ModelTask() {
             }
 
             if (gotNum > 0) {
-                Log.other("芝麻炼金⚗️[次日奖励领取成功]#获得" + gotNum + "粒")
+                Log.sesame("芝麻炼金⚗️[次日奖励领取成功]#获得" + gotNum + "粒")
             } else {
-                record("芝麻炼金⚗️[次日奖励无奖励] 已领取或无可领奖励")
+                Log.sesame("芝麻炼金⚗️[次日奖励无奖励] 已领取或无可领奖励")
             }
 
             setFlagToday(StatusFlags.FLAG_ZMXY_ALCHEMY_NEXT_DAY_AWARD)
@@ -2065,14 +2065,14 @@ class AntMember : ModelTask() {
             if (ResChecker.checkRes(TAG, collectAllJo)) {
                 needFallbackCollect = false
                 items.forEach { item ->
-                    Log.other("$logPrefix[" + item.title + "]#" + item.potentialSize + "粒(一键收取)")
+                    Log.sesame("$logPrefix[" + item.title + "]#" + item.potentialSize + "粒(一键收取)")
                     collectedCount++
                 }
             } else {
                 val msg = collectAllJo.optString("resultView").ifEmpty {
                     collectAllJo.optString("errorMessage", collectAllResp)
                 }
-                record(TAG, "$logPrefix[一键收取失败，回退逐个收取]#$msg")
+                Log.sesame(TAG, "$logPrefix[一键收取失败，回退逐个收取]#$msg")
             }
         }
 
@@ -2093,7 +2093,7 @@ class AntMember : ModelTask() {
                 )
                 continue
             }
-            Log.other("$logPrefix[" + item.title + "]#" + item.potentialSize + "粒")
+            Log.sesame("$logPrefix[" + item.title + "]#" + item.potentialSize + "粒")
             collectedCount++
         }
         return collectedCount
@@ -2112,7 +2112,7 @@ class AntMember : ModelTask() {
             val items = queryUnclaimedSesameFeedbackItems("芝麻信用💳") ?: return@run
             if (items.isEmpty()) {
                 flagState = Status.TodayFlagState.NO_MORE_ACTION_TODAY
-                record(TAG, "芝麻信用💳[当前无待收取芝麻粒]")
+                Log.sesame(TAG, "芝麻信用💳[当前无待收取芝麻粒]")
                 return@run
             }
             collectSesameFeedbackItems(items, withOneClick, "芝麻信用💳")
@@ -2123,7 +2123,7 @@ class AntMember : ModelTask() {
             if (remainingItems.isEmpty()) {
                 flagState = Status.TodayFlagState.DONE
             } else {
-                record(TAG, "芝麻信用💳[仍有${remainingItems.size}项未收取] 保留后续重试机会")
+                Log.sesame(TAG, "芝麻信用💳[仍有${remainingItems.size}项未收取] 保留后续重试机会")
             }
         } catch (t: Throwable) {
             Log.printStackTrace("$TAG.collectSesame", t)
@@ -2154,7 +2154,7 @@ class AntMember : ModelTask() {
                     return@run
                 }
                 val gainGold = jo.getJSONObject("data").getString("gainSumInsuredYuan")
-                Log.other("保障金🏥[领取保证金]#+" + gainGold + "元")
+                Log.member("保障金🏥[领取保证金]#+" + gainGold + "元")
             }
             for (i in 0..<otherBallList.length()) {
                 val anotherBall = otherBallList.getJSONObject(i)
@@ -2165,7 +2165,7 @@ class AntMember : ModelTask() {
                     return@run
                 }
                 val gainGold = jo.getJSONObject("data").getJSONObject("gainSumInsuredDTO").getString("gainSumInsuredYuan")
-                Log.other("保障金🏥[领取保证金]+" + gainGold + "元")
+                Log.member("保障金🏥[领取保证金]+" + gainGold + "元")
             }
         } catch (t: Throwable) {
             Log.printStackTrace("$TAG.collectInsuredGold", t)
@@ -2183,7 +2183,7 @@ class AntMember : ModelTask() {
         val id = taskConfigInfo.getLong("id")
         val awardParamPoint = taskConfigInfo.getJSONObject("awardParam").getString("awardParamPoint")
         if (isMemberTaskInBlacklist(id.toString(), name)) {
-            record(TAG, "会员任务🎖️[$name]#黑名单任务，停止执行")
+            Log.member(TAG, "会员任务🎖️[$name]#黑名单任务，停止执行")
             return@run false
         }
         val targetBusiness = resolveSupportedMemberTaskTargetBusiness(
@@ -2205,7 +2205,7 @@ class AntMember : ModelTask() {
             return@run false
         }
         if (checkMemberTaskFinished(id)) {
-            Log.other("会员任务🎖️[$name]#获得积分$awardParamPoint")
+            Log.member("会员任务🎖️[$name]#获得积分$awardParamPoint")
             return@run true
         }
         false
@@ -2318,12 +2318,12 @@ class AntMember : ModelTask() {
         val needConsume = doConsume && !hasFlagToday(StatusFlags.FLAG_ANTMEMBER_GOLD_TICKET_CONSUME_DONE)
 
         if (!needSignIn && !needHomeCheck && !needConsume) {
-            record("黄金票🎫[今日已处理] 跳过执行")
+            Log.member("黄金票🎫[今日已处理] 跳过执行")
             return
         }
 
         try {
-            record("开始执行黄金票...")
+            Log.member("开始执行黄金票...")
 
             var homeUpsertData: JSONObject? = null
             if (needSignIn || needHomeCheck) {
@@ -2400,17 +2400,17 @@ class AntMember : ModelTask() {
     private fun doGoldTicketSignIn(homeUpsertData: JSONObject): Boolean {
         return try {
             if (!isGoldTicketCanSign(homeUpsertData)) {
-                record("黄金票🎫[今日已签到]")
+                Log.member("黄金票🎫[今日已签到]")
                 return true
             }
 
-            record("黄金票🎫[准备签到]")
+            Log.member("黄金票🎫[准备签到]")
 
             var signSuccess = false
             val collectCount = doGoldTicketIndexCollect("签到尝试")
             var refreshedHome = queryGoldTicketHomeUpsert()
             if (refreshedHome != null && !isGoldTicketCanSign(refreshedHome)) {
-                Log.other(
+                Log.member(
                     if (collectCount > 0) "黄金票🎫[签到成功]#通过首页收取完成签到"
                     else "黄金票🎫[签到成功]"
                 )
@@ -2427,7 +2427,7 @@ class AntMember : ModelTask() {
                         refreshedHome = queryGoldTicketHomeUpsert()
                         signSuccess = refreshedHome != null && !isGoldTicketCanSign(refreshedHome)
                         if (signSuccess || amount.isNotBlank()) {
-                            Log.other(
+                            Log.member(
                                 if (amount.isNotBlank()) "黄金票🎫[签到成功]#获得: $amount"
                                 else "黄金票🎫[签到成功]"
                             )
@@ -2460,7 +2460,7 @@ class AntMember : ModelTask() {
 
             val collectCount = doGoldTicketIndexCollect("场景收取")
             if (collectCount == 0) {
-                record("黄金票🎫[场景收取] 暂无可领取奖励")
+                Log.member("黄金票🎫[场景收取] 暂无可领取奖励")
             }
         } catch (e: Exception) {
             Log.printStackTrace(TAG, e)
@@ -2476,7 +2476,7 @@ class AntMember : ModelTask() {
             if (!ResChecker.checkRes(TAG, collectJson)) {
                 val message = collectJson.optString("resultDesc", collectJson.optString("memo"))
                 if (message.isNotBlank()) {
-                    record("黄金票🎫[$source] $message")
+                    Log.member("黄金票🎫[$source] $message")
                 }
                 return 0
             }
@@ -2490,13 +2490,13 @@ class AntMember : ModelTask() {
                     continue
                 }
                 count++
-                Log.other("黄金票🎫[$source]#$item")
+                Log.member("黄金票🎫[$source]#$item")
             }
 
             if (count > 0) {
                 val totalAmount = result.optJSONObject("collectedCamp")?.optString("amount").orEmpty()
                 if (totalAmount.isNotBlank()) {
-                    Log.other("黄金票🎫[$source]#本次共得${totalAmount}份")
+                    Log.member("黄金票🎫[$source]#本次共得${totalAmount}份")
                 }
             }
             count
@@ -2576,10 +2576,10 @@ class AntMember : ModelTask() {
             }
 
             if (autoReceivedCount > 0) {
-                record("黄金票🎫[任务自动领取] ${autoReceivedCount}项")
+                Log.member("黄金票🎫[任务自动领取] ${autoReceivedCount}项")
             }
             if (manualCount > 0) {
-                record("黄金票🎫[任务待手动处理] ${manualCount}项")
+                Log.member("黄金票🎫[任务待手动处理] ${manualCount}项")
             }
         } catch (e: Exception) {
             Log.printStackTrace(TAG, e)
@@ -2611,7 +2611,7 @@ class AntMember : ModelTask() {
                     if (!ResChecker.checkRes(TAG, pushJson)) {
                         val pushDesc = pushJson.optString("resultDesc", pushJson.optString("memo"))
                         if (pushDesc.isNotBlank()) {
-                            record("黄金票🎫[任务推送提示] $title#$pushDesc")
+                            Log.member("黄金票🎫[任务推送提示] $title#$pushDesc")
                         }
                         return false
                     }
@@ -2619,7 +2619,7 @@ class AntMember : ModelTask() {
                         ?.optJSONObject("pushResult")
                         ?.optBoolean("done", true)
                     if (pushDone == false) {
-                        record("黄金票🎫[任务推送未完成] $title")
+                        Log.member("黄金票🎫[任务推送未完成] $title")
                         return false
                     }
                 }
@@ -2627,9 +2627,9 @@ class AntMember : ModelTask() {
 
             val amount = task.optString("amount")
             if (amount.isNotBlank()) {
-                Log.other("黄金票🎫[任务领取成功]#$title#+${amount}份")
+                Log.member("黄金票🎫[任务领取成功]#$title#+${amount}份")
             } else {
-                Log.other("黄金票🎫[任务领取成功]#$title")
+                Log.member("黄金票🎫[任务领取成功]#$title")
             }
             true
         } catch (e: Exception) {
@@ -2644,7 +2644,7 @@ class AntMember : ModelTask() {
     private fun doGoldTicketConsume() {
         var consumeDone = false
         try {
-            record("黄金票🎫[准备检查余额及提取]")
+            Log.member("黄金票🎫[准备检查余额及提取]")
 
             // 1. 调用新接口 queryConsumeHome 获取最新的资产信息
             val queryRes = AntMemberRpcCall.queryConsumeHome() ?: return
@@ -2664,7 +2664,7 @@ class AntMember : ModelTask() {
             val extractAmount = (availableAmount / exchangeAmountUnit) * exchangeAmountUnit
 
             if (extractAmount < minExchangeAmount) {
-                record("黄金票🎫[余额不足] 当前: $availableAmount，最低需$minExchangeAmount")
+                Log.member("黄金票🎫[余额不足] 当前: $availableAmount，最低需$minExchangeAmount")
                 consumeDone = true
                 return
             }
@@ -2703,7 +2703,7 @@ class AntMember : ModelTask() {
             // 5. 提交提取
             val exchangeMoney = result.optJSONObject("calcInfo")?.optString("exchangeMoney")
                 ?.takeIf { it.isNotBlank() } ?: String.format(Locale.US, "%.2f", extractAmount / 1000.0)
-            record("黄金票🎫[开始提取] 计划: $extractAmount 份 => $exchangeMoney 元 (持有: $availableAmount)")
+            Log.member("黄金票🎫[开始提取] 计划: $extractAmount 份 => $exchangeMoney 元 (持有: $availableAmount)")
             val submitRes = AntMemberRpcCall.submitConsume(extractAmount, productId, bonusAmount)
 
             if (submitRes.isNullOrBlank()) {
@@ -2724,7 +2724,7 @@ class AntMember : ModelTask() {
             val writeOffNo = submitResult?.optString("writeOffNo").orEmpty()
             val successTitle = submitResult?.optString("successTitle").orEmpty()
             if (writeOffNo.isNotBlank() || successTitle.contains("成功")) {
-                Log.other("黄金票🎫[提取成功]#$exchangeMoney 元#$extractAmount 份")
+                Log.member("黄金票🎫[提取成功]#$exchangeMoney 元#$extractAmount 份")
                 consumeDone = true
             } else {
                 Log.error("黄金票🎫[提取失败] 未返回核销码")
@@ -2758,7 +2758,7 @@ class AntMember : ModelTask() {
                     val signModule = data.optJSONObject("signInBallModule")
                     val signed = signModule != null && signModule.optBoolean("signInStatus", false)
                     if (signed) {
-                        record("$TAG.enableGameCenter.signIn", "游戏中心🎮[今日已签到]")
+                        Log.member("$TAG.enableGameCenter.signIn", "游戏中心🎮[今日已签到]")
                     } else {
                         val signResp = AntMemberRpcCall.continueSignIn()
                         val signJo = JSONObject(signResp)
@@ -2790,7 +2790,7 @@ class AntMember : ModelTask() {
                                 if (!desc.isEmpty()) {
                                     sb.append("#").append(desc)
                                 }
-                                Log.other(sb.toString())
+                                Log.member(sb.toString())
                             } else {
                                 val sb = StringBuilder()
                                 if (!title.isEmpty()) {
@@ -2846,7 +2846,7 @@ class AntMember : ModelTask() {
                                     if (taskId == lastFailedTaskId) {
                                         lastFailedCount++
                                         if (lastFailedCount >= 2) {
-                                            record(
+                                            Log.member(
                                                 "$TAG.enableGameCenter.tasks", "游戏中心🎮任务[" + task.optString("title") + "]连续失败2次,跳过"
                                             )
                                             continue
@@ -2899,7 +2899,7 @@ class AntMember : ModelTask() {
                                                 failed++
                                             } else {
                                                 // 真正完成,重置失败计数
-                                                Log.other(
+                                                Log.member(
                                                     "游戏中心🎮任务[" + (subTitle.ifEmpty { title }) + "]#完成,奖励" + pointAmount + "玩乐豆" + (if (needSignUp) "(签到任务)" else "")
                                                 )
                                                 finished++
@@ -2922,16 +2922,16 @@ class AntMember : ModelTask() {
                                 }
 
                                 if (total > 0) {
-                                    record(
+                                    Log.member(
                                         "$TAG.enableGameCenter.tasks", "游戏中心🎮[平台任务处理完成]#待做:$total 完成:$finished 失败:$failed"
                                     )
                                 } else {
-                                    record(
+                                    Log.member(
                                         "$TAG.enableGameCenter.tasks", "游戏中心🎮[无待处理的平台任务]"
                                     )
                                 }
                             } else {
-                                record("$TAG.enableGameCenter.tasks", "游戏中心🎮[平台任务列表为空]")
+                                Log.member("$TAG.enableGameCenter.tasks", "游戏中心🎮[平台任务列表为空]")
                             }
                         }
                     }
@@ -2951,7 +2951,7 @@ class AntMember : ModelTask() {
                     val data = root.optJSONObject("data")
                     val pointBallList = data?.optJSONArray("pointBallList")
                     if (pointBallList == null || pointBallList.length() == 0) {
-                        record("$TAG.enableGameCenter.point", "游戏中心🎮[暂无可领取乐豆]")
+                        Log.member("$TAG.enableGameCenter.point", "游戏中心🎮[暂无可领取乐豆]")
                     } else {
                         val batchResp = AntMemberRpcCall.batchReceivePointBall()
                         val batchJo = JSONObject(batchResp)
@@ -2960,9 +2960,9 @@ class AntMember : ModelTask() {
                             val receiveAmount = batchData?.optInt("receiveAmount", 0) ?: 0
                             val totalAmount = batchData?.optInt("totalAmount", receiveAmount) ?: receiveAmount
                             if (receiveAmount > 0) {
-                                Log.other("游戏中心🎮[一键领取乐豆成功]#本次领取" + receiveAmount + " | 当前累计" + totalAmount + "玩乐豆")
+                                Log.member("游戏中心🎮[一键领取乐豆成功]#本次领取" + receiveAmount + " | 当前累计" + totalAmount + "玩乐豆")
                             } else {
-                                record("$TAG.enableGameCenter.point", "游戏中心🎮[暂无可领取乐豆]")
+                                Log.member("$TAG.enableGameCenter.point", "游戏中心🎮[暂无可领取乐豆]")
                             }
                         } else {
                             val msg = batchJo.optString(
@@ -2989,7 +2989,7 @@ class AntMember : ModelTask() {
 
                 var jo = JSONObject(signInProcessStr)
                 if (!ResChecker.checkRes(TAG, jo)) {
-                    record(jo.toString())
+                    Log.member(jo.toString())
                     return
                 }
 
@@ -2999,9 +2999,9 @@ class AntMember : ModelTask() {
                     jo = JSONObject(signInTriggerStr)
                     if (ResChecker.checkRes(TAG, jo)) {
                         val prizeName = jo.getJSONObject("result").getJSONArray("prizeSendOrderDTOList").getJSONObject(0).getString("prizeName")
-                        record(TAG, "安心豆🫘[$prizeName]")
+                        Log.member(TAG, "安心豆🫘[$prizeName]")
                     } else {
-                        record(jo.toString())
+                        Log.member(jo.toString())
                     }
                 }
             } catch (e: NullPointerException) {
@@ -3020,7 +3020,7 @@ class AntMember : ModelTask() {
 
                 var jo = JSONObject(accountInfo)
                 if (!ResChecker.checkRes(TAG, jo)) {
-                    record(jo.toString())
+                    Log.member(jo.toString())
                     return
                 }
 
@@ -3031,7 +3031,7 @@ class AntMember : ModelTask() {
 
                 jo = JSONObject(exchangeDetailStr)
                 if (!ResChecker.checkRes(TAG, jo)) {
-                    record(jo.toString())
+                    Log.member(jo.toString())
                     return
                 }
 
@@ -3049,9 +3049,9 @@ class AntMember : ModelTask() {
 
                 jo = JSONObject(exchangeResult)
                 if (ResChecker.checkRes(TAG, jo)) {
-                    record(TAG, "安心豆🫘[兑换:$itemName]")
+                    Log.member(TAG, "安心豆🫘[兑换:$itemName]")
                 } else {
-                    record(jo.toString())
+                    Log.member(jo.toString())
                 }
             } catch (e: NullPointerException) {
                 Log.printStackTrace(TAG, "安心豆🫘[RPC桥接失败]#可能是RpcBridge未初始化", e)
@@ -3066,7 +3066,7 @@ class AntMember : ModelTask() {
      */
     private suspend fun doSesameAlchemy(): Unit = CoroutineUtils.run {
         try {
-            record(TAG, "开始执行芝麻炼金⚗️")
+            Log.sesame(TAG, "开始执行芝麻炼金⚗️")
 
             // ================= Step 1: 自动炼金 (消耗芝麻粒升级) =================
             val homeRes = AntMemberRpcCall.Zmxy.Alchemy.alchemyQueryHome()
@@ -3086,7 +3086,7 @@ class AntMember : ModelTask() {
                         val alchemyJo = JSONObject(alchemyRes)
 
                         if (isSesameAlchemyCapReached(alchemyJo)) {
-                            Log.record(TAG, "芝麻炼金⚗️[已达盖帽值，停止自动炼金]")
+                            Log.sesame(TAG, "芝麻炼金⚗️[已达盖帽值，停止自动炼金]")
                             break
                         }
                         if (ResChecker.checkRes(TAG, alchemyJo)) {
@@ -3100,7 +3100,7 @@ class AntMember : ModelTask() {
                                 if (levelUp) currentLevel++
                                 if (levelFull) capReached = true
 
-                                Log.other(
+                                Log.sesame(
                                     ("芝麻炼金⚗️[炼金成功]" + "#消耗" + cost + "粒" + " | 获得" + goldNum + "金" + " | 当前等级Lv." + currentLevel + (if (levelUp) "（升级🎉）" else "") + (if (levelFull) "（满级🏆）" else ""))
                                 )
                                 zmlBalance -= cost
@@ -3140,7 +3140,7 @@ class AntMember : ModelTask() {
                                         val prizeObj = prize.optJSONObject("prize")
                                         prize.optInt("zmlNum", prizeObj?.optInt("num", 0) ?: 0)
                                     }
-                                    Log.other("芝麻炼金⚗️[每日签到成功]#获得" + num + "粒")
+                                    Log.sesame("芝麻炼金⚗️[每日签到成功]#获得" + num + "粒")
                                 } else {
                                     Log.error("$TAG.doSesameAlchemy", "炼金签到失败:$completeRes")
                                 }
@@ -3156,7 +3156,7 @@ class AntMember : ModelTask() {
 
             // 1. 查询时段任务
             val queryRespStr = AntMemberRpcCall.Zmxy.Alchemy.alchemyQueryTimeLimitedTask()
-            record(TAG, "芝麻炼金⚗️[检查时段奖励]")
+            Log.sesame(TAG, "芝麻炼金⚗️[检查时段奖励]")
 
             val queryResp = JSONObject(queryRespStr)
             if (!ResChecker.checkRes(TAG + "查询时段任务失败:", queryResp) || !ResChecker.checkRes(
@@ -3171,7 +3171,7 @@ class AntMember : ModelTask() {
 
             val timeLimitedTaskVO = queryResp.getJSONObject("data").optJSONObject("timeLimitedTaskVO")
             if (timeLimitedTaskVO == null) {
-                record(TAG, "芝麻炼金⚗️[当前没有时段奖励任务]")
+                Log.sesame(TAG, "芝麻炼金⚗️[当前没有时段奖励任务]")
                 return
             }
 
@@ -3182,19 +3182,19 @@ class AntMember : ModelTask() {
             val tomorrow = timeLimitedTaskVO.optBoolean("tomorrow", false)
             val rewardAmount = timeLimitedTaskVO.optInt("rewardAmount", 0)
 
-            record(
+            Log.sesame(
                 TAG, "芝麻炼金⚗️[任务检查] 任务=$taskName 状态=$state 奖励=$rewardAmount 明天=$tomorrow"
             )
 
             // 3. 如果是明天任务，跳过
             if (tomorrow) {
-                record(TAG, "芝麻炼金⚗️[任务跳过] 任务=$taskName 是明天的奖励")
+                Log.sesame(TAG, "芝麻炼金⚗️[任务跳过] 任务=$taskName 是明天的奖励")
                 return
             }
 
             // 4. 如果状态是可领取，则领取奖励
             if (state == 1) { // 可领取
-                record(TAG, "芝麻炼金⚗️[开始领取任务奖励] 任务=$taskName")
+                Log.sesame(TAG, "芝麻炼金⚗️[开始领取任务奖励] 任务=$taskName")
 
                 val collectRespStr = AntMemberRpcCall.Zmxy.Alchemy.alchemyCompleteTimeLimitedTask(templateId)
                 val collectResp = JSONObject(collectRespStr)
@@ -3208,15 +3208,15 @@ class AntMember : ModelTask() {
                     val data = collectResp.getJSONObject("data")
                     val zmlNum = data.optInt("zmlNum", 0)
                     val toast = data.optString("toast", "")
-                    record(TAG, "芝麻炼金⚗️[领取成功] 获得芝麻粒=$zmlNum 提示=$toast")
+                    Log.sesame(TAG, "芝麻炼金⚗️[领取成功] 获得芝麻粒=$zmlNum 提示=$toast")
                 }
             } else { // 其他状态
-                record(TAG, "芝麻炼金⚗️[当前不可领取] 任务=$taskName")
+                Log.sesame(TAG, "芝麻炼金⚗️[当前不可领取] 任务=$taskName")
             }
 
 
             // ================= Step 3: 自动做任务 =================
-            record(TAG, "芝麻炼金⚗️[开始扫描任务列表]")
+            Log.sesame(TAG, "芝麻炼金⚗️[开始扫描任务列表]")
             val listRes = AntMemberRpcCall.Zmxy.Alchemy.alchemyQueryListV3()
             val listJo = JSONObject(listRes)
 
@@ -3243,19 +3243,19 @@ class AntMember : ModelTask() {
             }
 
             // ================= Step 4: [新增] 任务完成后一键收取芝麻粒 =================
-            record(TAG, "芝麻炼金⚗️[任务处理完毕，准备收取芝麻粒]")
+            Log.sesame(TAG, "芝麻炼金⚗️[任务处理完毕，准备收取芝麻粒]")
             ActionDelayUtil.humanActionDelay(2000L) // 稍作等待，确保任务奖励到账
 
             val feedbackItems = queryUnclaimedSesameFeedbackItems("芝麻炼金⚗️")
             if (feedbackItems == null) {
-                record(TAG, "芝麻炼金⚗️[查询待收取芝麻粒失败]")
+                Log.sesame(TAG, "芝麻炼金⚗️[查询待收取芝麻粒失败]")
             } else if (feedbackItems.isEmpty()) {
-                record(TAG, "芝麻炼金⚗️[当前无待收取芝麻粒]")
+                Log.sesame(TAG, "芝麻炼金⚗️[当前无待收取芝麻粒]")
             } else {
-                record(TAG, "芝麻炼金⚗️[发现" + feedbackItems.size + "个待收取项，执行一键收取]")
+                Log.sesame(TAG, "芝麻炼金⚗️[发现" + feedbackItems.size + "个待收取项，执行一键收取]")
                 val collectedCount = collectSesameFeedbackItems(feedbackItems, true, "芝麻炼金⚗️")
                 if (collectedCount > 0) {
-                    Log.other("芝麻炼金⚗️[收取完成]#本次处理" + collectedCount + "项")
+                    Log.sesame("芝麻炼金⚗️[收取完成]#本次处理" + collectedCount + "项")
                 }
             }
         } catch (t: Throwable) {
@@ -3287,14 +3287,14 @@ class AntMember : ModelTask() {
             if (isTaskInBlacklist(title)) {
                 // 只有在所有任务组中未处理过时才记录日志
                 if (!processedBlacklistTasks.contains(title)) {
-                    record(TAG, "跳过黑名单任务: $title")
+                    Log.sesame(TAG, "跳过黑名单任务: $title")
                     processedBlacklistTasks.add(title)
                 }
                 continue
             }
 
             if (shouldSkipShareAssistSesameTask(task)) {
-                record(TAG, "芝麻炼金任务: 跳过助力型任务 $title")
+                Log.sesame(TAG, "芝麻炼金任务: 跳过助力型任务 $title")
                 continue
             }
 
@@ -3320,14 +3320,14 @@ class AntMember : ModelTask() {
                 continue
             }
 
-            record(TAG, "芝麻炼金任务: $title 准备执行")
+            Log.sesame(TAG, "芝麻炼金任务: $title 准备执行")
 
             var recordId = task.optString("recordId", "")
 
             if (recordId.isEmpty()) {
                 // templateId 为空或无效时，直接跳过，避免 "参数[templateId]不是有效的入参"
                 if (templateId == null || templateId.trim { it <= ' ' }.isEmpty()) {
-                    record(TAG, "芝麻炼金任务: 模板为空，跳过 $title")
+                    Log.sesame(TAG, "芝麻炼金任务: 模板为空，跳过 $title")
                     continue
                 }
                 val joinRes = AntMemberRpcCall.joinSesameTask(templateId)
@@ -3337,7 +3337,7 @@ class AntMember : ModelTask() {
                     if (joinData != null) {
                         recordId = joinData.optString("recordId")
                     }
-                    record(TAG, "任务领取成功: $title")
+                    Log.sesame(TAG, "任务领取成功: $title")
                     ActionDelayUtil.humanActionDelay(1000L)
                 } else {
                     Log.error(
@@ -3356,7 +3356,7 @@ class AntMember : ModelTask() {
                 val finishJo = JSONObject(finishRes)
                 if (ResChecker.checkRes(TAG, finishJo)) {
                     val reward = task.optInt("rewardAmount", 0)
-                    Log.other("芝麻炼金⚗️[任务完成: " + title + "]#获得" + reward + "粒")
+                    Log.sesame("芝麻炼金⚗️[任务完成: " + title + "]#获得" + reward + "粒")
                 } else {
                     val errorCode = finishJo.optString("resultCode", "")
                     val resultView = finishJo.optString("resultView", finishRes)
@@ -3475,21 +3475,21 @@ class AntMember : ModelTask() {
             if ("NOT_DONE" == status || "SIGNUP_COMPLETE" == status) {
                 // SIGNUP_COMPLETE 通常表示已报名但未做，或者对于复访任务表示可以去完成
                 if (taskId == null) {
-                    record(TAG, "芝麻树🌳[跳过无有效任务ID] $title")
+                    Log.sesame(TAG, "芝麻树🌳[跳过无有效任务ID] $title")
                     return
                 }
-                record("芝麻树🌳[开始任务] " + title + (if (prizeName.isEmpty()) "" else " ($prizeName)"))
+                Log.sesame("芝麻树🌳[开始任务] " + title + (if (prizeName.isEmpty()) "" else " ($prizeName)"))
                 performTask(taskId, title, prizeName)
                 // 任务完成
             } else if ("TO_RECEIVE" == status) {
                 // 待领取状态
                 if (taskId == null) {
-                    record(TAG, "芝麻树🌳[跳过无有效任务ID] $title")
+                    Log.sesame(TAG, "芝麻树🌳[跳过无有效任务ID] $title")
                     return
                 }
                 if (doTaskAction(taskId, "receive")) {
                     val logMsg = "芝麻树🌳[领取奖励] " + title + " #" + (prizeName.ifEmpty { "奖励已领取" })
-                    Log.other(logMsg)
+                    Log.sesame(logMsg)
                 }
             }
         } catch (e: Exception) {
@@ -3536,7 +3536,7 @@ class AntMember : ModelTask() {
                 // 发送"领取"指令
                 if (doTaskAction(taskId, "receive")) {
                     val logMsg = "芝麻树🌳[完成任务] " + title + " #" + (prizeName.ifEmpty { "奖励已领取" })
-                    Log.other(logMsg)
+                    Log.sesame(logMsg)
                     return true
                 }
             }
@@ -3643,11 +3643,11 @@ class AntMember : ModelTask() {
             }
 
             if (clicks <= 0) {
-                record("芝麻树🌳[无需净化] 净化值不足（当前: " + score + "g，可点击: " + clicks + "次）")
+                Log.sesame("芝麻树🌳[无需净化] 净化值不足（当前: " + score + "g，可点击: " + clicks + "次）")
                 return@run
             }
 
-            record("芝麻树🌳[开始净化] 可点击 $clicks 次")
+            Log.sesame("芝麻树🌳[开始净化] 可点击 $clicks 次")
 
             for (i in 0..<clicks) {
                 val res = AntMemberRpcCall.zhimaTreeCleanAndPush(treeCode) ?: break
@@ -3668,7 +3668,7 @@ class AntMember : ModelTask() {
 
                 var log = "芝麻树🌳[净化]第" + (i + 1) + "次 | 剩:" + newScore + "g"
                 if (growth != -1) log += "|成长:$growth"
-                Log.other("$log ✅")
+                Log.sesame("$log ✅")
 
                 delay(1500)
             }
@@ -3685,7 +3685,7 @@ class AntMember : ModelTask() {
     fun queryAndCollectStickers() {
         try {
             if (hasFlagToday(StatusFlags.FLAG_ANTMEMBER_STICKER)) {
-                record(TAG, "今日已兑换贴纸，跳过")
+                Log.sesame(TAG, "今日已兑换贴纸，跳过")
                 return
             }
             val date = Date()
@@ -3721,7 +3721,7 @@ class AntMember : ModelTask() {
             }
 
             if (allStickerIds.isEmpty()) {
-                record(TAG, "贴纸扫描：暂无可领取的贴纸")
+                Log.sesame(TAG, "贴纸扫描：暂无可领取的贴纸")
                 //  Status.setFlagToday(StatusFlags.FLAG_AntMember_STICKER)
                 return
             }
@@ -3739,7 +3739,7 @@ class AntMember : ModelTask() {
             val specialList = collectJson.optJSONArray("specialStickerList")
             val obtainedIds = collectJson.optJSONArray("obtainedConfigId")
 
-            record(TAG, "贴纸领取成功，总数：${obtainedIds?.length() ?: 0}")
+            Log.sesame(TAG, "贴纸领取成功，总数：${obtainedIds?.length() ?: 0}")
 
             if (specialList != null && specialList.length() > 0) {
                 for (i in 0 until specialList.length()) {
@@ -3752,8 +3752,8 @@ class AntMember : ModelTask() {
 
                     val ranking = special.optString("rankingText")
 
-                    // 仅对特殊贴纸进行 other 输出，显示真实的贴纸名称
-                    Log.other(TAG, "获得特殊贴纸 → $stickerName ($ranking)")
+                    // 仅对特殊贴纸输出芝麻日志，显示真实的贴纸名称
+                    Log.sesame(TAG, "获得特殊贴纸 → $stickerName ($ranking)")
                 }
             }
 
@@ -3785,7 +3785,7 @@ class AntMember : ModelTask() {
                     val json = JSONObject(queryResp)
                     if (!ResChecker.checkRes(TAG, json)) {
                         if (attempt == 0) {
-                            record(TAG, "攒芝麻分🎁[查询进度球失败，1.2秒后重试]")
+                            Log.sesame(TAG, "攒芝麻分🎁[查询进度球失败，1.2秒后重试]")
                             Thread.sleep(1200)
                             continue
                         }
@@ -3806,12 +3806,12 @@ class AntMember : ModelTask() {
                     val collectResp = AntMemberRpcCall.Zmxy.collectProgressBall(idList) ?: return
                     val collectJson = JSONObject(collectResp)
                     if (isSesameProgressBallEmpty(collectJson)) {
-                        record(TAG, "攒芝麻分🎁[暂无可领取进度球]")
+                        Log.sesame(TAG, "攒芝麻分🎁[暂无可领取进度球]")
                         return
                     }
                     if (!ResChecker.checkRes(TAG, collectJson)) {
                         if (attempt == 0) {
-                            record(TAG, "攒芝麻分🎁[领取进度球失败，1.2秒后重试]")
+                            Log.sesame(TAG, "攒芝麻分🎁[领取进度球失败，1.2秒后重试]")
                             Thread.sleep(1200)
                             continue
                         }
@@ -3819,7 +3819,7 @@ class AntMember : ModelTask() {
                         return
                     }
 
-                    Log.other(
+                    Log.sesame(
                         TAG, String.format(
                             "领取完成 → 本次加速进度: %d, 当前加速倍率: %.2f",
                             collectJson.optInt("collectedAccelerateProgress", -1),
@@ -3852,13 +3852,13 @@ class AntMember : ModelTask() {
                             val receiveSumPoint = receiveAllObject.optInt("receiveSumPoint", 0)
                             val receiveStatus = receiveAllObject.optString("receiveStatus")
                             if ("SUCCESS" == receiveStatus || receiveSumPoint > 0) {
-                                Log.other("会员积分🎖️[一键领取]#${receiveSumPoint}积分")
+                                Log.member("会员积分🎖️[一键领取]#${receiveSumPoint}积分")
                             } else {
-                                record(TAG, "会员积分🎖️[一键领取]#未返回SUCCESS(receiveStatus=$receiveStatus)")
+                                Log.member(TAG, "会员积分🎖️[一键领取]#未返回SUCCESS(receiveStatus=$receiveStatus)")
                             }
                             return
                         }
-                        record(TAG, "会员积分🎖️[一键领取失败，回退逐条领取]")
+                        Log.member(TAG, "会员积分🎖️[一键领取失败，回退逐条领取]")
                     }
                     val hasNextPage = jo.optBoolean("hasNextPage")
                     val jaCertList = jo.optJSONArray("certList") ?: JSONArray()
@@ -3873,10 +3873,10 @@ class AntMember : ModelTask() {
                         s = AntMemberRpcCall.receivePointByUser(id)
                         val receiveObject = JSONObject(s)
                         if (ResChecker.checkRes(TAG + "会员积分领取失败:", receiveObject)) {
-                            Log.other("会员积分🎖️[领取$bizTitle]#${pointAmount}积分")
+                            Log.member("会员积分🎖️[领取$bizTitle]#${pointAmount}积分")
                         } else {
-                            record(receiveObject.optString("resultDesc"))
-                            record(s)
+                            Log.member(receiveObject.optString("resultDesc"))
+                            Log.member(s)
                         }
                     }
                     if (hasNextPage) {
@@ -3901,18 +3901,18 @@ class AntMember : ModelTask() {
                         s = AntMemberRpcCall.receivePointByUser(id)
                         val receiveObject = JSONObject(s)
                         if (ResChecker.checkRes(TAG + "会员积分领取失败:", receiveObject)) {
-                            Log.other("会员积分🎖️[领取$bizTitle]#${pointAmount}积分")
+                            Log.member("会员积分🎖️[领取$bizTitle]#${pointAmount}积分")
                         } else {
-                            record(receiveObject.optString("resultDesc"))
-                            record(s)
+                            Log.member(receiveObject.optString("resultDesc"))
+                            Log.member(s)
                         }
                     }
                     if (hasNextPage) {
                         queryPointCert(page + 1, pageSize)
                     }
                 } else {
-                    record(jo.getString("resultDesc"))
-                    record(s)
+                    Log.member(jo.getString("resultDesc"))
+                    Log.member(s)
                 }
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, "queryPointCert err:", t)
@@ -3930,14 +3930,14 @@ class AntMember : ModelTask() {
                 if (ResChecker.checkRes(TAG, jo)) {
                     val entrance = jo.optJSONObject("entrance") ?: return false
                     if (!entrance.optBoolean("openApp")) {
-                        Log.other("芝麻信用💳[未开通芝麻信用]")
+                        Log.sesame("芝麻信用💳[未开通芝麻信用]")
                         return false
                     }
                     return true
                 }
-                record(TAG, "芝麻信用💳[V7首页探活失败，回退V8]")
+                Log.sesame(TAG, "芝麻信用💳[V7首页探活失败，回退V8]")
             } catch (t: Throwable) {
-                record(TAG, "芝麻信用💳[V7首页探活异常，回退V8]#${t.message}")
+                Log.sesame(TAG, "芝麻信用💳[V7首页探活异常，回退V8]#${t.message}")
             }
 
             try {
@@ -3949,7 +3949,7 @@ class AntMember : ModelTask() {
                 }
                 val entrance = jo.optJSONObject("entrance") ?: return false
                 if (!entrance.optBoolean("openApp")) {
-                    Log.other("芝麻信用💳[未开通芝麻信用]")
+                    Log.sesame("芝麻信用💳[未开通芝麻信用]")
                     return false
                 }
                 return true
@@ -4029,7 +4029,7 @@ class AntMember : ModelTask() {
                 !primarySceneCode.isNullOrBlank() &&
                 "PROMISE_TODAY_FINISH_TIMES_LIMIT" != joinResultCode
             ) {
-                record(TAG, "$logPrefix[领取任务扩展参数失败，回退简版参数]#$taskTitle")
+                Log.sesame(TAG, "$logPrefix[领取任务扩展参数失败，回退简版参数]#$taskTitle")
                 joinRes = AntMemberRpcCall.joinSesameTask(taskTemplateId)
                 joinJo = JSONObject(joinRes)
             }
@@ -4046,7 +4046,7 @@ class AntMember : ModelTask() {
         ): Boolean {
             val templateId = task.optString("templateId")
             if (templateId.isBlank()) {
-                record(TAG, "$logPrefix[任务回调缺少templateId]#$taskTitle")
+                Log.sesame(TAG, "$logPrefix[任务回调缺少templateId]#$taskTitle")
                 return false
             }
 
@@ -4088,7 +4088,7 @@ class AntMember : ModelTask() {
                     feedbackJo.optString("errorMessage", feedbackRes)
                 }
                 if (index < feedbackAttempts.lastIndex) {
-                    record(
+                    Log.sesame(
                         TAG,
                         "$logPrefix[任务回调${attemptLabel}失败，尝试兼容参数]#$taskTitle - $lastResultView"
                     )
@@ -4106,20 +4106,20 @@ class AntMember : ModelTask() {
         ): Boolean {
             val logExtMap = task.optJSONObject("logExtMap")
             if (logExtMap == null) {
-                record(TAG, "$logPrefix[广告任务缺少logExtMap]#$taskTitle")
+                Log.sesame(TAG, "$logPrefix[广告任务缺少logExtMap]#$taskTitle")
                 return false
             }
             val bizId = logExtMap.optString("bizId")
             if (bizId.isEmpty()) {
-                record(TAG, "$logPrefix[广告任务缺少bizId]#$taskTitle")
+                Log.sesame(TAG, "$logPrefix[广告任务缺少bizId]#$taskTitle")
                 return false
             }
-            record(TAG, "$logPrefix[广告任务准备]#$taskTitle")
+            Log.sesame(TAG, "$logPrefix[广告任务准备]#$taskTitle")
             val adFinishRes = AntMemberRpcCall.taskFinish(bizId)
             val adFinishJo = JSONObject(adFinishRes)
             if (ResChecker.checkRes(TAG, adFinishJo) || "0" == adFinishJo.optString("errCode")) {
                 val reward = task.optInt("rewardAmount", 0)
-                Log.other("$logPrefix[广告任务完成: " + taskTitle + "]#获得" + reward + "粒")
+                Log.sesame("$logPrefix[广告任务完成: " + taskTitle + "]#获得" + reward + "粒")
                 return true
             }
             val errorCode = adFinishJo.optString(
@@ -4159,13 +4159,13 @@ class AntMember : ModelTask() {
                 val actionText = task.optString("actionText", "")
 
                 if (transientSkippedTasks.contains(taskTitle)) {
-                    record(TAG, "芝麻信用💳[跳过本轮频控任务]#$taskTitle")
+                    Log.sesame(TAG, "芝麻信用💳[跳过本轮频控任务]#$taskTitle")
                     skippedCount++
                     continue
                 }
 
                 if (finishFlag || "已完成" == actionText) {
-                    record(TAG, "芝麻信用💳[跳过已完成任务]#$taskTitle")
+                    Log.sesame(TAG, "芝麻信用💳[跳过已完成任务]#$taskTitle")
                     skippedCount++
                     continue
                 }
@@ -4173,7 +4173,7 @@ class AntMember : ModelTask() {
                 var recordId = task.optString("recordId", "")
                 if (recordId.isEmpty() && joinLimitReached) {
                     if (!joinLimitLogged) {
-                        record(TAG, "芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
+                        Log.sesame(TAG, "芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
                         joinLimitLogged = true
                     }
                     skippedCount++
@@ -4181,13 +4181,13 @@ class AntMember : ModelTask() {
                 }
 
                 if (isTaskInBlacklist(taskTitle)) {
-                    record(TAG, "芝麻信用💳[跳过黑名单任务]#$taskTitle")
+                    Log.sesame(TAG, "芝麻信用💳[跳过黑名单任务]#$taskTitle")
                     skippedCount++
                     continue
                 }
 
                 if (shouldSkipShareAssistSesameTask(task)) {
-                    record(TAG, "芝麻信用💳[跳过助力型任务]#$taskTitle")
+                    Log.sesame(TAG, "芝麻信用💳[跳过助力型任务]#$taskTitle")
                     skippedCount++
                     continue
                 }
@@ -4203,7 +4203,7 @@ class AntMember : ModelTask() {
                 }
 
                 if (!task.has("templateId")) {
-                    record(TAG, "芝麻信用💳[跳过缺少templateId任务]#$taskTitle")
+                    Log.sesame(TAG, "芝麻信用💳[跳过缺少templateId任务]#$taskTitle")
                     skippedCount++
                     continue
                 }
@@ -4212,7 +4212,7 @@ class AntMember : ModelTask() {
                 val needCompleteNum = if (task.has("needCompleteNum")) task.getInt("needCompleteNum") else 1
                 val completedNum = task.optInt("completedNum", 0)
                 if (completedNum >= needCompleteNum && needCompleteNum > 0) {
-                    record(TAG, "芝麻信用💳[跳过已达完成次数]#$taskTitle")
+                    Log.sesame(TAG, "芝麻信用💳[跳过已达完成次数]#$taskTitle")
                     skippedCount++
                     continue
                 }
@@ -4221,7 +4221,7 @@ class AntMember : ModelTask() {
 
                 val actionUrl = task.optString("actionUrl", "")
                 if (actionUrl.contains("jumpAction") && !actionUrl.contains("jumpAction=userGrowth")) {
-                    record(TAG, "芝麻信用💳[跳过跳转APP任务]#$taskTitle")
+                    Log.sesame(TAG, "芝麻信用💳[跳过跳转APP任务]#$taskTitle")
                     skippedCount++
                     continue
                 }
@@ -4240,7 +4240,7 @@ class AntMember : ModelTask() {
                     if ("PROMISE_TODAY_FINISH_TIMES_LIMIT" == joinResultCode) {
                         joinLimitReached = true
                         setFlagToday(StatusFlags.FLAG_ANTMEMBER_SESAME_JOIN_LIMIT_REACHED)
-                        record(TAG, "芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
+                        Log.sesame(TAG, "芝麻信用💳[领取任务已达当日上限] 今日不再领取新任务")
                         joinLimitLogged = true
                         skippedCount++
                         continue
@@ -4250,7 +4250,7 @@ class AntMember : ModelTask() {
                     }
                     if (isTransientSesameTaskError(joinResultCode, joinResultView)) {
                         transientSkippedTasks.add(taskTitle)
-                        record(TAG, "芝麻信用💳[领取任务暂时跳过]#$taskTitle#$joinResultView")
+                        Log.sesame(TAG, "芝麻信用💳[领取任务暂时跳过]#$taskTitle#$joinResultView")
                         skippedCount++
                         continue
                     }
@@ -4293,12 +4293,12 @@ class AntMember : ModelTask() {
                 }
                 if (isTransientSesameTaskError(errorCode, resultView)) {
                     transientSkippedTasks.add(taskTitle)
-                    record(TAG, "芝麻信用💳[完成任务暂时跳过]#$taskTitle#$resultView")
+                    Log.sesame(TAG, "芝麻信用💳[完成任务暂时跳过]#$taskTitle#$resultView")
                     if (isSesameTaskFlowInterrupted(responseObj)) {
                         interrupted = true
                     }
                 } else if (ResChecker.checkRes(TAG, responseObj)) {
-                    record(
+                    Log.sesame(
                         TAG,
                         "芝麻信用💳[完成任务" + taskTitle + "]#(" + (completedNum + 1) + "/" + needCompleteNum + "天)"
                     )
@@ -4355,7 +4355,7 @@ class AntMember : ModelTask() {
                 val s = AntMemberRpcCall.queryActivity()
                 val jo = JSONObject(s)
                 if (!ResChecker.checkRes(TAG, jo)) {
-                    record(TAG, "queryActivity $s")
+                    Log.member(TAG, "queryActivity $s")
                     return@run false
                 }
 
@@ -4365,11 +4365,11 @@ class AntMember : ModelTask() {
                         if (activityNo.isEmpty()) return@run false
                         val joSignIn = JSONObject(AntMemberRpcCall.signIn(activityNo))
                         if (ResChecker.checkRes(TAG, joSignIn)) {
-                            Log.other("商家服务🏬[开门打卡签到成功]")
+                            Log.member("商家服务🏬[开门打卡签到成功]")
                             return@run true
                         }
-                        record(TAG, joSignIn.optString("errorMsg"))
-                        record(TAG, joSignIn.toString())
+                        Log.member(TAG, joSignIn.optString("errorMsg"))
+                        Log.member(TAG, joSignIn.toString())
                         return@run false
                     }
 
@@ -4404,16 +4404,16 @@ class AntMember : ModelTask() {
                             val activityPeriodName = jo.getString("activityPeriodName")
                             val joSignUp = JSONObject(AntMemberRpcCall.signUp(activityNo))
                             if (ResChecker.checkRes(TAG, joSignUp)) {
-                                Log.other("商家服务🏬[" + activityPeriodName + "开门打卡报名]")
+                                Log.member("商家服务🏬[" + activityPeriodName + "开门打卡报名]")
                                 return@run true
                             } else {
-                                record(TAG, joSignUp.getString("errorMsg"))
-                                record(TAG, joSignUp.toString())
+                                Log.member(TAG, joSignUp.getString("errorMsg"))
+                                Log.member(TAG, joSignUp.toString())
                             }
                         }
                     } else {
-                        record(TAG, "queryActivity")
-                        record(TAG, jo.toString())
+                        Log.member(TAG, "queryActivity")
+                        Log.member(TAG, jo.toString())
                     }
                     delay(500)
                 }
@@ -4436,7 +4436,7 @@ class AntMember : ModelTask() {
                 var jo = JSONObject(s)
                 if (!ResChecker.checkRes(TAG, jo)) {
                     if (!handled) {
-                        record(TAG, "doMerchantSign err:$s")
+                        Log.member(TAG, "doMerchantSign err:$s")
                     }
                     return@run handled
                 }
@@ -4444,12 +4444,12 @@ class AntMember : ModelTask() {
                 val signResult = jo.optString("signInResult")
                 val reward = jo.optString("todayReward")
                 if ("SUCCESS" == signResult) {
-                    Log.other("商家服务🏬[每日签到]#获得积分$reward")
+                    Log.member("商家服务🏬[每日签到]#获得积分$reward")
                     return@run true
                 } else {
                     // 对于「已签到 / 不可签到」等情况，直接视为今日已处理，避免反复请求触发风控
-                    record(TAG, "商家服务🏬[每日签到]#未返回SUCCESS(signInResult=$signResult,todayReward=$reward)")
-                    record(TAG, s)
+                    Log.member(TAG, "商家服务🏬[每日签到]#未返回SUCCESS(signInResult=$signResult,todayReward=$reward)")
+                    Log.member(TAG, s)
                     return@run true
                 }
             } catch (t: Throwable) {
@@ -4468,7 +4468,7 @@ class AntMember : ModelTask() {
                     val taskGroups = queryMerchantTaskGroups()
                     if (taskGroups.isEmpty()) {
                         if (roundIndex == 0) {
-                            record(TAG, "商家服务🏬[积分任务]#未查询到任务列表")
+                            Log.member(TAG, "商家服务🏬[积分任务]#未查询到任务列表")
                         }
                         return@run
                     }
@@ -4515,14 +4515,14 @@ class AntMember : ModelTask() {
                 val s = AntMemberRpcCall.taskReceive(taskCode)
                 var jo = JSONObject(s)
                 if (!ResChecker.checkRes(TAG, jo)) {
-                    record(TAG, "taskReceive $s")
+                    Log.member(TAG, "taskReceive $s")
                     return@run false
                 }
 
                 ActionDelayUtil.humanActionDelay(500L)
                 jo = JSONObject(AntMemberRpcCall.actioncode(actionCode))
                 if (!ResChecker.checkRes(TAG, jo)) {
-                    record(TAG, "taskQueryByActionCode $jo")
+                    Log.member(TAG, "taskQueryByActionCode $jo")
                     return@run false
                 }
 
@@ -4533,13 +4533,13 @@ class AntMember : ModelTask() {
                     }
                     jo = JSONObject(AntMemberRpcCall.produce(actionCode))
                     if (!ResChecker.checkRes(TAG, jo)) {
-                        record(TAG, "taskProduce $jo")
+                        Log.member(TAG, "taskProduce $jo")
                         break
                     }
                     produceSuccess = true
                 }
                 if (produceSuccess) {
-                    Log.other("商家服务🏬[完成任务$title]")
+                    Log.member("商家服务🏬[完成任务$title]")
                 }
                 return@run produceSuccess
             } catch (t: Throwable) {
@@ -4557,17 +4557,17 @@ class AntMember : ModelTask() {
                     if (data?.optBoolean("isOpened") == true) {
                         return@run true
                     }
-                    record(TAG, "商家服务👪未开通")
+                    Log.member(TAG, "商家服务👪未开通")
                     return@run false
                 }
                 val errorCode = jo.optInt("error", jo.optInt("errorNo", 0))
                 val errorTip = jo.optString("errorTip")
                 val errorMessage = jo.optString("errorMessage", jo.optString("errorMsg"))
                 if (errorCode == 1009 || errorTip == "1009" || errorMessage.contains("訪問被拒絕") || errorMessage.contains("访问被拒绝")) {
-                    record(TAG, "商家服务🏬[开门打卡]#transcode.check返回1009，跳过执行")
+                    Log.member(TAG, "商家服务🏬[开门打卡]#transcode.check返回1009，跳过执行")
                     return@run false
                 }
-                record(TAG, "商家服务🏬[开门打卡]#查询开通状态失败:$s")
+                Log.member(TAG, "商家服务🏬[开门打卡]#查询开通状态失败:$s")
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, "canRunMerchantKmdk err:", t)
             }
@@ -4586,16 +4586,16 @@ class AntMember : ModelTask() {
                     "UNRECEIVED" -> {
                         val executeResp = JSONObject(AntMemberRpcCall.zcjSignInExecute())
                         if (!ResChecker.checkRes(TAG, executeResp)) {
-                            record(TAG, "doMerchantZcjSignIn err:$executeResp")
+                            Log.member(TAG, "doMerchantZcjSignIn err:$executeResp")
                             return@run false
                         }
                         val data = executeResp.optJSONObject("data")
                         val reward = data?.optString("todayReward").orEmpty()
                         val widgetName = data?.optString("widgetName").orEmpty().ifEmpty { "招财金签到" }
                         if (reward.isNotEmpty()) {
-                            Log.other("商家服务🏬[$widgetName]#获得积分$reward")
+                            Log.member("商家服务🏬[$widgetName]#获得积分$reward")
                         } else {
-                            Log.other("商家服务🏬[$widgetName]")
+                            Log.member("商家服务🏬[$widgetName]")
                         }
                         return@run true
                     }
@@ -4671,7 +4671,7 @@ class AntMember : ModelTask() {
                 }
                 val jo = JSONObject(AntMemberRpcCall.taskFinish(bizId))
                 if (ResChecker.checkRes(TAG, jo)) {
-                    Log.other("商家服务🏬[$title]#领取积分$reward")
+                    Log.member("商家服务🏬[$title]#领取积分$reward")
                     return@run true
                 }
                 return@run false
@@ -4757,9 +4757,9 @@ class AntMember : ModelTask() {
                     }
                     val pointReceived = receiveResp.optJSONObject("data")?.optString("pointReceived").orEmpty()
                     if (pointReceived.isNotEmpty()) {
-                        Log.other("商家服务🏬领取[$ballName]#获得积分$pointReceived")
+                        Log.member("商家服务🏬领取[$ballName]#获得积分$pointReceived")
                     } else {
-                        Log.other("商家服务🏬领取[$ballName]")
+                        Log.member("商家服务🏬领取[$ballName]")
                     }
                     received = true
                 }
@@ -4782,11 +4782,11 @@ class AntMember : ModelTask() {
                 }
                 val pointReceived = jo.optJSONObject("data")?.optString("pointReceived").orEmpty()
                 if (pointReceived.isNotEmpty()) {
-                    Log.other("商家服务🏬[$title]#领取积分$pointReceived")
+                    Log.member("商家服务🏬[$title]#领取积分$pointReceived")
                 } else if (reward.isNotEmpty()) {
-                    Log.other("商家服务🏬[$title]#领取积分$reward")
+                    Log.member("商家服务🏬[$title]#领取积分$reward")
                 } else {
-                    Log.other("商家服务🏬[$title]#领取积分")
+                    Log.member("商家服务🏬[$title]#领取积分")
                 }
                 return@run true
             } catch (t: Throwable) {
@@ -4849,11 +4849,11 @@ class AntMember : ModelTask() {
                     }
                     // 3. 检查库存
                     if (remainingBudget <= 0) {
-                        record(TAG, "跳过[$name]: 库存不足")
+                        Log.sesame(TAG, "跳过[$name]: 库存不足")
                         continue
                     }
                     // 4. 执行兑换 (这里不加每日限制判断了，只要有库存且勾选了就尝试兑换)
-                    record(TAG, "准备兑换[$name], ID: $id, 需芝麻粒: $pointNeeded")
+                    Log.sesame(TAG, "准备兑换[$name], ID: $id, 需芝麻粒: $pointNeeded")
                     if (exchangeSesameGift(id, name, pointNeeded)) {
                         // 兑换成功后，稍微等待一下
                         delay(2000)
@@ -4866,7 +4866,7 @@ class AntMember : ModelTask() {
 
             // 保存映射关系到本地文件 sesame_gift.json
             IdMapManager.getInstance(SesameGiftMap::class.java).save(userId)
-            record(TAG, "芝麻粒兑换任务处理完毕，商品列表已更新")
+            Log.sesame(TAG, "芝麻粒兑换任务处理完毕，商品列表已更新")
             // 标记今日已完成
             setFlagToday("sesameGrainExchange::done")
 
@@ -4887,7 +4887,7 @@ class AntMember : ModelTask() {
             // 检查结果
             if (ResChecker.checkRes(TAG, jo)) {
                 val recordId = jo.optJSONObject("data")?.optString("awardRecordId", "")
-                Log.other("芝麻粒兑换🛒[成功] $name #消耗${point}粒")
+                Log.sesame("芝麻粒兑换🛒[成功] $name #消耗${point}粒")
                 return true
             } else {
                 val errorMsg = jo.optString("resultView", resString)

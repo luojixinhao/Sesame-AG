@@ -165,11 +165,11 @@ class NewRpcBridge : RpcBridge {
         val wasOffline = io.github.aoguai.sesameag.hook.ApplicationHookConstants.offline
         val cooldownMs = offlineCooldownMs()
         if (!wasOffline) {
-            Notify.updateStatusText(statusText)
+            Notify.updateRunningStatus(statusText)
             if (BaseModel.errNotify.value == true &&
                 shouldNotifyNow(lastErrorNotifyAtMs, errorNotifyIntervalMs)
             ) {
-                Notify.sendErrorNotification(
+                Notify.sendAlert(
                     "${TimeUtil.getTimeStr()} | $notifyTitle",
                     response.orEmpty()
                 )
@@ -512,9 +512,9 @@ class NewRpcBridge : RpcBridge {
                                         "current=$currentErrorCount threshold=$setMaxErrorCount"
                                     )
                                     enteredOffline = true
-                                    Notify.updateStatusText("网络连接异常，已进入离线模式")
+                                    Notify.updateRunningStatus("网络连接异常，已进入离线模式")
                                     if (BaseModel.errNotify.value == true) {
-                                        Notify.sendErrorNotification(
+                                        Notify.sendAlert(
                                             "${TimeUtil.getTimeStr()} | 网络异常次数超过阈值[$setMaxErrorCount]",
                                             response
                                         )
@@ -524,7 +524,7 @@ class NewRpcBridge : RpcBridge {
                                 if (BaseModel.errNotify.value == true &&
                                     shouldNotifyNow(lastErrorNotifyAtMs, errorNotifyIntervalMs)
                                 ) {
-                                    Notify.sendErrorNotification(
+                                    Notify.sendAlert(
                                         "${TimeUtil.getTimeStr()} | 网络异常: $methodName",
                                         response
                                     )

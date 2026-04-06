@@ -17,6 +17,7 @@ import io.github.aoguai.sesameag.ui.theme.AppTheme
 import io.github.aoguai.sesameag.ui.theme.ThemeManager
 import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.Files
+import io.github.aoguai.sesameag.util.LogChannel
 import io.github.aoguai.sesameag.util.ToastUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
 
@@ -72,7 +73,7 @@ class ManualTaskActivity : ComponentActivity() {
     }
 
     private fun openRecordLog() {
-        val logFile = Files.getRecordLogFile()
+        val logFile = Files.getLogFile(LogChannel.RECORD)
         if (!logFile.exists()) {
             ToastUtil.showToast(this, "日志文件尚未生成")
             return

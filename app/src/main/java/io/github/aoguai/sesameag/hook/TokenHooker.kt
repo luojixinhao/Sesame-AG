@@ -68,7 +68,7 @@ object TokenHooker {
             vipData.add("AntFarmReferToken", token)
 
             if (vipData.save(userId)) {
-                Log.other(TAG, "🎁 捕获到蚂蚁庄园 referToken 并已保存, uid=$userId")
+                Log.farm(TAG, "🎁 捕获到蚂蚁庄园 referToken 并已保存, uid=$userId")
             } else {
                 Log.error(TAG, "保存 vipdata.json 失败, uid=$userId")
             }

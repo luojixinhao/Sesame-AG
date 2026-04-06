@@ -112,12 +112,12 @@ object Privilege {
 
     fun studentSignInRedEnvelope() {
         if (!isSignInTimeValid()) {
-            Log.record("$PREFIX_SIGN 5点前不执行签到")
+            Log.forest("$PREFIX_SIGN 5点前不执行签到")
             return
         }
 
         if (Status.hasFlagToday(FLAG_STUDENT_TASK)) {
-            Log.record("$PREFIX_SIGN 今日已完成签到")
+            Log.forest("$PREFIX_SIGN 今日已完成签到")
             return
         }
 
@@ -143,7 +143,7 @@ object Privilege {
         }
 
         if (result.optString("resultCode") != RPC_SUCCESS) {
-            Log.record("$PREFIX_SIGN 查询失败：${result.optString("resultDesc")}")
+            Log.forest("$PREFIX_SIGN 查询失败：${result.optString("resultDesc")}")
             return
         }
 

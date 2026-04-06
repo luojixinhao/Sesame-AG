@@ -9,13 +9,13 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 日志工具类，负责初始化和管理各种类型的日志记录器，并提供日志输出方法。
+ * 日志工具类，负责统一日志通道与模块分层。
  */
 object Log {
-    private const val MAX_DUPLICATE_ERRORS = 3 // 最多打印3次相同错误
+    private const val MAX_DUPLICATE_ERRORS = 3
 
-    // 错误去重机制
     private val errorCountMap = ConcurrentHashMap<String, AtomicInteger>()
+    private val loggerMap: Map<LogChannel, Logger>
 
     private enum class Severity {
         DEBUG,
@@ -24,20 +24,11 @@ object Log {
         ERROR
     }
 
-    private val loggerMap: Map<LogChannel, Logger>
-
     init {
-        // 🔥 1. 立即初始化 Logcat，确保在任何 Context 到来之前控制台可用
         Logback.initLogcatOnly()
-
-        // 2. 初始化 Logger 实例 (此时它们已经有了 Logcat 能力)
         loggerMap = LogCatalog.channels.associateWith { LoggerFactory.getLogger(it.loggerName) }
     }
 
-    /**
-     * 🔥 新增初始化方法
-     * 在这里传入 Context，追加文件日志功能
-     */
     @JvmStatic
     fun init(context: Context) {
         try {
@@ -47,11 +38,7 @@ object Log {
         }
     }
 
-    // --- 日志方法 ---
-
-    private fun getLogger(channel: LogChannel): Logger {
-        return loggerMap.getValue(channel)
-    }
+    private fun getLogger(channel: LogChannel): Logger = loggerMap.getValue(channel)
 
     private fun formatTaggedMessage(tag: String, msg: String): String = "[$tag]: $msg"
 
@@ -83,6 +70,10 @@ object Log {
         logRaw(channel, severity, msg)
     }
 
+    private fun business(channel: LogChannel, msg: String) {
+        write(channel, Severity.INFO, msg)
+    }
+
     @JvmStatic
     fun system(msg: String) {
         write(LogChannel.SYSTEM, Severity.INFO, msg)
@@ -90,7 +81,7 @@ object Log {
 
     @JvmStatic
     fun system(tag: String, msg: String) {
-        system("[$tag]: $msg")
+        system(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -100,9 +91,8 @@ object Log {
 
     @JvmStatic
     fun runtime(tag: String, msg: String) {
-        runtime("[$tag]: $msg")
+        runtime(formatTaggedMessage(tag, msg))
     }
-
 
     @JvmStatic
     fun record(msg: String) {
@@ -111,22 +101,52 @@ object Log {
 
     @JvmStatic
     fun record(tag: String, msg: String) {
-        record("[$tag]: $msg")
+        record(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun summary(msg: String) {
+        write(LogChannel.SUMMARY, Severity.INFO, msg)
+    }
+
+    @JvmStatic
+    fun summary(tag: String, msg: String) {
+        summary(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun common(msg: String) {
+        business(LogChannel.COMMON, msg)
+    }
+
+    @JvmStatic
+    fun common(tag: String, msg: String) {
+        common(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
     fun forest(msg: String) {
-        write(LogChannel.FOREST, Severity.DEBUG, msg)
+        business(LogChannel.FOREST, msg)
     }
 
     @JvmStatic
     fun forest(tag: String, msg: String) {
-        forest("[$tag]: $msg")
+        forest(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun orchard(msg: String) {
+        business(LogChannel.ORCHARD, msg)
+    }
+
+    @JvmStatic
+    fun orchard(tag: String, msg: String) {
+        orchard(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
     fun farm(msg: String) {
-        write(LogChannel.FARM, Severity.DEBUG, msg)
+        business(LogChannel.FARM, msg)
     }
 
     @JvmStatic
@@ -135,13 +155,63 @@ object Log {
     }
 
     @JvmStatic
-    fun other(msg: String) {
-        write(LogChannel.OTHER, Severity.DEBUG, msg)
+    fun stall(msg: String) {
+        business(LogChannel.STALL, msg)
     }
 
     @JvmStatic
-    fun other(tag: String, msg: String) {
-        other("[$tag]: $msg")
+    fun stall(tag: String, msg: String) {
+        stall(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun ocean(msg: String) {
+        business(LogChannel.OCEAN, msg)
+    }
+
+    @JvmStatic
+    fun ocean(tag: String, msg: String) {
+        ocean(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun member(msg: String) {
+        business(LogChannel.MEMBER, msg)
+    }
+
+    @JvmStatic
+    fun member(tag: String, msg: String) {
+        member(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun sports(msg: String) {
+        business(LogChannel.SPORTS, msg)
+    }
+
+    @JvmStatic
+    fun sports(tag: String, msg: String) {
+        sports(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun greenFinance(msg: String) {
+        business(LogChannel.GREEN_FINANCE, msg)
+    }
+
+    @JvmStatic
+    fun greenFinance(tag: String, msg: String) {
+        greenFinance(formatTaggedMessage(tag, msg))
+    }
+
+    @JvmStatic
+    fun sesame(msg: String) {
+        business(LogChannel.SESAME_CREDIT, msg)
+    }
+
+    @JvmStatic
+    fun sesame(tag: String, msg: String) {
+        sesame(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -151,7 +221,7 @@ object Log {
 
     @JvmStatic
     fun debug(tag: String, msg: String) {
-        debug("[$tag]: $msg")
+        debug(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -161,7 +231,7 @@ object Log {
 
     @JvmStatic
     fun error(tag: String, msg: String) {
-        error("[$tag]: $msg")
+        error(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -171,7 +241,7 @@ object Log {
 
     @JvmStatic
     fun capture(tag: String, msg: String) {
-        capture("[$tag]: $msg")
+        capture(formatTaggedMessage(tag, msg))
     }
 
     @JvmStatic
@@ -209,18 +279,12 @@ object Log {
         write(LogChannel.ERROR, Severity.ERROR, finalMsg)
     }
 
-
-    /**
-     * 检查是否应该打印此错误（去重机制）
-     */
     private fun shouldSkipDuplicateError(th: Throwable?): Boolean {
-        if (th == null) return false
+        if (th == null) {
+            return false
+        }
 
-        // 提取错误特征
-        var errorSignature = th.javaClass.simpleName + ":" +
-                (th.message?.take(50) ?: "null")
-
-        // 特殊处理：JSON解析空字符串错误
+        var errorSignature = th.javaClass.simpleName + ":" + (th.message?.take(50) ?: "null")
         if (th.message?.contains("End of input at character 0") == true) {
             errorSignature = "JSONException:EmptyResponse"
         }
@@ -228,13 +292,11 @@ object Log {
         val count = errorCountMap.computeIfAbsent(errorSignature) { AtomicInteger(0) }
         val currentCount = count.incrementAndGet()
 
-        // 如果是第3次，记录一个汇总信息
         if (currentCount == MAX_DUPLICATE_ERRORS) {
-            record("⚠️ 错误【$errorSignature】已出现${currentCount}次，后续将不再打印详细堆栈")
+            summary("错误去重", "错误【$errorSignature】已出现${currentCount}次，后续不再打印详细堆栈")
             return false
         }
 
-        // 超过最大次数后不再打印
         return currentCount > MAX_DUPLICATE_ERRORS
     }
 
@@ -260,13 +322,17 @@ object Log {
 
     @JvmStatic
     fun printStackTrace(th: Throwable) {
-        if (shouldSkipDuplicateError(th)) return
+        if (shouldSkipDuplicateError(th)) {
+            return
+        }
         error(buildStackTraceMessage(th = th))
     }
 
     @JvmStatic
     fun printStackTrace(context: String, th: Throwable) {
-        if (shouldSkipDuplicateError(th)) return
+        if (shouldSkipDuplicateError(th)) {
+            return
+        }
         val message = if (shouldTreatContextAsTag(context)) {
             buildStackTraceMessage(tag = context, th = th)
         } else {
@@ -277,14 +343,15 @@ object Log {
 
     @JvmStatic
     fun printStackTrace(tag: String, msg: String, th: Throwable) {
-        if (shouldSkipDuplicateError(th)) return
+        if (shouldSkipDuplicateError(th)) {
+            return
+        }
         error(buildStackTraceMessage(tag = tag, msg = msg, th = th))
     }
 
     @JvmStatic
     fun printStack(tag: String) {
         val stackTrace = "stack: " + android.util.Log.getStackTraceString(Exception("获取当前堆栈$tag:"))
-        record(stackTrace)
+        debug(stackTrace)
     }
 }
-

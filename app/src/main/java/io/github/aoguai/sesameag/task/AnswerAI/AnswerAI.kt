@@ -8,6 +8,8 @@ import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.StringModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.TextModelField
 import io.github.aoguai.sesameag.util.Log
+import io.github.aoguai.sesameag.util.LogCatalog
+import io.github.aoguai.sesameag.util.LogChannel
 
 class AnswerAI : Model() {
 
@@ -146,14 +148,6 @@ class AnswerAI : Model() {
         answerAIInterface = null
     }
 
-    private fun selectlogger(flag: String, msg: String) {
-        when (flag) {
-            "farm" -> Log.farm(msg)
-            "forest" -> Log.forest(msg)
-            else -> Log.other(msg)
-        }
-    }
-
     companion object {
         private val TAG = AnswerAI::class.java.simpleName
         private const val QUESTION_LOG_FORMAT = "题目📒 [%s] | 选项: %s"
@@ -171,24 +165,48 @@ class AnswerAI : Model() {
             return (aiType.value ?: AIType.TONGYI).coerceIn(0, AIType.nickNames.lastIndex)
         }
 
+        private fun resolveLogChannel(flag: String): LogChannel {
+            val channel = LogCatalog.findByLoggerName(flag.trim()) ?: return LogChannel.COMMON
+            return when (channel) {
+                LogChannel.COMMON,
+                LogChannel.FOREST,
+                LogChannel.ORCHARD,
+                LogChannel.FARM,
+                LogChannel.STALL,
+                LogChannel.OCEAN,
+                LogChannel.MEMBER,
+                LogChannel.SPORTS,
+                LogChannel.GREEN_FINANCE,
+                LogChannel.SESAME_CREDIT -> channel
+                else -> LogChannel.COMMON
+            }
+        }
+
+        private fun logByFlag(flag: String, msg: String) {
+            when (resolveLogChannel(flag)) {
+                LogChannel.FARM -> Log.farm(msg)
+                LogChannel.FOREST -> Log.forest(msg)
+                LogChannel.ORCHARD -> Log.orchard(msg)
+                LogChannel.STALL -> Log.stall(msg)
+                LogChannel.OCEAN -> Log.ocean(msg)
+                LogChannel.MEMBER -> Log.member(msg)
+                LogChannel.SPORTS -> Log.sports(msg)
+                LogChannel.GREEN_FINANCE -> Log.greenFinance(msg)
+                LogChannel.SESAME_CREDIT -> Log.sesame(msg)
+                else -> Log.common(msg)
+            }
+        }
+
         @JvmStatic
         fun getAnswer(text: String?, answerList: List<String>?, flag: String): String {
             if (text == null || answerList == null) {
-                when (flag) {
-                    "farm" -> Log.farm("问题或答案列表为空")
-                    "forest" -> Log.forest("问题或答案列表为空")
-                    else -> Log.other("问题或答案列表为空")
-                }
+                logByFlag(flag, "问题或答案列表为空")
                 return ""
             }
             var answerStr = ""
             try {
                 val msg = String.format(QUESTION_LOG_FORMAT, text, answerList)
-                when (flag) {
-                    "farm" -> Log.farm(msg)
-                    "forest" -> Log.forest(msg)
-                    else -> Log.other(msg)
-                }
+                logByFlag(flag, msg)
                 
                 if (enable && answerAIInterface != null) {
                     val answer = answerAIInterface?.getAnswer(text, answerList)
@@ -200,22 +218,14 @@ class AnswerAI : Model() {
                             AIType.nickNames[getSafeAiType()],
                             answerAIInterface?.getModelName() ?: ""
                         )
-                        when (flag) {
-                            "farm" -> Log.farm(logMsg)
-                            "forest" -> Log.forest(logMsg)
-                            else -> Log.other(logMsg)
-                        }
+                        logByFlag(flag, logMsg)
                     } else {
                         Log.error(ERROR_AI_ANSWER)
                     }
                 } else if (answerList.isNotEmpty()) {
                     answerStr = answerList[0]
                     val logMsg = String.format(NORMAL_ANSWER_LOG_FORMAT, answerStr)
-                    when (flag) {
-                        "farm" -> Log.farm(logMsg)
-                        "forest" -> Log.forest(logMsg)
-                        else -> Log.other(logMsg)
-                    }
+                    logByFlag(flag, logMsg)
                 }
             } catch (t: Throwable) {
                 Log.printStackTrace(TAG, "AI获取答案异常:", t)

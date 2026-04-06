@@ -1,32 +1,262 @@
 package io.github.aoguai.sesameag.util
 
+enum class LogModuleDomain(val displayName: String) {
+    COMMON("通用"),
+    FOREST("蚂蚁森林"),
+    ORCHARD("芭芭农场"),
+    FARM("蚂蚁庄园"),
+    STALL("蚂蚁新村"),
+    OCEAN("神奇海洋"),
+    MEMBER("会员"),
+    SPORTS("运动"),
+    GREEN_FINANCE("绿色经营"),
+    SESAME_CREDIT("芝麻信用"),
+    SYSTEM("系统");
+}
+
+enum class LogTechKind(val displayName: String) {
+    BUSINESS("业务"),
+    RECORD("总览"),
+    SUMMARY("摘要"),
+    RUNTIME("运行时"),
+    DEBUG("调试"),
+    ERROR("错误"),
+    CAPTURE("抓包"),
+    SYSTEM("系统");
+}
+
+enum class LogViewerGroup(val displayName: String) {
+    OVERVIEW("总览"),
+    MODULES("业务模块"),
+    TECHNICAL("技术排障");
+}
+
+data class LogViewerSection(
+    val group: LogViewerGroup,
+    val channels: List<LogChannel>
+)
+
 enum class LogChannel(
     val loggerName: String,
+    val displayName: String,
+    val moduleDomain: LogModuleDomain,
+    val techKind: LogTechKind,
+    val description: String,
+    val viewerGroup: LogViewerGroup? = null,
     val mirrorToRecord: Boolean = false,
     val visibleInViewer: Boolean = false
 ) {
-    SYSTEM("system"),
-    RUNTIME("runtime"),
-    RECORD("record", visibleInViewer = true),
-    DEBUG("debug"),
-    FOREST("forest", mirrorToRecord = true, visibleInViewer = true),
-    FARM("farm", mirrorToRecord = true, visibleInViewer = true),
-    OTHER("other", mirrorToRecord = true, visibleInViewer = true),
-    ERROR("error", mirrorToRecord = true, visibleInViewer = true),
-    CAPTURE("capture", visibleInViewer = true),
-    CAPTCHA("captcha");
+    SYSTEM(
+        loggerName = "system",
+        displayName = "系统日志",
+        moduleDomain = LogModuleDomain.SYSTEM,
+        techKind = LogTechKind.SYSTEM,
+        description = "模块内部系统日志",
+    ),
+    RECORD(
+        loggerName = "record",
+        displayName = "全部日志",
+        moduleDomain = LogModuleDomain.COMMON,
+        techKind = LogTechKind.RECORD,
+        description = "聚合后的总览日志，适合日常查看执行过程",
+        viewerGroup = LogViewerGroup.OVERVIEW,
+        visibleInViewer = true,
+    ),
+    SUMMARY(
+        loggerName = "summary",
+        displayName = "执行摘要",
+        moduleDomain = LogModuleDomain.COMMON,
+        techKind = LogTechKind.SUMMARY,
+        description = "任务调度与执行统计摘要",
+        viewerGroup = LogViewerGroup.OVERVIEW,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    COMMON(
+        loggerName = "common",
+        displayName = "通用日志",
+        moduleDomain = LogModuleDomain.COMMON,
+        techKind = LogTechKind.BUSINESS,
+        description = "未归属到特定玩法模块的通用业务日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true
+    ),
+    FOREST(
+        loggerName = "forest",
+        displayName = "森林日志",
+        moduleDomain = LogModuleDomain.FOREST,
+        techKind = LogTechKind.BUSINESS,
+        description = "蚂蚁森林与保护地相关业务日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    ORCHARD(
+        loggerName = "orchard",
+        displayName = "农场日志",
+        moduleDomain = LogModuleDomain.ORCHARD,
+        techKind = LogTechKind.BUSINESS,
+        description = "芭芭农场施肥、肥料与果树相关日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    FARM(
+        loggerName = "farm",
+        displayName = "庄园日志",
+        moduleDomain = LogModuleDomain.FARM,
+        techKind = LogTechKind.BUSINESS,
+        description = "蚂蚁庄园、小鸡乐园、家庭与美食相关日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    STALL(
+        loggerName = "stall",
+        displayName = "新村日志",
+        moduleDomain = LogModuleDomain.STALL,
+        techKind = LogTechKind.BUSINESS,
+        description = "蚂蚁新村摆摊、罚单、助力与任务相关日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    OCEAN(
+        loggerName = "ocean",
+        displayName = "海洋日志",
+        moduleDomain = LogModuleDomain.OCEAN,
+        techKind = LogTechKind.BUSINESS,
+        description = "神奇海洋、海域推进与碎片合成相关日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    MEMBER(
+        loggerName = "member",
+        displayName = "会员日志",
+        moduleDomain = LogModuleDomain.MEMBER,
+        techKind = LogTechKind.BUSINESS,
+        description = "会员积分、黄金票与会员任务相关日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    SPORTS(
+        loggerName = "sports",
+        displayName = "运动日志",
+        moduleDomain = LogModuleDomain.SPORTS,
+        techKind = LogTechKind.BUSINESS,
+        description = "运动步数、跑图、健康岛与联动任务日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    GREEN_FINANCE(
+        loggerName = "green_finance",
+        displayName = "绿色经营日志",
+        moduleDomain = LogModuleDomain.GREEN_FINANCE,
+        techKind = LogTechKind.BUSINESS,
+        description = "绿色经营金币、打卡、捐助与任务日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    SESAME_CREDIT(
+        loggerName = "sesame_credit",
+        displayName = "芝麻信用日志",
+        moduleDomain = LogModuleDomain.SESAME_CREDIT,
+        techKind = LogTechKind.BUSINESS,
+        description = "芝麻信用、芝麻粒与信用玩法相关日志",
+        viewerGroup = LogViewerGroup.MODULES,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    RUNTIME(
+        loggerName = "runtime",
+        displayName = "运行时日志",
+        moduleDomain = LogModuleDomain.COMMON,
+        techKind = LogTechKind.RUNTIME,
+        description = "底层桥接、缓存与内部诊断日志",
+        viewerGroup = LogViewerGroup.TECHNICAL,
+        visibleInViewer = true,
+    ),
+    DEBUG(
+        loggerName = "debug",
+        displayName = "调试日志",
+        moduleDomain = LogModuleDomain.COMMON,
+        techKind = LogTechKind.DEBUG,
+        description = "RPC 调试工具与开发排障辅助日志",
+        viewerGroup = LogViewerGroup.TECHNICAL,
+        visibleInViewer = true,
+    ),
+    ERROR(
+        loggerName = "error",
+        displayName = "错误日志",
+        moduleDomain = LogModuleDomain.COMMON,
+        techKind = LogTechKind.ERROR,
+        description = "异常、失败、风控与错误堆栈日志",
+        viewerGroup = LogViewerGroup.TECHNICAL,
+        mirrorToRecord = true,
+        visibleInViewer = true,
+    ),
+    CAPTURE(
+        loggerName = "capture",
+        displayName = "抓包日志",
+        moduleDomain = LogModuleDomain.COMMON,
+        techKind = LogTechKind.CAPTURE,
+        description = "Hook 请求响应、自定义 RPC 与抓包调试日志",
+        viewerGroup = LogViewerGroup.TECHNICAL,
+        visibleInViewer = true,
+    );
 
     val fileName: String
         get() = "$loggerName.log"
+
+    fun matchesLoggerName(value: String?): Boolean {
+        if (value.isNullOrBlank()) {
+            return false
+        }
+        return loggerName.equals(value, ignoreCase = true)
+    }
 }
 
 object LogCatalog {
     val channels: List<LogChannel> = LogChannel.values().toList()
 
     @JvmStatic
-    fun loggerNames(): List<String> = channels.map { it.loggerName }
+    fun loggerNames(): List<String> = channels.map { it.loggerName }.distinct()
 
     @JvmStatic
-    fun fileName(loggerName: String): String = "${loggerName}.log"
-}
+    fun viewerSections(): List<LogViewerSection> {
+        return LogViewerGroup.values().mapNotNull { group ->
+            val groupChannels = channels.filter { it.visibleInViewer && it.viewerGroup == group }
+            if (groupChannels.isEmpty()) {
+                null
+            } else {
+                LogViewerSection(group, groupChannels)
+            }
+        }
+    }
 
+    @JvmStatic
+    fun visibleChannels(): List<LogChannel> = channels.filter { it.visibleInViewer }
+
+    @JvmStatic
+    fun findByLoggerName(loggerName: String?): LogChannel? {
+        return channels.firstOrNull { it.matchesLoggerName(loggerName) }
+    }
+
+    @JvmStatic
+    fun findByFileName(fileName: String?): LogChannel? {
+        if (fileName.isNullOrBlank()) {
+            return null
+        }
+        return channels.firstOrNull { channel -> channel.fileName.equals(fileName, ignoreCase = true) }
+    }
+
+    @JvmStatic
+    fun fileName(loggerName: String): String {
+        return findByLoggerName(loggerName)?.fileName ?: "${loggerName}.log"
+    }
+}

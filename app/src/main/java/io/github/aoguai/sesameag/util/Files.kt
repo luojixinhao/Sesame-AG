@@ -411,30 +411,16 @@ object Files {
     }
 
     @JvmStatic
-    fun getLogFile(logName: String): String {
-        return LogCatalog.fileName(logName)
+    fun getLogFile(channel: LogChannel): File = ensureLogFile(channel.fileName)
+
+    @JvmStatic
+    fun getLogFileByLoggerName(loggerName: String?): File? {
+        val channel = LogCatalog.findByLoggerName(loggerName) ?: return null
+        return getLogFile(channel)
     }
 
     @JvmStatic
-    fun getRecordLogFile(): File = ensureLogFile(LogChannel.RECORD.fileName)
-
-    @JvmStatic
-    fun getDebugLogFile(): File = ensureLogFile(LogChannel.DEBUG.fileName)
-
-    @JvmStatic
-    fun getCaptureLogFile(): File = ensureLogFile(LogChannel.CAPTURE.fileName)
-
-    @JvmStatic
-    fun getForestLogFile(): File = ensureLogFile(LogChannel.FOREST.fileName)
-
-    @JvmStatic
-    fun getFarmLogFile(): File = ensureLogFile(LogChannel.FARM.fileName)
-
-    @JvmStatic
-    fun getOtherLogFile(): File = ensureLogFile(LogChannel.OTHER.fileName)
-
-    @JvmStatic
-    fun getErrorLogFile(): File = ensureLogFile(LogChannel.ERROR.fileName)
+    fun getVisibleLogChannels(): List<LogChannel> = LogCatalog.visibleChannels()
 
     @JvmStatic
     fun close(c: Closeable?) {

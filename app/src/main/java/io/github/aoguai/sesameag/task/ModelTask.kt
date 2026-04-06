@@ -8,8 +8,8 @@ import io.github.aoguai.sesameag.model.ModelFields
 import io.github.aoguai.sesameag.model.ModelType
 import io.github.aoguai.sesameag.task.antForest.AntForest
 import io.github.aoguai.sesameag.util.Log
-import io.github.aoguai.sesameag.util.Notify.setStatusTextExec
-import io.github.aoguai.sesameag.util.Notify.updateNextExecText
+import io.github.aoguai.sesameag.util.Notify.updateRunningStatus
+import io.github.aoguai.sesameag.util.Notify.updateRunningNextExec
 import io.github.aoguai.sesameag.util.StringUtil
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -253,7 +253,7 @@ abstract class ModelTask : Model() {
                 try {
                     isRunning = true
                     addRunCents()
-                    setStatusTextExec(getName())
+                    updateRunningStatus("${getName()?.ifBlank { "任务" } ?: "任务"} 运行中")
                     executeMultiRoundTask(rounds)
                 } catch (_: CancellationException) {
                     // 协程取消属于正常控制流程（如停止任务/切换用户），不视为错误
@@ -262,7 +262,7 @@ abstract class ModelTask : Model() {
                     Log.printStackTrace("startTask err: ${getName()}", e)
                 } finally {
                     isRunning = false
-                    updateNextExecText(-1)
+                    updateRunningNextExec(-1)
                 }
             }
         }
@@ -277,7 +277,7 @@ abstract class ModelTask : Model() {
         
         for (round in 1..rounds) {
             if (getName() != "MAIN_TASK") {
-                Log.record(TAG, "开始执行第${round}轮任务: ${getName()}")
+                Log.debug(TAG, "开始执行第${round}轮任务: ${getName()}")
             }
             // 无论什么模式，都使用顺序执行
             executeSequential(round, stats)
@@ -292,8 +292,8 @@ abstract class ModelTask : Model() {
         // 完成统计，补充结束时间
         stats.complete()
         if (getName() != "MAIN_TASK") {
-            Log.record(TAG, "任务 ${getName()} 完成，总耗时: ${endTime - startTime}ms")
-            Log.record(TAG, stats.summary)
+            Log.debug(TAG, "任务 ${getName()} 完成，总耗时: ${endTime - startTime}ms")
+            Log.debug(TAG, stats.summary)
         }
     }
 
@@ -308,7 +308,7 @@ abstract class ModelTask : Model() {
         } catch (_: CancellationException) {
             // 本轮被取消，记录为跳过而非失败
             stats.recordSkipped("${getName()}-Round$round")
-            Log.record(TAG, "任务本轮被取消: ${getName()}-Round$round")
+            Log.debug(TAG, "任务本轮被取消: ${getName()}-Round$round")
         } catch (e: Exception) {
             stats.recordTaskEnd("${getName()}-Round$round", false)
             throw e

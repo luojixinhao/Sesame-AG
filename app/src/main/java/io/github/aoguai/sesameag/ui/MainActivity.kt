@@ -32,6 +32,7 @@ import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.IconManager
 import io.github.aoguai.sesameag.util.Log
+import io.github.aoguai.sesameag.util.LogChannel
 import io.github.aoguai.sesameag.util.PermissionUtil
 import io.github.aoguai.sesameag.util.ToastUtil
 import io.github.aoguai.sesameag.util.maps.UserMap
@@ -119,6 +120,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Deprecated(
+        message = "Overrides deprecated framework callback; retained for the current permission flow."
+    )
+    @Suppress("DEPRECATION")
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,
@@ -134,15 +139,9 @@ class MainActivity : ComponentActivity() {
      */
     sealed class MainUiEvent {
         data object RefreshOneWord : MainUiEvent()
-        data object OpenForestLog : MainUiEvent()
-        data object OpenFarmLog : MainUiEvent()
+        data class OpenLog(val channel: LogChannel) : MainUiEvent()
         data object OpenGithub : MainUiEvent()
-        data object OpenErrorLog : MainUiEvent()
-        data object OpenOtherLog : MainUiEvent()
-        data object OpenAllLog : MainUiEvent()
-        data object OpenDebugLog : MainUiEvent()
         data class ToggleIconHidden(val isHidden: Boolean) : MainUiEvent()
-        data object OpenCaptureLog : MainUiEvent()
         data object OpenExtend : MainUiEvent()
         data object ClearConfig : MainUiEvent()
     }
@@ -153,13 +152,8 @@ class MainActivity : ComponentActivity() {
     private fun handleEvent(event: MainUiEvent) {
         when (event) {
             MainUiEvent.RefreshOneWord -> viewModel.fetchOneWord()
-            MainUiEvent.OpenForestLog -> openLogFile(Files.getForestLogFile())
-            MainUiEvent.OpenFarmLog -> openLogFile(Files.getFarmLogFile())
-            MainUiEvent.OpenOtherLog -> openLogFile(Files.getOtherLogFile())
+            is MainUiEvent.OpenLog -> openLogChannel(event.channel)
             MainUiEvent.OpenGithub -> openUrl(General.PROJECT_HOMEPAGE_URL)
-            MainUiEvent.OpenErrorLog -> openLogFile(Files.getErrorLogFile())
-            MainUiEvent.OpenAllLog -> openLogFile(Files.getRecordLogFile())
-            MainUiEvent.OpenDebugLog -> openLogFile(Files.getDebugLogFile())
             is MainUiEvent.ToggleIconHidden -> {
                 val shouldHide = event.isHidden
                 getSharedPreferences(PREFERENCES_KEY, MODE_PRIVATE).edit { putBoolean("is_icon_hidden", shouldHide) }
@@ -167,7 +161,6 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this, "设置已保存，可能需要重启桌面才能生效", Toast.LENGTH_SHORT).show()
             }
 
-            MainUiEvent.OpenCaptureLog -> openLogFile(Files.getCaptureLogFile())
             MainUiEvent.OpenExtend -> startActivity(Intent(this, ExtendActivity::class.java))
             MainUiEvent.ClearConfig -> {
                 // 🔥 这里只负责执行逻辑，不再负责弹窗
@@ -180,6 +173,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun openLogChannel(channel: LogChannel) {
+        openLogFile(Files.getLogFile(channel))
     }
 
     // --- 辅助方法 (替代 BaseActivity) ---

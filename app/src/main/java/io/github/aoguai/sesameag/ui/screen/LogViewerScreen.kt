@@ -105,6 +105,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.aoguai.sesameag.ui.compose.CommonAlertDialog
 import io.github.aoguai.sesameag.ui.viewmodel.LogViewerViewModel
+import io.github.aoguai.sesameag.util.LogCatalog
 import io.github.aoguai.sesameag.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -125,6 +126,7 @@ fun LogViewerScreen(
     val state by viewModel.uiState.collectAsState()
     val floatValue by viewModel.fontSize.collectAsState()
     val currentFontSize = floatValue.sp
+    val fileMeta = remember(filePath) { LogCatalog.findByFileName(File(filePath).name) }
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -252,18 +254,40 @@ fun LogViewerScreen(
                         } else {
                             Column {
                                 Text(
-                                    File(filePath).name,
+                                    fileMeta?.displayName ?: File(filePath).name,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     // ✅ 统一颜色
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    if (state.isExporting) "导出中..." else if (state.isLoading) "Loading..." else "${state.totalCount} lines",
+                                    buildString {
+                                        if (state.isExporting) {
+                                            append("导出中...")
+                                        } else if (state.isLoading) {
+                                            append("Loading...")
+                                        } else {
+                                            append("${state.totalCount} lines")
+                                        }
+                                        fileMeta?.let { meta ->
+                                            append(" · ${meta.moduleDomain.displayName}")
+                                            append(" · ${meta.techKind.displayName}")
+                                            append(" · ${File(filePath).name}")
+                                        }
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     // ✅ 统一颜色
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                fileMeta?.description?.let { description ->
+                                    Text(
+                                        text = description,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }

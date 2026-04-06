@@ -106,11 +106,11 @@ class AntDodo : ModelTask() {
     override fun check(): Boolean {
         return when {
             TaskCommon.IS_ENERGY_TIME -> {
-                Log.record(TAG, "⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
+                Log.forest(TAG, "⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
                 false
             }
             TaskCommon.IS_MODULE_SLEEP_TIME -> {
-                Log.record(TAG, "💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
+                Log.forest(TAG, "💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
                 false
             }
             else -> true
@@ -119,7 +119,7 @@ class AntDodo : ModelTask() {
 
     override fun runJava() {
         try {
-            Log.record(TAG, "执行开始-${getName()}")
+            Log.forest(TAG, "执行开始-${getName()}")
             receiveTaskAward()
             propList()
             collect()
@@ -133,7 +133,7 @@ class AntDodo : ModelTask() {
             Log.runtime(TAG, "start.run err:")
             Log.printStackTrace(TAG, t)
         } finally {
-            Log.record(TAG, "执行结束-${getName()}")
+            Log.forest(TAG, "执行结束-${getName()}")
         }
     }
 
@@ -160,7 +160,7 @@ class AntDodo : ModelTask() {
             if (ResChecker.checkRes(TAG, jo)) {
                 val data = jo.getJSONObject("data")
                 if (data.getBoolean("collect")) {
-                    Log.record(TAG, "神奇物种卡片今日收集完成！")
+                    Log.forest(TAG, "神奇物种卡片今日收集完成！")
                 } else {
                     collectAnimalCard()
                 }
@@ -255,7 +255,7 @@ class AntDodo : ModelTask() {
                 }
                 val jsonResponse = JSONObject(response)
                 if (!ResChecker.checkRes(TAG, jsonResponse)) {
-                    Log.record(TAG, "查询任务列表失败：${jsonResponse.getString("resultDesc")}")
+                    Log.forest(TAG, "查询任务列表失败：${jsonResponse.getString("resultDesc")}")
                     Log.runtime(response)
                     break
                 }
@@ -284,7 +284,7 @@ class AntDodo : ModelTask() {
                                     doubleCheck = true
                                     Log.forest("任务奖励🎖️[$taskTitle]#${awardCount}个")
                                 } else {
-                                    Log.record(TAG, "领取失败，$response")
+                                    Log.forest(TAG, "领取失败，$response")
                                 }
                                 Log.runtime(joAward.toString())
                             }
@@ -300,7 +300,7 @@ class AntDodo : ModelTask() {
                                         Log.forest("物种任务🧾️[$taskTitle]")
                                         doubleCheck = true
                                     } else {
-                                        Log.record(TAG, "完成任务失败，$taskTitle")
+                                        Log.forest(TAG, "完成任务失败，$taskTitle")
                                         badTaskSet.add(taskType)
                                         DataStore.put("badDodoTaskList", badTaskSet)
                                     }
@@ -351,7 +351,7 @@ class AntDodo : ModelTask() {
                         }
                         val joConsume = JSONObject(consumeResponse)
                         if (!ResChecker.checkRes(TAG, joConsume)) {
-                            Log.record(joConsume.getString("resultDesc"))
+                            Log.forest(joConsume.getString("resultDesc"))
                             Log.runtime(joConsume.toString())
                             continue
                         }
@@ -412,7 +412,7 @@ class AntDodo : ModelTask() {
             if (availableFriends.contains(safeUserId)) {
                 return safeUserId
             }
-            Log.record(TAG, "神奇物种送卡跳过[${UserMap.getMaskName(safeUserId) ?: safeUserId}]：对方未开通神奇物种")
+            Log.forest(TAG, "神奇物种送卡跳过[${UserMap.getMaskName(safeUserId) ?: safeUserId}]：对方未开通神奇物种")
         }
         return null
     }

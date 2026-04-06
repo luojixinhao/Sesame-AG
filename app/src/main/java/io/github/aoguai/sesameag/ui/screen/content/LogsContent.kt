@@ -5,55 +5,102 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.Agriculture
-import androidx.compose.material.icons.rounded.AlignVerticalTop
 import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.CardMembership
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Forest
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import io.github.aoguai.sesameag.ui.MainActivity
 import io.github.aoguai.sesameag.ui.screen.components.MenuButton
+import io.github.aoguai.sesameag.util.LogCatalog
+import io.github.aoguai.sesameag.util.LogChannel
 
 @Composable
 fun LogsContent(
     onEvent: (MainActivity.MainUiEvent) -> Unit
 ) {
-    Column(
+    val sections = LogCatalog.viewerSections()
+
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.Center, // 居中显示
+        verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 使用 Grid 布局或者简单的 Row 组合
-        val modifier = Modifier.weight(1f)
+        sections.forEach { section ->
+            item(key = section.group.name) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = section.group.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = section.channels.joinToString(" · ") { it.displayName },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MenuButton(text = "森林日志", icon = Icons.Rounded.Forest, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenForestLog) }
-            MenuButton(text = "农场日志", icon = Icons.Rounded.Agriculture, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenFarmLog) }
+            items(
+                items = section.channels.chunked(2),
+                key = { row -> row.joinToString("-") { it.loggerName } }
+            ) { rowChannels ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    rowChannels.forEach { channel ->
+                        MenuButton(
+                            text = channel.displayName,
+                            icon = iconFor(channel),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            onEvent(MainActivity.MainUiEvent.OpenLog(channel))
+                        }
+                    }
+                    if (rowChannels.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MenuButton(text = "其他日志", icon = Icons.Rounded.AlignVerticalTop, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenOtherLog) }
-            MenuButton(text = "错误日志", icon = Icons.Rounded.ErrorOutline, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenErrorLog) }
+        item {
+            Spacer(Modifier.height(12.dp))
         }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MenuButton(text = "全部日志", icon = Icons.Rounded.Description, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenAllLog) }
-            MenuButton(text = "抓包日志", icon = Icons.Rounded.History, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenCaptureLog) }
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MenuButton(text = "调试日志", icon = Icons.Rounded.BugReport, modifier = modifier) { onEvent(MainActivity.MainUiEvent.OpenDebugLog) }
-            Spacer(modifier)
-        }
+    }
+}
+
+private fun iconFor(channel: LogChannel): ImageVector {
+    return when (channel) {
+        LogChannel.FOREST -> Icons.Rounded.Forest
+        LogChannel.ORCHARD, LogChannel.FARM, LogChannel.STALL -> Icons.Rounded.Agriculture
+        LogChannel.MEMBER -> Icons.Rounded.CardMembership
+        LogChannel.SPORTS -> Icons.AutoMirrored.Rounded.DirectionsRun
+        LogChannel.DEBUG, LogChannel.RUNTIME -> Icons.Rounded.BugReport
+        LogChannel.ERROR -> Icons.Rounded.ErrorOutline
+        LogChannel.CAPTURE -> Icons.Rounded.History
+        else -> Icons.Rounded.Description
     }
 }

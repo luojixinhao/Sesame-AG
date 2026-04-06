@@ -206,7 +206,7 @@ class BaseModel : Model() {
          * 是否开启抓包调试模式
          */
         val debugMode: BooleanModelField = BooleanModelField("debugMode", "开启抓包(基于新接口)", false).withDesc(
-            "开启后启动抓包调试链路与本地调试服务，仅研究排障时建议启用。"
+            "开启后启动抓包调试链路与本地调试服务；Hook/RPC 原始请求响应主要写入抓包日志，调试工具结果写入调试日志。"
         )
 
         /**
@@ -220,15 +220,15 @@ class BaseModel : Model() {
         /**
          * 是否记录record日志
          */
-        val recordLog: BooleanModelField = BooleanModelField("recordLog", "全部 | 记录record日志", true).withDesc(
-            "记录日常任务流程日志，适合查看执行过程；关闭可减少日志体积。"
+        val recordLog: BooleanModelField = BooleanModelField("recordLog", "总览 | 记录 record 日志", true).withDesc(
+            "记录聚合后的总览日志与执行摘要，用于查看调度流程、配置状态和全局生命周期；关闭可减少日志体积。"
         )
 
         /**
          * 是否记录runtime日志
          */
-        val runtimeLog: BooleanModelField = BooleanModelField("runtimeLog", "全部 | 记录runtime日志", false).withDesc(
-            "记录更细的运行时调试日志，排查问题时更有用。"
+        val runtimeLog: BooleanModelField = BooleanModelField("runtimeLog", "技术 | 记录 runtime 日志", false).withDesc(
+            "记录底层桥接、缓存命中、合流与内部诊断日志；默认建议关闭，仅排障时开启。"
         )
 
         /**
@@ -252,8 +252,8 @@ class BaseModel : Model() {
         /**
          * 是否开启状态栏禁删
          */
-        val enableOnGoing: BooleanModelField = BooleanModelField("enableOnGoing", "开启状态栏禁删", false).withDesc(
-            "开启后常驻状态栏通知会标记为不可左滑删除，避免运行中被误清除。"
+        val enableOnGoing: BooleanModelField = BooleanModelField("enableOnGoing", "运行通知不可左滑删除", false).withDesc(
+            "开启后运行状态通知会标记为不可左滑删除，避免执行过程中被误清除。"
         )
 
         val sendHookData: BooleanModelField = BooleanModelField("sendHookData", "启用Hook数据转发", false).withDesc(

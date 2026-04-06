@@ -32,6 +32,7 @@ import io.github.aoguai.sesameag.ui.screen.card.OneWordCard
 import io.github.aoguai.sesameag.ui.screen.card.ServicesStatusCard
 import io.github.aoguai.sesameag.ui.viewmodel.MainViewModel
 import io.github.aoguai.sesameag.util.CommandUtil.ServiceStatus
+import io.github.aoguai.sesameag.util.LogChannel
 import io.github.aoguai.sesameag.util.ToastUtil
 
 @Composable
@@ -128,7 +129,7 @@ fun HomeContent(
                 isLoading = isOneWordLoading,
                 onClick = onOneWordClick,
                 onLongClick = {
-                    onEvent(MainActivity.MainUiEvent.OpenDebugLog)
+                    onEvent(MainActivity.MainUiEvent.OpenLog(LogChannel.DEBUG))
                     ToastUtil.showToast(context, "准备起飞🛫")
                 }
             )

@@ -114,7 +114,7 @@ class AntOrchard : ModelTask() {
 
     override suspend fun runSuspend() {
         try {
-            Log.record(TAG, "执行开始-${getName()}")
+            Log.orchard(TAG, "执行开始-${getName()}")
             skipManurePotCollectThisRound = false
             executeIntervalInt = maxOf(executeInterval.value ?: 0, 500)
 
@@ -122,13 +122,13 @@ class AntOrchard : ModelTask() {
             val indexJson = JSONObject(indexResponse)
 
             if (indexJson.optString("resultCode") != "100") {
-                Log.record(TAG, indexJson.optString("resultDesc", "orchardIndex 调用失败"))
+                Log.orchard(TAG, indexJson.optString("resultDesc", "orchardIndex 调用失败"))
                 return
             }
 
             if (!indexJson.optBoolean("userOpenOrchard", false)) {
                 enableField.value = false
-                Log.farm("请先开启芭芭农场！")
+                Log.orchard("请先开启芭芭农场！")
                 return
             }
 
@@ -220,7 +220,7 @@ class AntOrchard : ModelTask() {
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "start.run err:", t)
         } finally {
-            Log.record(TAG, "执行结束-${getName()}")
+            Log.orchard(TAG, "执行结束-${getName()}")
         }
     }
 
@@ -260,11 +260,11 @@ class AntOrchard : ModelTask() {
         var totalWatered = Status.getIntFlagToday(statusKey) ?: 0
 
         if (!waterToLimit && totalWatered >= targetLimit) {
-            Log.record(TAG, "$sceneName: 今日已完成施肥目标 $totalWatered/$targetLimit")
+            Log.orchard(TAG, "$sceneName: 今日已完成施肥目标 $totalWatered/$targetLimit")
             return
         }
 
-        Log.record(
+        Log.orchard(
             TAG,
             if (waterToLimit) {
                 "开始 $sceneName 任务，当前进度: $totalWatered，目标: 施肥到当日上限"
@@ -317,7 +317,7 @@ class AntOrchard : ModelTask() {
 
                 if (accountInfo != null) {
                     if (happyPoint == null || happyPoint < singleWateringCost) {
-                        Log.record(TAG, "$sceneName 肥料不足: 当前 ${happyPoint ?: 0} < 消耗 $singleWateringCost")
+                        Log.orchard(TAG, "$sceneName 肥料不足: 当前 ${happyPoint ?: 0} < 消耗 $singleWateringCost")
                         return
                     }
                 }
@@ -336,7 +336,7 @@ class AntOrchard : ModelTask() {
                     useBatchSpread = true
                     actualWaterTimes = batchSpreadTimes
                     if (shouldForceBreakthrough) {
-                        Log.record(TAG, "$sceneName 触发199次临界点，开启${batchSpreadTimes}连施肥模式以突破限制")
+                        Log.orchard(TAG, "$sceneName 触发199次临界点，开启${batchSpreadTimes}连施肥模式以突破限制")
                     }
                 }
 
@@ -351,7 +351,7 @@ class AntOrchard : ModelTask() {
                 // 摇钱树特有逻辑：达到上限停止
                 // {{ 修改：增加 P13 状态码判定 (摇钱树施肥已达当日上限) }}
                 if ((resultCode == "P14" || resultCode == "P13") && !isMain) {
-                    Log.record(TAG, "$sceneName 已达持仓金额上限/次数上限，停止施肥")
+                    Log.orchard(TAG, "$sceneName 已达持仓金额上限/次数上限，停止施肥")
                     return
                 }
 
@@ -405,12 +405,12 @@ class AntOrchard : ModelTask() {
                         }
                     }
 
-                    Log.farm("施肥💩[$sceneName] $stageText|累计:$totalWatered")
+                    Log.orchard("施肥💩[$sceneName] $stageText|累计:$totalWatered")
                 } else {
                     // 兜底逻辑
                     totalWatered += actualWaterTimes
                     Status.setIntFlagToday(statusKey, totalWatered)
-                    Log.farm("施肥💩[$sceneName] 成功|累计:$totalWatered")
+                    Log.orchard("施肥💩[$sceneName] 成功|累计:$totalWatered")
                 }
 
                 CoroutineUtils.sleepCompat(500)
@@ -425,7 +425,7 @@ class AntOrchard : ModelTask() {
             }
         } while (waterToLimit || totalWatered < targetLimit)
 
-        Log.record(
+        Log.orchard(
             TAG,
             if (waterToLimit) {
                 "$sceneName 施肥结束，已按当日上限模式停止，最终累计: $totalWatered"
@@ -442,7 +442,7 @@ class AntOrchard : ModelTask() {
             val hour = cal.get(Calendar.HOUR_OF_DAY)
             // 每天7点后尝试领取
             if (hour >= 7 && !Status.hasFlagToday(STATUS_MONEY_TREE_COLLECTED)) {
-                Log.record(TAG, "检测到7点已过，尝试领取摇钱树余额奖励...")
+                Log.orchard(TAG, "检测到7点已过，尝试领取摇钱树余额奖励...")
                 val res = AntOrchardRpcCall.moneyTreeTrigger()
                 val json = JSONObject(res)
                 if (json.optBoolean("success")) {
@@ -451,13 +451,13 @@ class AntOrchard : ModelTask() {
                     val amount = awardInfo?.optString("totalAmount", "0") ?: "0"
 
                     if (amount != "0") {
-                        Log.farm("摇钱树💰[获得余额]#$amount 元")
+                        Log.orchard("摇钱树💰[获得余额]#$amount 元")
                     } else {
-                        Log.record(TAG, "摇钱树暂无奖励可领")
+                        Log.orchard(TAG, "摇钱树暂无奖励可领")
                     }
                     Status.setFlagToday(STATUS_MONEY_TREE_COLLECTED)
                 } else {
-                    Log.record(TAG, "摇钱树奖励领取失败: ${json.toString()}")
+                    Log.orchard(TAG, "摇钱树奖励领取失败: ${json.toString()}")
                 }
             }
         } catch (t: Throwable) {
@@ -471,7 +471,7 @@ class AntOrchard : ModelTask() {
             if (enterSceneResponse.optString("resultCode").isNotEmpty() &&
                 enterSceneResponse.optString("resultCode") != "100"
             ) {
-                Log.record(
+                Log.orchard(
                     TAG,
                     "余额宝体验金任务场景进入异常: ${
                         enterSceneResponse.optString(
@@ -484,7 +484,7 @@ class AntOrchard : ModelTask() {
 
             var queryResponse = JSONObject(AntOrchardRpcCall.queryYebExpGoldMain())
             if (!isYebExpGoldSuccess(queryResponse)) {
-                Log.record(
+                Log.orchard(
                     TAG,
                     "余额宝体验金任务查询失败: ${
                         queryResponse.optString(
@@ -517,7 +517,7 @@ class AntOrchard : ModelTask() {
 
                 val title = getYebExpGoldTaskTitle(task, taskId)
                 if (isYebExpGoldTaskBlacklisted(title, taskId)) {
-                    Log.record(TAG, "跳过黑名单任务[$title]")
+                    Log.orchard(TAG, "跳过黑名单任务[$title]")
                     continue
                 }
                 val successFlag = "$STATUS_YEB_EXP_GOLD_TASK_PREFIX::$taskId"
@@ -552,7 +552,7 @@ class AntOrchard : ModelTask() {
                 handledTask = claimPendingYebExpGoldRewards(queryResponse, taskMap) || handledTask
                 handledTask = handleYebExpGoldExchange(queryResponse) || handledTask
             } else {
-                Log.record(
+                Log.orchard(
                     TAG,
                     "余额宝体验金任务刷新失败: ${
                         queryResponse.optString(
@@ -564,10 +564,10 @@ class AntOrchard : ModelTask() {
             }
 
             if (!handledTask && manualTaskTitles.isEmpty()) {
-                Log.record(TAG, "余额宝体验金任务: 未发现可自动处理项目")
+                Log.orchard(TAG, "余额宝体验金任务: 未发现可自动处理项目")
             }
             if (manualTaskTitles.isNotEmpty()) {
-                Log.record(TAG, "余额宝体验金任务待手动完成: ${manualTaskTitles.joinToString("、")}")
+                Log.orchard(TAG, "余额宝体验金任务待手动完成: ${manualTaskTitles.joinToString("、")}")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "handleYebExpGoldTasks err:", t)
@@ -618,14 +618,14 @@ class AntOrchard : ModelTask() {
             .orEmpty()
         val title = if (amount.isBlank()) "余额宝体验金签到" else "余额宝体验金签到(${amount}元)"
         if (TaskBlacklist.isTaskInBlacklist(title)) {
-            Log.record(TAG, "跳过黑名单任务[$title]")
+            Log.orchard(TAG, "跳过黑名单任务[$title]")
             Status.setFlagToday(STATUS_YEB_EXP_GOLD_SIGN_DONE)
             return false
         }
 
         val signResponse = JSONObject(AntOrchardRpcCall.signInYebExpGold())
         if (!isYebExpGoldSuccess(signResponse)) {
-            Log.record(TAG, "余额宝体验金签到失败: ${getYebExpGoldErrorDesc(signResponse)}")
+            Log.orchard(TAG, "余额宝体验金签到失败: ${getYebExpGoldErrorDesc(signResponse)}")
             manualTaskTitles.add(title)
             return false
         }
@@ -655,13 +655,13 @@ class AntOrchard : ModelTask() {
                     fallbackAmount.isNotBlank() -> fallbackAmount + "元"
                     else -> "成功"
                 }
-                Log.farm("余额宝体验金💰[签到成功]#$rewardText")
+                Log.orchard("余额宝体验金💰[签到成功]#$rewardText")
             }
             return
         }
 
         val rewardText = if (fallbackAmount.isNotBlank()) "${fallbackAmount}元" else "成功"
-        Log.farm("余额宝体验金💰[签到成功]#$rewardText")
+        Log.orchard("余额宝体验金💰[签到成功]#$rewardText")
     }
 
     private fun getYebExpGoldErrorDesc(response: JSONObject): String {
@@ -706,7 +706,7 @@ class AntOrchard : ModelTask() {
 
         val prepareResponse = JSONObject(AntOrchardRpcCall.queryYebExpGoldMain(true, taskId))
         if (!isYebExpGoldSuccess(prepareResponse)) {
-            Log.record(
+            Log.orchard(
                 TAG,
                 "余额宝体验金任务预处理失败[$title]: ${
                     prepareResponse.optString(
@@ -736,7 +736,7 @@ class AntOrchard : ModelTask() {
                     return true
                 }
             }
-            Log.record(
+            Log.orchard(
                 TAG,
                 "余额宝体验金任务领取失败[$title]: ${
                     completeResponse.optString(
@@ -775,7 +775,7 @@ class AntOrchard : ModelTask() {
 
             val title = getYebExpGoldCompletedTitle(rewardItem, taskMap[taskId], taskId)
             if (isYebExpGoldTaskBlacklisted(title, taskId)) {
-                Log.record(TAG, "跳过黑名单任务[$title]")
+                Log.orchard(TAG, "跳过黑名单任务[$title]")
                 continue
             }
             val completeResponse = JSONObject(AntOrchardRpcCall.completeYebExpGoldTask(taskId))
@@ -790,7 +790,7 @@ class AntOrchard : ModelTask() {
                     claimed = true
                     continue
                 }
-                Log.record(
+                Log.orchard(
                     TAG,
                     "余额宝体验金任务领取失败[$title]: ${
                         completeResponse.optString(
@@ -852,7 +852,7 @@ class AntOrchard : ModelTask() {
         }
 
         if (threshold > 0.0 && balance < threshold) {
-            Log.record(
+            Log.orchard(
                 TAG,
                 "余额宝体验金未达兑换门槛: 当前$balanceText，最低需${thresholdText.ifBlank { threshold.toString() }}"
             )
@@ -862,7 +862,7 @@ class AntOrchard : ModelTask() {
 
         val trialAssetResponse = JSONObject(AntOrchardRpcCall.queryYebTrialAsset())
         if (!isYebExpGoldSuccess(trialAssetResponse)) {
-            Log.record(
+            Log.orchard(
                 TAG,
                 "余额宝体验金资产查询失败: ${
                     trialAssetResponse.optString(
@@ -876,14 +876,14 @@ class AntOrchard : ModelTask() {
 
         val trialInfo = getYebTrialInfo(trialAssetResponse)
         if (trialInfo == null) {
-            Log.record(TAG, "余额宝体验金兑换缺少试用资产信息")
+            Log.orchard(TAG, "余额宝体验金兑换缺少试用资产信息")
             return false
         }
 
         val campId = trialInfo.optString("promoCampId")
         val prizeId = trialInfo.optString("promoPrizeId")
         if (campId.isBlank() || prizeId.isBlank()) {
-            Log.record(TAG, "余额宝体验金兑换缺少活动参数")
+            Log.orchard(TAG, "余额宝体验金兑换缺少活动参数")
             return false
         }
 
@@ -895,7 +895,7 @@ class AntOrchard : ModelTask() {
             )
         )
         if (!isYebExpGoldSuccess(exchangeResponse)) {
-            Log.record(
+            Log.orchard(
                 TAG,
                 "余额宝体验金兑换失败: ${
                     exchangeResponse.optString(
@@ -911,13 +911,13 @@ class AntOrchard : ModelTask() {
             ?.optString("equityNo")
             .orEmpty()
         if (couponId.isBlank()) {
-            Log.record(TAG, "余额宝体验金兑换成功但缺少激活凭证")
+            Log.orchard(TAG, "余额宝体验金兑换成功但缺少激活凭证")
             return false
         }
 
         val activeResponse = JSONObject(AntOrchardRpcCall.activeYebTrial(couponId))
         if (!isYebExpGoldSuccess(activeResponse)) {
-            Log.record(
+            Log.orchard(
                 TAG,
                 "余额宝体验金激活失败: ${
                     activeResponse.optString(
@@ -944,7 +944,7 @@ class AntOrchard : ModelTask() {
                 append("[收益:$profitDate]")
             }
         }
-        Log.farm("余额宝体验金💰[兑换激活]#${amountText}元$extraInfo")
+        Log.orchard("余额宝体验金💰[兑换激活]#${amountText}元$extraInfo")
         Status.setFlagToday(STATUS_YEB_EXP_GOLD_EXCHANGE_DONE)
         return true
     }
@@ -981,7 +981,7 @@ class AntOrchard : ModelTask() {
                 }
             }
         } else {
-            Log.record(
+            Log.orchard(
                 TAG,
                 "余额宝体验金任务列表查询失败: ${getYebExpGoldErrorDesc(taskListResponse)}"
             )
@@ -1103,7 +1103,7 @@ class AntOrchard : ModelTask() {
             }
             if (rewardNames.isNotEmpty()) {
                 rewardNames.forEach { prizeName ->
-                    Log.farm("余额宝体验金💰[$title]#$prizeName")
+                    Log.orchard("余额宝体验金💰[$title]#$prizeName")
                 }
                 return
             }
@@ -1116,14 +1116,14 @@ class AntOrchard : ModelTask() {
                 val prizeOrder = prizeSendOrderList.optJSONObject(index) ?: continue
                 val prizeName = prizeOrder.optString("prizeName")
                 if (prizeName.isNotBlank()) {
-                    Log.farm("余额宝体验金💰[$title]#$prizeName")
+                    Log.orchard("余额宝体验金💰[$title]#$prizeName")
                 } else {
-                    Log.farm("余额宝体验金💰[$title]")
+                    Log.orchard("余额宝体验金💰[$title]")
                 }
             }
             return
         }
-        Log.farm("余额宝体验金💰[$title]")
+        Log.orchard("余额宝体验金💰[$title]")
     }
 
     // 辅助方法：施肥后检测肥料礼盒
@@ -1152,7 +1152,7 @@ class AntOrchard : ModelTask() {
                     val setResponse = JSONObject(AntOrchardRpcCall.extraInfoSet(source))
                     if (setResponse.getString("resultCode") == "100") {
                         val typeName = if (from == "water") "礼盒" else "每日"
-                        Log.farm("领取${typeName}肥料💩[${num}g]")
+                        Log.orchard("领取${typeName}肥料💩[${num}g]")
                     }
                 }
             }
@@ -1197,7 +1197,7 @@ class AntOrchard : ModelTask() {
                 val jo2 = ja.getJSONObject(i)
                 if (jo2.getString("itemId") == itemId) {
                     if (!jo2.getBoolean("received")) {
-                        Log.record(TAG, "七日礼包: 发现未领取奖励 (itemId=$itemId)")
+                        Log.orchard(TAG, "七日礼包: 发现未领取奖励 (itemId=$itemId)")
                         val jo3 = JSONObject(AntOrchardRpcCall.drawLottery())
                         if (jo3.getString("resultCode") == "100") {
                             val userEverydayGiftItems = jo3.getJSONObject("lotteryPlusInfo")
@@ -1208,15 +1208,15 @@ class AntOrchard : ModelTask() {
                                 val jo4 = userEverydayGiftItems.getJSONObject(j)
                                 if (jo4.getString("itemId") == itemId) {
                                     val awardCount = jo4.optInt("awardCount", 1)
-                                    Log.farm("七日礼包🎁[获得肥料]#${awardCount}g")
+                                    Log.orchard("七日礼包🎁[获得肥料]#${awardCount}g")
                                     break
                                 }
                             }
                         } else {
-                            Log.record(TAG, jo3.toString())
+                            Log.orchard(TAG, jo3.toString())
                         }
                     } else {
-                        Log.record(TAG, "七日礼包: 今日已领取")
+                        Log.orchard(TAG, "七日礼包: 今日已领取")
                     }
                     break
                 }
@@ -1237,7 +1237,7 @@ class AntOrchard : ModelTask() {
             }
 
             val inTeam = responseJson.optBoolean("inTeam", false)
-            Log.record(TAG, if (inTeam) "当前为农场 team 模式（合种/帮帮种已开启）" else "当前为普通单人农场模式")
+            Log.orchard(TAG, if (inTeam) "当前为农场 team 模式（合种/帮帮种已开启）" else "当前为普通单人农场模式")
 
             if (responseJson.has("signTaskInfo")) {
                 val signTaskInfo = responseJson.getJSONObject("signTaskInfo")
@@ -1265,7 +1265,7 @@ class AntOrchard : ModelTask() {
                 val groupIdInBlacklist = TaskBlacklist.isTaskInBlacklist(groupId)
                 val titleInBlacklist = TaskBlacklist.isTaskInBlacklist(title)
                 if (groupIdInBlacklist || titleInBlacklist) {
-                    Log.record(TAG, "跳过黑名单任务[$title] groupId=$groupId")
+                    Log.orchard(TAG, "跳过黑名单任务[$title] groupId=$groupId")
                     continue
                 }
 
@@ -1277,13 +1277,13 @@ class AntOrchard : ModelTask() {
                         if (isXLightTask(task)) {
                             executeXLightTask(task, title)
                         } else {
-                            Log.record(TAG, "农场任务⏭️[$title] action=VISIT 暂无稳定RPC，跳过")
+                            Log.orchard(TAG, "农场任务⏭️[$title] action=VISIT 暂无稳定RPC，跳过")
                         }
                     }
                     "TRIGGER", "ADD_HOME", "PUSH_SUBSCRIBE" -> {
                         val finishResponse = JSONObject(AntOrchardRpcCall.finishTask(userId, sceneCode, taskId, ORCHARD_SOURCE))
                         if (ResChecker.checkRes(TAG, finishResponse)) {
-                            Log.farm("农场任务🧾[$title]")
+                            Log.orchard("农场任务🧾[$title]")
                         } else {
                             Log.error(TAG, "农场任务🧾[$title]${finishResponse.optString("desc")}")
                         }
@@ -1293,13 +1293,13 @@ class AntOrchard : ModelTask() {
                         collectOrchardManurePotIfNeeded(responseJson)
                     }
                     "ANTFOREST_DEFOLIATION" -> {
-                        Log.record(TAG, "农场联动任务⏭️[森林落叶] 依赖森林模块完成后再领奖")
+                        Log.orchard(TAG, "农场联动任务⏭️[森林落叶] 依赖森林模块完成后再领奖")
                     }
                     "MULTI_STAGE", "P2P_NEW", "SYSTEM_SWITCH", "JUMP", "GAME_CENTER" -> {
-                        Log.record(TAG, "农场任务⏭️[$title] action=$actionType 暂未自动化，已兼容跳过")
+                        Log.orchard(TAG, "农场任务⏭️[$title] action=$actionType 暂未自动化，已兼容跳过")
                     }
                     else -> {
-                        Log.record(TAG, "农场任务⏭️[$title] action=$actionType 暂未支持，已跳过")
+                        Log.orchard(TAG, "农场任务⏭️[$title] action=$actionType 暂未支持，已跳过")
                     }
                 }
             }
@@ -1311,15 +1311,15 @@ class AntOrchard : ModelTask() {
     private fun collectOrchardManurePotIfNeeded(listTaskJson: JSONObject) {
         try {
             if (skipManurePotCollectThisRound) {
-                Log.record(TAG, "庄园鸡屎💩任务：本轮已触发“肥料太少”保护，跳过重复收取")
+                Log.orchard(TAG, "庄园鸡屎💩任务：本轮已触发“肥料太少”保护，跳过重复收取")
                 return
             }
             val manureFactory = listTaskJson.optJSONObject("manureFactory") ?: run {
-                Log.record(TAG, "庄园鸡屎💩任务：缺少 manureFactory 字段，跳过")
+                Log.orchard(TAG, "庄园鸡屎💩任务：缺少 manureFactory 字段，跳过")
                 return
             }
             if (!manureFactory.optBoolean("canCollect", false)) {
-                Log.record(TAG, "庄园鸡屎💩任务：当前不可收取（canCollect=false）")
+                Log.orchard(TAG, "庄园鸡屎💩任务：当前不可收取（canCollect=false）")
                 return
             }
 
@@ -1352,12 +1352,12 @@ class AntOrchard : ModelTask() {
             }
             if (collectTargets.isEmpty()) {
                 if (allPotNos.size >= 3) {
-                    Log.record(
+                    Log.orchard(
                         TAG,
                         "庄园鸡屎💩任务：已识别${allPotNos.size}个池子，但未满足至少3个池子都>1g，跳过收取"
                     )
                 } else {
-                    Log.record(
+                    Log.orchard(
                         TAG,
                         "庄园鸡屎💩任务：未识别到完整三池结构，当前总量${"%.1f".format(totalPotNum)}g未达到>3g兜底门槛，跳过收取"
                     )
@@ -1370,9 +1370,9 @@ class AntOrchard : ModelTask() {
             if (ResChecker.checkRes(TAG, collectResp)) {
                 val collected = collectResp.optInt("collectManurePotNum", 0)
                 if (collected > 0) {
-                    Log.farm("庄园鸡屎💩[收取肥料]#${collected}g")
+                    Log.orchard("庄园鸡屎💩[收取肥料]#${collected}g")
                 } else {
-                    Log.record(TAG, "庄园鸡屎💩任务：已触发收取，但本次为0g")
+                    Log.orchard(TAG, "庄园鸡屎💩任务：已触发收取，但本次为0g")
                 }
             } else {
                 val resultCode = collectResp.optString("resultCode").ifBlank { collectResp.optString("code") }
@@ -1380,10 +1380,10 @@ class AntOrchard : ModelTask() {
                     .ifBlank { collectResp.optString("desc", collectResp.optString("resultDesc")) }
                 if (resultCode == "G03" || desc.contains("肥料太少")) {
                     skipManurePotCollectThisRound = true
-                    Log.record(TAG, "庄园鸡屎💩任务：肥料太少啦，等一会再收吧；本轮不再重试")
+                    Log.orchard(TAG, "庄园鸡屎💩任务：肥料太少啦，等一会再收吧；本轮不再重试")
                     return
                 }
-                Log.record(TAG, "庄园鸡屎💩任务收取失败: ${collectResp.toString()}")
+                Log.orchard(TAG, "庄园鸡屎💩任务收取失败: ${collectResp.toString()}")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "collectOrchardManurePotIfNeeded err:", t)
@@ -1395,7 +1395,7 @@ class AntOrchard : ModelTask() {
             val taskDisplayConfig = task.optJSONObject("taskDisplayConfig") ?: return false
             val targetUrl = taskDisplayConfig.optString("targetUrl")
             if (targetUrl.isEmpty()) {
-                Log.record(TAG, "农场广告任务⏭️[$title] 缺少 targetUrl")
+                Log.orchard(TAG, "农场广告任务⏭️[$title] 缺少 targetUrl")
                 return false
             }
 
@@ -1403,7 +1403,7 @@ class AntOrchard : ModelTask() {
                 ?: UrlUtil.getParamValue(targetUrl, "url")
                 ?: targetUrl.takeIf { it.startsWith("http") }
             if (pageUrl.isNullOrEmpty()) {
-                Log.record(TAG, "农场广告任务⏭️[$title] 无法解析 pageUrl")
+                Log.orchard(TAG, "农场广告任务⏭️[$title] 无法解析 pageUrl")
                 return false
             }
 
@@ -1412,7 +1412,7 @@ class AntOrchard : ModelTask() {
             val referToken = UrlUtil.extractParamFromUrl(pageUrl, "tokenFeeds")
                 ?: UrlUtil.getParamValue(targetUrl, "tokenFeeds")
             if (spaceCode.isNullOrEmpty()) {
-                Log.record(TAG, "农场广告任务⏭️[$title] 无法解析 spaceCodeFeeds")
+                Log.orchard(TAG, "农场广告任务⏭️[$title] 无法解析 spaceCodeFeeds")
                 return false
             }
 
@@ -1427,7 +1427,7 @@ class AntOrchard : ModelTask() {
             val playingResult = responseJson.optJSONObject("resData")?.optJSONObject("playingResult")
                 ?: responseJson.optJSONObject("playingResult")
             if (playingResult == null) {
-                Log.record(TAG, "农场广告任务⏭️[$title] 未返回 playingResult")
+                Log.orchard(TAG, "农场广告任务⏭️[$title] 未返回 playingResult")
                 return false
             }
 
@@ -1435,7 +1435,7 @@ class AntOrchard : ModelTask() {
             val eventRewardInfoList = playingResult.optJSONObject("eventRewardDetail")
                 ?.optJSONArray("eventRewardInfoList")
             if (playingBizId.isEmpty() || eventRewardInfoList == null || eventRewardInfoList.length() == 0) {
-                Log.record(TAG, "农场广告任务⏭️[$title] 未返回可完成事件")
+                Log.orchard(TAG, "农场广告任务⏭️[$title] 未返回可完成事件")
                 return false
             }
 
@@ -1452,7 +1452,7 @@ class AntOrchard : ModelTask() {
                     )
                 )
                 if (!ResChecker.checkRes(TAG, finishResult)) {
-                    Log.record(TAG, "农场广告任务⏭️[$title] 浏览事件领取失败:${finishResult.optString("desc", finishResult.optString("errMsg"))}")
+                    Log.orchard(TAG, "农场广告任务⏭️[$title] 浏览事件领取失败:${finishResult.optString("desc", finishResult.optString("errMsg"))}")
                     return finishedCount > 0
                 }
                 finishedCount++
@@ -1460,11 +1460,11 @@ class AntOrchard : ModelTask() {
             }
 
             if (finishedCount > 0) {
-                Log.farm("农场广告任务📺[$title] 完成${finishedCount}次浏览奖励")
+                Log.orchard("农场广告任务📺[$title] 完成${finishedCount}次浏览奖励")
                 return true
             }
 
-            Log.record(TAG, "农场广告任务⏭️[$title] 未找到 BROWSE 事件")
+            Log.orchard(TAG, "农场广告任务⏭️[$title] 未找到 BROWSE 事件")
             return false
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "executeXLightTask err:", t)
@@ -1483,7 +1483,7 @@ class AntOrchard : ModelTask() {
         if (convertToManureTask != null && convertToManureTask.optBoolean("showTask", false)) {
             val taskStatus = convertToManureTask.optString("taskStatus")
             if (taskStatus == "TODO") {
-                Log.record(TAG, "农场联动任务⏭️[${convertToManureTask.optString("title")}] 需由森林模块完成")
+                Log.orchard(TAG, "农场联动任务⏭️[${convertToManureTask.optString("title")}] 需由森林模块完成")
             }
         }
     }
@@ -1506,16 +1506,16 @@ class AntOrchard : ModelTask() {
             val sceneCode = stage.optString("sceneCode")
             val taskType = stage.optString("taskType")
             if (sceneCode.isBlank() || taskType.isBlank()) {
-                Log.record(TAG, "丰收奖励🎁字段缺失: sceneCode=$sceneCode taskType=$taskType")
+                Log.orchard(TAG, "丰收奖励🎁字段缺失: sceneCode=$sceneCode taskType=$taskType")
                 return
             }
             val awardCount = stage.optInt("awardCount", 0)
             val source = getSceneSource(indexJson.optString("currentPlantScene", currentPlantScene))
             val awardResp = JSONObject(AntOrchardRpcCall.receiveTaskAward(sceneCode, taskType, source))
             if (ResChecker.checkRes(TAG, awardResp)) {
-                Log.farm("丰收奖励🎁[领取成功]#${awardCount}g肥料")
+                Log.orchard("丰收奖励🎁[领取成功]#${awardCount}g肥料")
             } else {
-                Log.record(TAG, "丰收奖励🎁领取失败: ${awardResp.toString()}")
+                Log.orchard(TAG, "丰收奖励🎁领取失败: ${awardResp.toString()}")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "tryReceiveSpreadManureActivityAward err:", t)
@@ -1547,12 +1547,12 @@ class AntOrchard : ModelTask() {
                     val awardCount = joSign.getJSONObject("signTaskInfo")
                         .getJSONObject("currentSignItem")
                         .getInt("awardCount")
-                    Log.farm("农场签到📅[获得肥料]#${awardCount}g")
+                    Log.orchard("农场签到📅[获得肥料]#${awardCount}g")
                 } else {
-                    Log.record(TAG, joSign.toString())
+                    Log.orchard(TAG, joSign.toString())
                 }
             } else {
-                Log.record(TAG, "农场今日已签到")
+                Log.orchard(TAG, "农场今日已签到")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "orchardSign err:", t)
@@ -1573,10 +1573,10 @@ class AntOrchard : ModelTask() {
                         val smashedItem = batchSmashedList.getJSONObject(i)
                         val manureCount = smashedItem.optInt("manureCount", 0)
                         val jackpot = smashedItem.optBoolean("jackpot", false)
-                        Log.farm("砸出肥料 🎖️: $manureCount g" + if (jackpot) "（触发大奖）" else "")
+                        Log.orchard("砸出肥料 🎖️: $manureCount g" + if (jackpot) "（触发大奖）" else "")
                     }
                 } else {
-                    Log.record(TAG, jo.optString("resultDesc", "未知错误"))
+                    Log.orchard(TAG, jo.optString("resultDesc", "未知错误"))
                     return
                 }
 
@@ -1608,13 +1608,13 @@ class AntOrchard : ModelTask() {
 
                     val jo3 = claimTaskReward(taskId, taskPlantType)
                     if (jo3 != null && jo3.getString("resultCode") == "100") {
-                        Log.farm("领取奖励🎖️[$title]#${awardCount}g肥料")
+                        Log.orchard("领取奖励🎖️[$title]#${awardCount}g肥料")
                     } else {
-                        Log.record(TAG, "领取奖励失败[$title] ${jo3?.toString() ?: "无可用响应"}")
+                        Log.orchard(TAG, "领取奖励失败[$title] ${jo3?.toString() ?: "无可用响应"}")
                     }
                 }
             } else {
-                Log.record(TAG, jo.getString("resultDesc"))
+                Log.orchard(TAG, jo.getString("resultDesc"))
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "triggerTbTask err:", t)
@@ -1660,16 +1660,16 @@ class AntOrchard : ModelTask() {
                     val awardObj = awardList.optJSONObject(i) ?: continue
                     val awardCount = awardObj.optInt("awardCount", 0)
                     val awardDesc = awardObj.optString("awardDesc", "")
-                    Log.farm("回访奖励[$awardDesc] $awardCount g肥料")
+                    Log.orchard("回访奖励[$awardDesc] $awardCount g肥料")
                     hasAwardReceived = true
                 }
             }
 
             if (hasAwardReceived) {
                 Status.setFlagToday(StatusFlags.FLAG_ANTORCHARD_WIDGET_DAILY_AWARD)
-                Log.record(TAG, "回访奖励领取完成")
+                Log.orchard(TAG, "回访奖励领取完成")
             } else {
-                Log.record(TAG, "回访奖励已全部领取或无可领取奖励")
+                Log.orchard(TAG, "回访奖励已全部领取或无可领取奖励")
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "receiveOrchardVisitAward err:", t)
@@ -1701,7 +1701,7 @@ class AntOrchard : ModelTask() {
                 val awardResp = AntOrchardRpcCall.receiveTaskAward("ORCHARD_LIMITED_TIME_CHALLENGE", MtaskId)
                 val joo = JSONObject(awardResp)
                 if (ResChecker.checkRes(TAG, joo)) {
-                    Log.farm("第 $currentRound 轮 限时任务🎁[肥料 * $MawardCount]")
+                    Log.orchard("第 $currentRound 轮 限时任务🎁[肥料 * $MawardCount]")
                 }
                 return
             }
@@ -1737,7 +1737,7 @@ class AntOrchard : ModelTask() {
                     "GAME_CENTER" -> {
                         val r = AntOrchardRpcCall.noticeGame("2021004165643274")
                         if (ResChecker.checkRes(TAG, JSONObject(r))) {
-                            Log.record(TAG, "游戏任务触发成功")
+                            Log.orchard(TAG, "游戏任务触发成功")
                         }
                     }
                     "VISIT" -> {
@@ -1766,7 +1766,7 @@ class AntOrchard : ModelTask() {
                         val playEventInfo = infoListArray.getJSONObject(0)
                         val finishResult = XLightRpcCall.finishTask(playingBizId, playEventInfo, sceneCode, groupId)
                         if (ResChecker.checkRes(TAG, JSONObject(finishResult))) {
-                            Log.record(TAG, "浏览广告任务完成")
+                            Log.orchard(TAG, "浏览广告任务完成")
                         }
                     }
                 }
@@ -1809,26 +1809,26 @@ class AntOrchard : ModelTask() {
                             if (optionKey != null) {
                                 val jo5 = JSONObject(AntOrchardRpcCall.triggerSubplotsActivity(activityId, "WISH", optionKey))
                                 if (jo5.getString("resultCode") == "100") {
-                                    Log.farm("农场许愿✨[每日施肥$taskRequire 次]")
+                                    Log.orchard("农场许愿✨[每日施肥$taskRequire 次]")
                                 } else {
-                                    Log.record(TAG, jo5.getString("resultDesc"))
+                                    Log.orchard(TAG, jo5.getString("resultDesc"))
                                 }
                             }
                         }
                         "FINISHED" -> {
                             val jo3 = JSONObject(AntOrchardRpcCall.receiveOrchardRights(activityId, "WISH"))
                             if (jo3.getString("resultCode") == "100") {
-                                Log.farm("许愿奖励✨[肥料${jo3.getInt("amount")}g]")
+                                Log.orchard("许愿奖励✨[肥料${jo3.getInt("amount")}g]")
                                 querySubplotsActivity(taskRequire)
                                 return
                             } else {
-                                Log.record(TAG, jo3.getString("resultDesc"))
+                                Log.orchard(TAG, jo3.getString("resultDesc"))
                             }
                         }
                     }
                 }
             } else {
-                Log.record(TAG, jo.getString("resultDesc"))
+                Log.orchard(TAG, jo.getString("resultDesc"))
             }
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "querySubplotsActivity err:", t)
@@ -1838,13 +1838,13 @@ class AntOrchard : ModelTask() {
     private fun orchardAssistFriend() {
         try {
             if (!Status.canAntOrchardAssistFriendToday()) {
-                Log.record(TAG, "今日已助力，跳过农场助力")
+                Log.orchard(TAG, "今日已助力，跳过农场助力")
                 return
             }
 
             val friendSet = assistFriendList.value ?: emptySet()
             if (friendSet.isEmpty()) {
-                Log.record(TAG, "未设置农场助力好友列表，跳过农场助力")
+                Log.orchard(TAG, "未设置农场助力好友列表，跳过农场助力")
                 return
             }
             for (uid in friendSet) {
@@ -1852,7 +1852,7 @@ class AntOrchard : ModelTask() {
                     continue
                 }
                 if (Status.hasFlagToday("orchard::assistRelationInvalid::$uid")) {
-                    Log.record(TAG, "农场助力⏭️[${UserMap.getMaskName(uid)}]今日关系已判定无效，跳过")
+                    Log.orchard(TAG, "农场助力⏭️[${UserMap.getMaskName(uid)}]今日关系已判定无效，跳过")
                     continue
                 }
                 val shareId = Base64.encodeToString(
@@ -1867,24 +1867,24 @@ class AntOrchard : ModelTask() {
                 if (!ResChecker.checkRes(TAG, str)) {
                     val code = jsonObject.optString("code")
                     if (code == "600000027") {
-                        Log.record(TAG, "农场助力💪今日助力他人次数上限")
+                        Log.orchard(TAG, "农场助力💪今日助力他人次数上限")
                         Status.antOrchardAssistFriendToday()
                         return
                     }
                     if (code == "600000031") {
-                        Log.record(TAG, "农场助力💪邀请过于频繁，停止今日助力以避免风控")
+                        Log.orchard(TAG, "农场助力💪邀请过于频繁，停止今日助力以避免风控")
                         Status.antOrchardAssistFriendToday()
                         return
                     }
                     if (code == "600000010") {
                         Status.setFlagToday("orchard::assistRelationInvalid::$uid")
-                        Log.record(TAG, "农场助力⏭️[$name]人传人邀请关系不存在，已记录为今日跳过")
+                        Log.orchard(TAG, "农场助力⏭️[$name]人传人邀请关系不存在，已记录为今日跳过")
                         continue
                     }
                     Log.error(TAG, "农场助力😔失败[$name]${jsonObject.optString("desc")}")
                     continue
                 }
-                Log.farm("农场助力💪[助力:$name]")
+                Log.orchard("农场助力💪[助力:$name]")
             }
             Status.antOrchardAssistFriendToday()
         } catch (t: Throwable) {

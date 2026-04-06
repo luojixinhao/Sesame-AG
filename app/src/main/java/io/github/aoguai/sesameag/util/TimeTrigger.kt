@@ -3,6 +3,7 @@ package io.github.aoguai.sesameag.util
 import io.github.aoguai.sesameag.task.ModelTask
 import java.lang.Runnable
 import java.util.Calendar
+import kotlin.ConsistentCopyVisibility
 import kotlin.math.max
 
 private const val TIME_TRIGGER_TAG = "TimeTrigger"
@@ -21,6 +22,7 @@ data class TimeTriggerRule(
     val blocked: Boolean = false
 )
 
+@ConsistentCopyVisibility
 data class TimeTriggerSpec internal constructor(
     val raw: String,
     val disabled: Boolean,

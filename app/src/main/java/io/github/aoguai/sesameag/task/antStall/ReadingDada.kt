@@ -4,6 +4,7 @@ import io.github.aoguai.sesameag.model.ModelGroup
 import io.github.aoguai.sesameag.task.AnswerAI.AnswerAI
 import io.github.aoguai.sesameag.util.JsonUtil
 import io.github.aoguai.sesameag.util.Log
+import io.github.aoguai.sesameag.util.LogChannel
 import org.json.JSONObject
 
 /**
@@ -50,7 +51,7 @@ object ReadingDada {
                 var answer = AnswerAI.getAnswer(
                     question,
                     JsonUtil.jsonArrayToList(options),
-                    "other"
+                    LogChannel.STALL.loggerName
                 )
 
                 // 如果AI未返回答案,使用第一个选项
@@ -68,7 +69,7 @@ object ReadingDada {
 
                 val submitJson = JSONObject(submitResponse)
                 return if (submitJson.getString("resultCode") == "200") {
-                    Log.record(TAG, "答题完成")
+                    Log.stall(TAG, "答题完成")
                     true
                 } else {
                     Log.error(TAG, "答题失败")

@@ -18,6 +18,7 @@ import io.github.aoguai.sesameag.ui.LogViewerActivity
 import io.github.aoguai.sesameag.util.SesameAgUtil
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.Log
+import io.github.aoguai.sesameag.util.LogChannel
 import io.github.aoguai.sesameag.util.ToastUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -359,7 +360,7 @@ class RpcDebugViewModel(application: Application) : AndroidViewModel(application
     fun runRpcItem(item: RpcDebugEntity, activityContext: Context) {
         viewModelScope.launch {
             try {
-                val logFile = Files.getDebugLogFile()
+                val logFile = Files.getLogFile(LogChannel.DEBUG)
                 Files.clearFile(logFile)
                 val intent = Intent(ApplicationHookConstants.BroadcastActions.RPC_TEST).apply {
                     putExtra("method", item.method)

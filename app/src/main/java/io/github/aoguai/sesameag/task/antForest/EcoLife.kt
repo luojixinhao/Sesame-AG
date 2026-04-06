@@ -33,7 +33,7 @@ object EcoLife {
             // 查询首页信息
             var jsonObject = JSONObject(AntForestRpcCall.ecolifeQueryHomePage())
             if (!jsonObject.optBoolean("success")) {
-                Log.record("$TAG.ecoLife.queryHomePage", jsonObject.optString("resultDesc"))
+                Log.forest("$TAG.ecoLife.queryHomePage", jsonObject.optString("resultDesc"))
                 return
             }
             var data = jsonObject.getJSONObject("data")
@@ -65,7 +65,7 @@ object EcoLife {
                 ecoLifeTick(actionListVO, dayPoint)
             }
         } catch (th: Throwable) {
-            Log.record(TAG, "ecoLife err:")
+            Log.forest(TAG, "ecoLife err:")
             Log.printStackTrace(TAG, th)
         }
     }
@@ -79,7 +79,7 @@ object EcoLife {
     fun openEcoLife(): Boolean {
         val jsonObject = JSONObject(AntForestRpcCall.ecolifeOpenEcolife())
         if (!jsonObject.optBoolean("success")) {
-            Log.record("$TAG.ecoLife.openEcolife", jsonObject.optString("resultDesc"))
+            Log.forest("$TAG.ecoLife.openEcolife", jsonObject.optString("resultDesc"))
             return false
         }
         val opResult = JsonUtil.getValueByPath(jsonObject, "data.opResult")
@@ -127,7 +127,7 @@ object EcoLife {
                 }
             }
         } catch (th: Throwable) {
-            Log.record(TAG, "ecoLifeTick err:")
+            Log.forest(TAG, "ecoLifeTick err:")
             Log.printStackTrace(TAG, th)
         }
     }
@@ -153,13 +153,13 @@ object EcoLife {
                 object : TypeReference<MutableList<MutableMap<String?, String?>>>() {
                 }
             val allPhotos: MutableList<MutableMap<String?, String?>> = DataStore.getOrCreate("plate", typeRef)
-            Log.record("$TAG [DEBUG] guangPanPhoto 数据内容: $allPhotos")
+            Log.forest("$TAG [DEBUG] guangPanPhoto 数据内容: $allPhotos")
             // 查询今日任务状态
             var str = AntForestRpcCall.ecolifeQueryDish(source, safeDayPoint)
             var jo = JSONObject(str)
             // 如果请求失败，则记录错误信息并返回
             if (!ResChecker.checkRes(TAG, jo)) {
-                Log.record("$TAG.photoGuangPan.ecolifeQueryDish", jo.optString("resultDesc"))
+                Log.forest("$TAG.photoGuangPan.ecolifeQueryDish", jo.optString("resultDesc"))
                 return
             }
             var photo: MutableMap<String?, String?>? = HashMap()
@@ -253,7 +253,7 @@ object EcoLife {
             Toast.show(toastMsg)
         } catch (t: Throwable) {
             // 捕获异常，记录错误信息和堆栈追踪
-            Log.record(TAG, "photoGuangPan err:")
+            Log.forest(TAG, "photoGuangPan err:")
             Log.printStackTrace(TAG, t)
         }
     }

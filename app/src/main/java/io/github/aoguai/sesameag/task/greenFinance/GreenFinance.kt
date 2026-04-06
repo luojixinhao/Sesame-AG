@@ -69,11 +69,11 @@ class GreenFinance : ModelTask() {
     override fun check(): Boolean {
         return when {
             TaskCommon.IS_ENERGY_TIME -> {
-                Log.record(TAG, "⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
+                Log.greenFinance(TAG, "⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
                 false
             }
             TaskCommon.IS_MODULE_SLEEP_TIME -> {
-                Log.record(TAG, "💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
+                Log.greenFinance(TAG, "💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
                 false
             }
             else -> true
@@ -89,7 +89,7 @@ class GreenFinance : ModelTask() {
     @Suppress("ReturnCount")
     override suspend fun runSuspend() {
         try {
-            Log.record(TAG, "执行开始-${getName()}")
+            Log.greenFinance(TAG, "执行开始-${getName()}")
             val s = GreenFinanceRpcCall.greenFinanceIndex()
             var jo = JsonUtil.parseJSONObject(s)
             if (!jo.optBoolean("success")) {
@@ -99,7 +99,7 @@ class GreenFinance : ModelTask() {
 
             val result = jo.optJSONObject("result") ?: return
             if (!result.optBoolean("greenFinanceSigned")) {
-                Log.other("绿色经营📊未开通")
+                Log.greenFinance("绿色经营📊未开通")
                 return
             }
 
@@ -144,7 +144,7 @@ class GreenFinance : ModelTask() {
             Log.runtime(TAG, "index err:")
             Log.printStackTrace(TAG, th)
         } finally {
-            Log.record(TAG, "执行结束-${getName()}")
+            Log.greenFinance(TAG, "执行结束-${getName()}")
         }
     }
 
@@ -154,7 +154,7 @@ class GreenFinance : ModelTask() {
             val joSelfCollect = JsonUtil.parseJSONObject(s)
             if (joSelfCollect.optBoolean("success")) {
                 val totalCollectPoint = joSelfCollect.optJSONObject("result")?.optInt("totalCollectPoint") ?: 0
-                Log.other("绿色经营📊收集获得$totalCollectPoint")
+                Log.greenFinance("绿色经营📊收集获得$totalCollectPoint")
             } else {
                 Log.runtime("$TAG.batchSelfCollect", joSelfCollect.optString("resultDesc"))
             }
@@ -180,7 +180,7 @@ class GreenFinance : ModelTask() {
             s = GreenFinanceRpcCall.signInTrigger(sceneId)
             jo = JsonUtil.parseJSONObject(s)
             if (jo.optBoolean("success")) {
-                Log.other("绿色经营📊签到成功")
+                Log.greenFinance("绿色经营📊签到成功")
             } else {
                 Log.runtime("$TAG.signIn.signInTrigger", jo.optString("resultDesc"))
             }
@@ -218,10 +218,10 @@ class GreenFinance : ModelTask() {
                 val obj = JsonUtil.parseJSONObject(str)
                 if (!obj.optBoolean("success") || 
                     JsonUtil.getValueByPath(obj, "result.result") != "true") {
-                    Log.other("绿色经营📊[${jsonObject.optString("title")}]打卡失败")
+                    Log.greenFinance("绿色经营📊[${jsonObject.optString("title")}]打卡失败")
                     break
                 }
-                Log.other("绿色经营📊[${jsonObject.optString("title")}]打卡成功")
+                Log.greenFinance("绿色经营📊[${jsonObject.optString("title")}]打卡成功")
             }
         } catch (th: Throwable) {
             Log.runtime(TAG, "doTick err:")
@@ -249,7 +249,7 @@ class GreenFinance : ModelTask() {
             if (amount <= 0) {
                 return
             }
-            Log.other("绿色经营📊1天内过期的金币[$amount]")
+            Log.greenFinance("绿色经营📊1天内过期的金币[$amount]")
             str = GreenFinanceRpcCall.queryAllDonationProjectNew()
             jsonObject = JsonUtil.parseJSONObject(str)
             if (!jsonObject.optBoolean("success")) {
@@ -283,7 +283,7 @@ class GreenFinance : ModelTask() {
                     Log.runtime("$TAG.donation.$id", jsonObject.optString("resultDesc"))
                     return
                 }
-                Log.other("绿色经营📊成功捐助[$name]${am}金币")
+                Log.greenFinance("绿色经营📊成功捐助[$name]${am}金币")
             }
         } catch (th: Throwable) {
             Log.runtime(TAG, "donation err:")
@@ -323,7 +323,7 @@ class GreenFinance : ModelTask() {
                 return
             }
             val obj = JsonUtil.getValueByPathObject(jsonObject, "result.prizes.[0]") as? JSONObject ?: return
-            Log.other("绿色经营🍬评级奖品[${obj.getString("prizeName")}]${obj.getString("price")}")
+            Log.greenFinance("绿色经营🍬评级奖品[${obj.getString("prizeName")}]${obj.getString("price")}")
         } catch (th: Throwable) {
             Log.runtime(TAG, "prizes err:")
             Log.printStackTrace(TAG, th)
@@ -340,7 +340,7 @@ class GreenFinance : ModelTask() {
                 val pageJo = queryRankingPage(startIndex) ?: break
                 val result = pageJo.optJSONObject("result") ?: break
                 if (result.optBoolean("lastPage")) {
-                    Log.other("绿色经营🙋，好友金币巡查完成")
+                    Log.greenFinance("绿色经营🙋，好友金币巡查完成")
                     Status.greenFinancePointFriend()
                     break
                 }
@@ -358,7 +358,7 @@ class GreenFinance : ModelTask() {
         val str = GreenFinanceRpcCall.queryRankingList(startIndex)
         val jo = JsonUtil.parseJSONObject(str)
         if (!jo.optBoolean("success")) {
-            Log.other("绿色经营🙋，好友金币巡查失败")
+            Log.greenFinance("绿色经营🙋，好友金币巡查失败")
             return null
         }
         return jo
@@ -401,7 +401,7 @@ class GreenFinance : ModelTask() {
             Log.runtime("$TAG.batchStealFriend.batchSteal", jsonObject.optString("resultDesc"))
             return
         }
-        Log.other("绿色经营🤩收[$nickname]${JsonUtil.getValueByPath(jsonObject, "result.totalCollectPoint")}金币")
+        Log.greenFinance("绿色经营🤩收[$nickname]${JsonUtil.getValueByPath(jsonObject, "result.totalCollectPoint")}金币")
     }
 
     private fun extractStealableBsnIds(points: JSONArray): JSONArray {
@@ -488,7 +488,7 @@ class GreenFinance : ModelTask() {
                     } else if ("TO_RECEIVE" != status) {
                         continue
                     }
-                    Log.other("$name[${JsonUtil.getValueByPath(taskDetail, "taskExtProps.TASK_MORPHO_DETAIL.title")}]任务完成")
+                    Log.greenFinance("$name[${JsonUtil.getValueByPath(taskDetail, "taskExtProps.TASK_MORPHO_DETAIL.title")}]任务完成")
                 }
             } catch (th: Throwable) {
                 Log.runtime(tag, "doTask err:")

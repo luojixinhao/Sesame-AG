@@ -47,11 +47,11 @@ class Reserve : ModelTask() {
     override fun check(): Boolean {
         return when {
             TaskCommon.IS_ENERGY_TIME -> {
-                Log.record(TAG, "⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
+                Log.forest(TAG, "⏸ 当前为只收能量时间【${BaseModel.energyTime.value}】，停止执行${getName()}任务！")
                 false
             }
             TaskCommon.IS_MODULE_SLEEP_TIME -> {
-                Log.record(TAG, "💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
+                Log.forest(TAG, "💤 模块休眠时间【${BaseModel.modelSleepTime.value}】停止执行${getName()}任务！")
                 false
             }
             else -> true
@@ -66,23 +66,23 @@ class Reserve : ModelTask() {
 
     override suspend fun runSuspend() {
         try {
-            Log.record(TAG, "开始保护地任务")
+            Log.forest(TAG, "开始保护地任务")
             initReserve()
             animalReserve()
         } catch (t: Throwable) {
             Log.runtime(TAG, "start.run err:")
             Log.printStackTrace(TAG, t)
         } finally {
-            Log.record(TAG, "保护地任务")
+            Log.forest(TAG, "保护地任务")
         }
     }
 
     private suspend fun animalReserve() {
         try {
-            Log.record(TAG, "开始执行-${getName()}")
+            Log.forest(TAG, "开始执行-${getName()}")
             val configuredReserveMap = getConfiguredReserveMap()
             if (configuredReserveMap.isEmpty()) {
-                Log.record(TAG, "保护地列表未配置有效申请项，跳过执行")
+                Log.forest(TAG, "保护地列表未配置有效申请项，跳过执行")
                 return
             }
             var s: String? = ReserveRpcCall.queryTreeItemsForExchange()
@@ -118,7 +118,7 @@ class Reserve : ModelTask() {
             Log.runtime(TAG, "animalReserve err:")
             Log.printStackTrace(TAG, t)
         } finally {
-            Log.record(TAG, "结束执行-${getName()}")
+            Log.forest(TAG, "结束执行-${getName()}")
         }
     }
 
@@ -156,7 +156,7 @@ class Reserve : ModelTask() {
                     false
                 }
             } else {
-                Log.record(jo.getString("resultDesc"))
+                Log.forest(jo.getString("resultDesc"))
                 Log.runtime(s)
             }
         } catch (t: Throwable) {
@@ -182,7 +182,7 @@ class Reserve : ModelTask() {
                     Log.forest(str)
                     Status.reserveToday(projectId, 1)
                 } else {
-                    Log.record(jo.getString("resultDesc"))
+                    Log.forest(jo.getString("resultDesc"))
                     Log.runtime(jo.toString())
                     Log.forest("领保护地🏕️[$itemName]#发生未知错误，停止申请")
                     break

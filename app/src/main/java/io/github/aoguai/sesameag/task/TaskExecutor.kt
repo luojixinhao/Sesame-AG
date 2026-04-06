@@ -27,6 +27,14 @@ enum class GameTask(
 
     private var cachedToken: String? = null
 
+    private fun logTask(msg: String) {
+        when (this) {
+            Orchard_ncscc -> Log.orchard(title, msg)
+            Farm_ddply -> Log.farm(title, msg)
+            Forest_slxcc, Forest_sljyd -> Log.forest(title, msg)
+        }
+    }
+
     /**
      * 第一步：登录获取 Token 并缓存
      */
@@ -79,7 +87,7 @@ enum class GameTask(
 
         cachedToken = login()
         if (cachedToken.isNullOrEmpty()) {
-            Log.record(title, "⚠️ 无法获取有效的 Token，放弃上报任务")
+            logTask("⚠️ 无法获取有效的 Token，放弃上报任务")
             return
         }
 
@@ -123,7 +131,9 @@ enum class GameTask(
 
             val resJson = JSONObject(responseText)
             if (resJson.optInt("code") == 1) {
-                if (current % requestsPerEgg == 0) Log.record(title, "📈 进度: $current/${total - 1} (已达成 ${current/requestsPerEgg} 个蛋)")
+                if (current % requestsPerEgg == 0) {
+                    logTask("📈 进度: $current/${total - 1} (已达成 ${current / requestsPerEgg} 个蛋)")
+                }
                 true
             } else {
                 // 💡 修正：这里会直接打印出服务器返回的完整错误 JSON，比如 {"code":0,"msg":"token invalid"...}

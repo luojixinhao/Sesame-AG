@@ -195,13 +195,21 @@ class OldRpcBridge : RpcBridge {
 
         // 检查响应中的"memo"字段是否包含"系统繁忙"
         if (resultObject.optString("memo", "").contains("系统繁忙")) {
-            val cooldownMs = io.github.aoguai.sesameag.hook.ApplicationHookConstants.getOfflineCooldownMs()
-            io.github.aoguai.sesameag.hook.ApplicationHookConstants.enterOffline(
-                cooldownMs,
-                "system_busy",
-                "memo contains 系统繁忙"
-            )
-            Notify.updateStatusText("系统繁忙，可能需要滑动验证")
+            if (!io.github.aoguai.sesameag.hook.ApplicationHookConstants.offline) {
+                val cooldownMs = io.github.aoguai.sesameag.hook.ApplicationHookConstants.getOfflineCooldownMs()
+                io.github.aoguai.sesameag.hook.ApplicationHookConstants.enterOffline(
+                    cooldownMs,
+                    "system_busy",
+                    "memo contains 系统繁忙"
+                )
+                Notify.updateRunningStatus("系统繁忙，可能需要滑动验证")
+                if (BaseModel.errNotify.value == true) {
+                    Notify.sendAlert(
+                        "${TimeUtil.getTimeStr()} | 系统繁忙",
+                        "旧 RPC 检测到系统繁忙，可能需要滑动验证"
+                    )
+                }
+            }
             Log.record(TAG, "系统繁忙，可能需要滑动验证")
             return null
         }
@@ -279,7 +287,13 @@ class OldRpcBridge : RpcBridge {
                 "login_timeout",
                 "旧RPC: 登录超时"
             )
-            Notify.updateStatusText("登录超时")
+            Notify.updateRunningStatus("登录超时")
+            if (BaseModel.errNotify.value == true) {
+                Notify.sendAlert(
+                    "${TimeUtil.getTimeStr()} | 登录超时",
+                    "旧 RPC 检测到登录超时，已进入离线保护"
+                )
+            }
             if (BaseModel.timeoutRestart.value == true) {
                 Log.record(TAG, "尝试重新登录")
                 io.github.aoguai.sesameag.hook.ApplicationHookUtils.reLoginByBroadcast()
@@ -293,9 +307,16 @@ class OldRpcBridge : RpcBridge {
     private fun handleEnergyCollectException() {
         val waitValue = BaseModel.waitWhenException.value ?: 0
         if (waitValue > 0) {
+            val previousPauseTime = RuntimeInfo.getInstance().getLong(RuntimeInfo.RuntimeInfoKey.ForestPauseTime)
             val waitTime = System.currentTimeMillis() + waitValue
             RuntimeInfo.getInstance().put(RuntimeInfo.RuntimeInfoKey.ForestPauseTime, waitTime)
-            Notify.updateStatusText("异常")
+            Notify.updateRunningStatus("异常")
+            if (BaseModel.errNotify.value == true && previousPauseTime <= System.currentTimeMillis()) {
+                Notify.sendAlert(
+                    "${TimeUtil.getTimeStr()} | 任务异常暂停",
+                    "旧 RPC 触发异常保护，恢复时间 ${TimeUtil.getCommonDate(waitTime)}"
+                )
+            }
             Log.record(TAG, "触发异常, 等待至${TimeUtil.getCommonDate(waitTime)}")
         }
     }
