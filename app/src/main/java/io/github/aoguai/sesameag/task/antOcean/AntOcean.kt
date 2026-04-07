@@ -13,6 +13,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.BooleanModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.ChoiceModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectAndCountModelField
 import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
+import io.github.aoguai.sesameag.util.ActionDelayUtil
 import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.FriendGuard
 import io.github.aoguai.sesameag.task.ModelTask
@@ -500,6 +501,18 @@ class AntOcean : ModelTask() {
             }
         }
         return 0
+    }
+
+    private fun resolveOceanTaskWaitMillis(waitSeconds: Int): Long {
+        return waitSeconds * 1000L + 1200L
+    }
+
+    private fun isOceanTimedBrowseTaskSafeByRpc(taskType: String, taskTitle: String, bizInfo: JSONObject): Boolean {
+        if (resolveOceanTaskFinishSource(taskType, taskTitle, bizInfo) != "ANTFOCEAN") {
+            return false
+        }
+        return !bizInfo.optBoolean("isPromotionTask") &&
+            !bizInfo.optBoolean("isFastCallAppTask")
     }
 
     private fun isActiveExtraCollect(extraCollectVO: JSONObject?): Boolean {
@@ -1315,7 +1328,82 @@ class AntOcean : ModelTask() {
                         } else {
                             val waitSeconds = resolveOceanTaskWaitSeconds(taskTitle, bizInfo)
                             if (waitSeconds > 0) {
-                                Log.ocean(TAG, "海洋任务🌊[$taskTitle]需等待${waitSeconds}s，跳过处理")
+                                val finishSource = resolveOceanTaskFinishSource(taskType, taskTitle, bizInfo)
+                                if (!isOceanTimedBrowseTaskSafeByRpc(taskType, taskTitle, bizInfo)) {
+                                    Log.ocean(
+                                        TAG,
+                                        "海洋任务🌊[$taskTitle]广告/高风险浏览任务待支持[wait=${waitSeconds}s][taskType=$taskType][source=$finishSource]，跳过处理"
+                                    )
+                                    continue
+                                }
+
+                                val bizKey = "${sceneCode}_$taskType"
+                                val count = oceanTaskTryCount.computeIfAbsent(bizKey) { AtomicInteger(0) }
+                                    .incrementAndGet()
+                                if (count > 1) {
+                                    Log.ocean(
+                                        TAG,
+                                        "海洋任务🌊[$taskTitle]浏览任务本轮已尝试过，跳过重复等待[taskType=$taskType]"
+                                    )
+                                    continue
+                                }
+
+                                val waitMillis = resolveOceanTaskWaitMillis(waitSeconds)
+                                Log.ocean(
+                                    TAG,
+                                    "海洋任务🌊[$taskTitle]开始等待${waitSeconds}s后尝试RPC完成[taskType=$taskType]"
+                                )
+                                ActionDelayUtil.humanActionDelay(500L)
+                                delay(waitMillis)
+
+                                val sourcesToTry = listOf(finishSource)
+                                var joFinishTask: JSONObject? = null
+                                var finishOk = false
+                                var notSupportedCount = 0
+
+                                for (source in sourcesToTry) {
+                                    val finishResponse = AntOceanRpcCall.finishTask(sceneCode, taskType, source)
+                                    val parsed = JsonUtil.parseJSONObjectOrNull(finishResponse) ?: continue
+                                    joFinishTask = parsed
+
+                                    val errorCode = parsed.optString("code", "")
+                                    val desc = parsed.optString("desc", "")
+                                    if (errorCode == "400000040" || desc.contains("不支持RPC完成")) {
+                                        notSupportedCount++
+                                        continue
+                                    }
+
+                                    if (ResChecker.checkRes(TAG, parsed)) {
+                                        finishOk = true
+                                        break
+                                    }
+                                }
+
+                                if (finishOk) {
+                                    oceanTaskTryCount.remove(bizKey)
+                                    Log.ocean("海洋任务🌊完成[$taskTitle]")
+                                    done = true
+                                } else if (notSupportedCount >= sourcesToTry.size) {
+                                    Log.ocean(
+                                        TAG,
+                                        "海洋任务🌊[$taskTitle]浏览任务暂不支持RPC完成[wait=${waitSeconds}s][taskType=$taskType][source=$finishSource]，保持跳过"
+                                    )
+                                } else {
+                                    val finishResult = joFinishTask
+                                    if (finishResult == null) {
+                                        Log.error(
+                                            TAG,
+                                            "海洋任务🌊浏览任务完成失败[$taskTitle][taskType=$taskType][waitSec=$waitSeconds][waitMillis=$waitMillis][source=$finishSource]: 响应为空"
+                                        )
+                                    } else {
+                                        Log.error(
+                                            TAG,
+                                            "海洋任务🌊浏览任务完成失败[$taskTitle][taskType=$taskType][waitSec=$waitSeconds][waitMillis=$waitMillis][source=$finishSource]: ${extractOceanResultDesc(finishResult)}"
+                                        )
+                                    }
+                                }
+
+                                delay(500)
                                 continue
                             }
 
