@@ -334,6 +334,10 @@ class AntMember : ModelTask() {
             return
         }
 
+        if (!canRunMerchantService()) {
+            return
+        }
+
         if (needMerchantSign) {
             if (doMerchantSign()) {
                 setFlagToday(StatusFlags.FLAG_ANTMEMBER_MERCHANT_SIGN_DONE)
@@ -343,9 +347,6 @@ class AntMember : ModelTask() {
             doMerchantMoreTask()
         }
         if (merchantKmdk?.value == true && (needKmdkSignIn || needKmdkSignUp)) {
-            if (!canRunMerchantKmdk()) {
-                return
-            }
             if (needKmdkSignIn) {
                 if (kmdkSignIn()) {
                     setFlagToday(StatusFlags.FLAG_ANTMEMBER_MERCHANT_KMDK_SIGNIN_DONE)
@@ -3787,7 +3788,7 @@ class AntMember : ModelTask() {
                 if (ResChecker.checkRes(TAG, jo)) {
                     val entrance = jo.optJSONObject("entrance") ?: return false
                     if (!entrance.optBoolean("openApp")) {
-                        Log.sesame("芝麻信用💳[未开通芝麻信用]")
+                        Log.sesame("芝麻信用💳[未开通，本轮跳过]")
                         return false
                     }
                     return true
@@ -3806,7 +3807,7 @@ class AntMember : ModelTask() {
                 }
                 val entrance = jo.optJSONObject("entrance") ?: return false
                 if (!entrance.optBoolean("openApp")) {
-                    Log.sesame("芝麻信用💳[未开通芝麻信用]")
+                    Log.sesame("芝麻信用💳[未开通，本轮跳过]")
                     return false
                 }
                 return true
@@ -4405,7 +4406,7 @@ class AntMember : ModelTask() {
             false
         }
 
-        private fun canRunMerchantKmdk(): Boolean = CoroutineUtils.run {
+        private fun canRunMerchantService(): Boolean = CoroutineUtils.run {
             try {
                 val s = AntMemberRpcCall.transcodeCheck()
                 val jo = JSONObject(s)
@@ -4414,19 +4415,19 @@ class AntMember : ModelTask() {
                     if (data?.optBoolean("isOpened") == true) {
                         return@run true
                     }
-                    Log.member(TAG, "商家服务👪未开通")
+                    Log.member(TAG, "商家服务🏬[未开通，本轮跳过]")
                     return@run false
                 }
                 val errorCode = jo.optInt("error", jo.optInt("errorNo", 0))
                 val errorTip = jo.optString("errorTip")
                 val errorMessage = jo.optString("errorMessage", jo.optString("errorMsg"))
                 if (errorCode == 1009 || errorTip == "1009" || errorMessage.contains("訪問被拒絕") || errorMessage.contains("访问被拒绝")) {
-                    Log.member(TAG, "商家服务🏬[开门打卡]#transcode.check返回1009，跳过执行")
+                    Log.member(TAG, "商家服务🏬[开通检查返回1009，本轮跳过]")
                     return@run false
                 }
-                Log.member(TAG, "商家服务🏬[开门打卡]#查询开通状态失败:$s")
+                Log.member(TAG, "商家服务🏬[开通检查失败，本轮跳过]#$s")
             } catch (t: Throwable) {
-                Log.printStackTrace(TAG, "canRunMerchantKmdk err:", t)
+                Log.printStackTrace(TAG, "canRunMerchantService err:", t)
             }
             false
         }

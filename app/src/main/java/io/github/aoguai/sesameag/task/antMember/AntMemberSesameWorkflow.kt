@@ -20,6 +20,16 @@ internal suspend fun AntMember.prepareSesameWorkflows(
     scope: CoroutineScope,
     deferredTasks: MutableList<Deferred<Unit>>
 ): AntMemberSesameWorkflowPlan {
+    val needSesameWorkflow =
+        sesameGrainExchange?.value == true ||
+            sesameTask?.value == true ||
+            collectSesame?.value == true ||
+            sesameAlchemy?.value == true ||
+            enableZhimaTree?.value == true
+    if (!needSesameWorkflow) {
+        return AntMemberSesameWorkflowPlan(false, false)
+    }
+
     if (!AntMember.checkSesameCanRun()) {
         return AntMemberSesameWorkflowPlan(false, false)
     }

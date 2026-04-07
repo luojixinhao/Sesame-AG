@@ -381,9 +381,8 @@ class AntOcean : ModelTask() {
         return try {
             val jo = JsonUtil.parseJSONObjectOrNull(AntOceanRpcCall.queryOceanStatus()) ?: return false
             if (ResChecker.checkRes(TAG, jo)) {
-                if (!jo.getBoolean("opened")) {
-                    enableField.setObjectValue(false)
-                    Log.ocean("请先开启神奇海洋，并完成引导教程")
+                if (!jo.optBoolean("opened", false)) {
+                    Log.ocean(TAG, "神奇海洋🌊[未开通或未完成引导，本轮跳过]")
                     false
                 } else {
                     initBeach()

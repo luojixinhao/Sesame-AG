@@ -126,8 +126,7 @@ class AntOrchard : ModelTask() {
             }
 
             if (!indexJson.optBoolean("userOpenOrchard", false)) {
-                enableField.value = false
-                Log.orchard("请先开启芭芭农场！")
+                Log.orchard(TAG, "芭芭农场🍎[未开通，本轮跳过]")
                 return
             }
 
