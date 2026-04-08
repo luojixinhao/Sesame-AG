@@ -22,6 +22,7 @@ import io.github.aoguai.sesameag.model.modelFieldExt.SelectModelField
 import io.github.aoguai.sesameag.util.TaskBlacklist.autoAddToBlacklist
 import io.github.aoguai.sesameag.task.ModelTask
 import io.github.aoguai.sesameag.task.antOrchard.AntOrchardRpcCall.orchardSpreadManure
+import io.github.aoguai.sesameag.task.antOrchard.UrlUtil
 import io.github.aoguai.sesameag.util.ActionDelayUtil
 import io.github.aoguai.sesameag.util.CoroutineUtils
 import io.github.aoguai.sesameag.util.GlobalThreadPools
@@ -114,7 +115,8 @@ class AntMember : ModelTask() {
         val title: String,
         val awardPoint: String,
         val targetBusiness: String,
-        val simpleTaskConfig: JSONObject
+        val simpleTaskConfig: JSONObject,
+        val adBizId: String
     )
 
     private data class MemberTaskProcessAward(
@@ -1377,17 +1379,32 @@ class AntMember : ModelTask() {
             if (!shouldKeepMemberTaskConfigId(taskConfigId)) {
                 continue
             }
+            val unsupportedAdTaskReason = resolveUnsupportedMemberAdTaskReason(taskProcessObject, simpleTaskConfig)
+            if (unsupportedAdTaskReason != null) {
+                logSkippedMemberAdTask(
+                    simpleTaskConfig.optString("title").ifEmpty {
+                        simpleTaskConfig.optString("name").ifEmpty { "任务$taskConfigId" }
+                    },
+                    unsupportedAdTaskReason
+                )
+                continue
+            }
+            val adBizId = resolveMemberAdTaskBizId(taskProcessObject, simpleTaskConfig)
             val targetBusiness = resolveSupportedMemberTaskTargetBusiness(
                 taskProcessObject.optJSONArray("targetBusiness") ?: simpleTaskConfig.optJSONArray("targetBusiness"),
                 simpleTaskConfig
             )
-            if (targetBusiness.isEmpty()) {
+            if (targetBusiness.isEmpty() && adBizId.isEmpty()) {
                 continue
             }
             val taskProcessId = taskProcessObject.optString("processId").ifEmpty {
                 taskProcessObject.optString("taskProcessId")
             }
-            val dedupKey = if (taskProcessId.isNotEmpty()) taskProcessId else taskConfigId
+            val dedupKey = when {
+                taskProcessId.isNotEmpty() -> taskProcessId
+                adBizId.isNotEmpty() -> "$taskConfigId#$adBizId"
+                else -> taskConfigId
+            }
             if (!dedupKeys.add(dedupKey)) {
                 continue
             }
@@ -1400,7 +1417,8 @@ class AntMember : ModelTask() {
                     },
                     awardPoint = extractMemberTaskAwardPoint(simpleTaskConfig),
                     targetBusiness = targetBusiness,
-                    simpleTaskConfig = simpleTaskConfig
+                    simpleTaskConfig = simpleTaskConfig,
+                    adBizId = adBizId
                 )
             )
         }
@@ -1412,6 +1430,11 @@ class AntMember : ModelTask() {
         if (isMemberTaskInBlacklist(task.taskConfigId, task.title)) {
             Log.member(TAG, "会员任务[${task.title}]#黑名单任务，停止执行")
             return@run false
+        }
+        if (task.adBizId.isNotEmpty()) {
+            val bizSubType = task.targetBusiness.split("#").getOrNull(1).orEmpty()
+            delay(calcMemberTaskWaitMillis(task.simpleTaskConfig, bizSubType))
+            return@run finishMemberAdTask(task.taskConfigId, task.title, task.awardPoint, task.adBizId)
         }
         val targetBusinessArray = task.targetBusiness.split("#".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
         if (targetBusinessArray.size < 3) {
@@ -2039,17 +2062,27 @@ class AntMember : ModelTask() {
         val taskConfigInfo = task.getJSONObject("taskConfigInfo")
         val name = taskConfigInfo.getString("name")
         val id = taskConfigInfo.getLong("id")
-        val awardParamPoint = taskConfigInfo.getJSONObject("awardParam").getString("awardParamPoint")
+        val awardParamPoint = extractMemberTaskAwardPoint(taskConfigInfo)
         if (isMemberTaskInBlacklist(id.toString(), name)) {
             Log.member(TAG, "会员任务🎖️[$name]#黑名单任务，停止执行")
             return@run false
         }
+        val unsupportedAdTaskReason = resolveUnsupportedMemberAdTaskReason(task, taskConfigInfo)
+        if (unsupportedAdTaskReason != null) {
+            logSkippedMemberAdTask(name, unsupportedAdTaskReason, "会员任务🎖️")
+            return@run false
+        }
+        val adBizId = resolveMemberAdTaskBizId(task, taskConfigInfo)
         val targetBusiness = resolveSupportedMemberTaskTargetBusiness(
             taskConfigInfo.optJSONArray("targetBusiness"),
             taskConfigInfo
         )
-        if (targetBusiness.isEmpty()) {
+        if (targetBusiness.isEmpty() && adBizId.isEmpty()) {
             return@run false
+        }
+        if (adBizId.isNotEmpty()) {
+            delay(calcMemberTaskWaitMillis(taskConfigInfo, ""))
+            return@run finishMemberAdTask(id.toString(), name, awardParamPoint, adBizId)
         }
         val targetBusinessArray = targetBusiness.split("#".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
         val bizType = targetBusinessArray[0]
@@ -2140,7 +2173,10 @@ class AntMember : ModelTask() {
     }
 
     private fun shouldKeepMemberTaskConfigId(taskConfigId: String): Boolean {
-        return taskConfigId.length >= 12 && taskConfigId.startsWith("6")
+        if (taskConfigId.length >= 12 && taskConfigId.startsWith("6")) {
+            return true
+        }
+        return taskConfigId.length == 8 && taskConfigId.startsWith("3200")
     }
 
     private fun isMemberTaskInBlacklist(taskConfigId: String, taskTitle: String): Boolean {
@@ -2163,6 +2199,243 @@ class AntMember : ModelTask() {
             }
         }
         return if ("UNLIMITED".equals(bizSubType, true)) 1200L else 16000L
+    }
+
+    private fun resolveMemberAdTaskBizId(
+        taskObject: JSONObject?,
+        taskConfigInfo: JSONObject? = null
+    ): String {
+        if (isUnsupportedMemberAdTaskType(taskObject, taskConfigInfo)) {
+            return ""
+        }
+
+        val urlCandidates = listOfNotNull(
+            taskObject?.optString("actionUrl"),
+            taskObject?.optString("targetUrl"),
+            taskObject?.optString("jumpUrl"),
+            taskObject?.optString("pageUrl"),
+            taskObject?.optString("clickThroughUrl"),
+            taskObject?.optString("halfClickThroughUrl"),
+            taskConfigInfo?.optString("actionUrl"),
+            taskConfigInfo?.optString("targetUrl"),
+            taskConfigInfo?.optString("jumpUrl"),
+            taskConfigInfo?.optString("pageUrl"),
+            taskConfigInfo?.optString("clickThroughUrl"),
+            taskConfigInfo?.optString("halfClickThroughUrl"),
+            taskConfigInfo?.optString("schemaJson")
+        ).filter { it.isNotBlank() }
+        val hasMemberAdUrlMarker = urlCandidates.any { looksLikeMemberAdTaskUrl(it) }
+
+        if (hasExplicitMemberAdTaskMarker(taskObject, taskConfigInfo, hasMemberAdUrlMarker)) {
+            val directBizId = sequenceOf(
+                taskObject?.optString("adBizId"),
+                taskObject?.optJSONObject("logExtMap")?.optString("bizId"),
+                taskObject?.optJSONObject("extInfo")?.optString("adBizId"),
+                taskObject?.optJSONObject("extInfo")?.optString("bizId"),
+                taskConfigInfo?.optString("adBizId"),
+                taskConfigInfo?.optJSONObject("logExtMap")?.optString("bizId"),
+                taskConfigInfo?.optJSONObject("extInfo")?.optString("adBizId"),
+                taskConfigInfo?.optJSONObject("extInfo")?.optString("bizId")
+            ).filterNotNull().firstOrNull { it.isNotBlank() }
+            if (!directBizId.isNullOrBlank()) {
+                return directBizId
+            }
+        }
+
+        for (urlCandidate in urlCandidates) {
+            if (!hasMemberAdUrlMarker || !looksLikeMemberAdTaskUrl(urlCandidate)) {
+                continue
+            }
+            extractMemberAdBizIdFromText(urlCandidate)?.let { return it }
+            val nestedUrl = UrlUtil.getFullNestedUrl(urlCandidate, "url")
+            if (!nestedUrl.isNullOrBlank()) {
+                extractMemberAdBizIdFromText(nestedUrl)?.let { return it }
+            }
+        }
+        return ""
+    }
+
+    private fun resolveUnsupportedMemberAdTaskReason(
+        taskObject: JSONObject?,
+        taskConfigInfo: JSONObject?
+    ): String? {
+        val taskTypeCandidates = sequenceOf(
+            taskObject?.optString("taskType"),
+            taskConfigInfo?.optString("taskType")
+        ).filterNotNull()
+        if (taskTypeCandidates.any { it.equals("MULTIPLE_TIMER_TASK", true) }) {
+            return "MULTIPLE_TIMER_TASK"
+        }
+        if (taskObject?.has("videoTaskInfo") == true || taskConfigInfo?.has("videoTaskInfo") == true) {
+            return "VIDEO_TASK"
+        }
+        if (taskObject?.optBoolean("adVideoTask") == true || taskConfigInfo?.optBoolean("adVideoTask") == true) {
+            return "AD_VIDEO_TASK"
+        }
+        if (hasMemberAdVideoSchema(taskObject, taskConfigInfo)) {
+            return "VIDEO_TASK"
+        }
+        return null
+    }
+
+    private fun isUnsupportedMemberAdTaskType(
+        taskObject: JSONObject?,
+        taskConfigInfo: JSONObject?
+    ): Boolean {
+        return resolveUnsupportedMemberAdTaskReason(taskObject, taskConfigInfo) != null
+    }
+
+    private fun logSkippedMemberAdTask(
+        taskTitle: String,
+        skipReason: String,
+        logPrefix: String = "会员任务"
+    ) {
+        val detail = when (skipReason) {
+            "MULTIPLE_TIMER_TASK" -> "多阶段倒计时任务"
+            "VIDEO_TASK", "AD_VIDEO_TASK" -> "视频广告任务"
+            else -> skipReason
+        }
+        Log.member(TAG, "$logPrefix[$taskTitle]#识别到$detail，阶段6按计划跳过")
+    }
+
+    private fun hasExplicitMemberAdTaskMarker(
+        taskObject: JSONObject?,
+        taskConfigInfo: JSONObject?,
+        hasMemberAdUrlMarker: Boolean
+    ): Boolean {
+        if (hasMemberAdUrlMarker) {
+            return true
+        }
+        val configIds = linkedSetOf<String>().apply {
+            taskObject?.let(::resolveCurrentMemberTaskConfigId)?.takeIf { it.isNotBlank() }?.let(::add)
+            taskObject?.optString("configId")?.takeIf { it.isNotBlank() }?.let(::add)
+            taskConfigInfo?.optString("configId")?.takeIf { it.isNotBlank() }?.let(::add)
+            taskConfigInfo?.optLong("id", 0L)?.takeIf { it > 0 }?.toString()?.let(::add)
+        }
+        if (configIds.any { it.length == 8 && it.startsWith("3200") }) {
+            return true
+        }
+        return taskObject?.optBoolean("adTaskFlag") == true ||
+            taskConfigInfo?.optBoolean("adTaskFlag") == true ||
+            taskObject?.optBoolean("adTask") == true ||
+            taskConfigInfo?.optBoolean("adTask") == true
+    }
+
+    private fun hasMemberAdVideoSchema(
+        taskObject: JSONObject?,
+        taskConfigInfo: JSONObject?
+    ): Boolean {
+        return sequenceOf(
+            taskObject?.optString("schemaJson"),
+            taskConfigInfo?.optString("schemaJson")
+        ).filterNotNull()
+            .any { schemaJson ->
+                if (schemaJson.isBlank()) {
+                    false
+                } else {
+                    runCatching {
+                        JSONObject(schemaJson).optString("videoUrl").isNotBlank()
+                    }.getOrDefault(false)
+                }
+            }
+    }
+
+    private fun extractMemberAdBizIdFromText(text: String): String? {
+        if (text.isBlank()) {
+            return null
+        }
+        UrlUtil.getParamValue(text, "bizId")?.takeIf { it.isNotBlank() }?.let { return it }
+        UrlUtil.getParamValue(text, "opParam")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { opParam ->
+                runCatching { JSONObject(opParam).optString("bizId") }
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { return it }
+            }
+        val jsonMatcher = Pattern.compile("\"bizId\"\\s*:\\s*\"([^\"]+)\"").matcher(text)
+        if (jsonMatcher.find()) {
+            return jsonMatcher.group(1)
+        }
+        val queryMatcher = Pattern.compile("bizId=([^&#\"]+)").matcher(text)
+        if (queryMatcher.find()) {
+            return queryMatcher.group(1)
+        }
+        return null
+    }
+
+    private fun looksLikeMemberAdTaskUrl(text: String): Boolean {
+        if (text.isBlank()) {
+            return false
+        }
+        val normalized = text.lowercase()
+        return normalized.contains("com.alipay.adtask.biz.mobilegw.service.task.finish") ||
+            normalized.contains("spacecode#ant_member_xlight_task") ||
+            normalized.contains("spacecode=ant_member_xlight_task") ||
+            (normalized.contains("renderconfigkey=") && normalized.contains("ant_member_xlight_task"))
+    }
+
+    private suspend fun finishMemberAdTask(
+        taskConfigId: String,
+        taskTitle: String,
+        fallbackAwardPoint: String,
+        bizId: String
+    ): Boolean = CoroutineUtils.run {
+        val response = AntMemberRpcCall.taskFinish(bizId)
+        val responseObject = JSONObject(response)
+        val success = responseObject.optBoolean("success") ||
+            responseObject.optString("errCode") == "0" ||
+            responseObject.optString("resultCode").equals("SUCCESS", true)
+        if (!success) {
+            val message = sequenceOf(
+                responseObject.optString("errMsg"),
+                responseObject.optString("resultDesc"),
+                responseObject.optString("errorMessage"),
+                response
+            ).firstOrNull { it.isNotBlank() }.orEmpty()
+            Log.member(TAG, "会员任务[$taskTitle]#广告任务上报失败:$message")
+            return@run false
+        }
+        val verifyState = checkMemberAdTaskFinished(taskConfigId, bizId)
+        val rewardPoint = responseObject.optJSONObject("extendInfo")
+            ?.optJSONObject("rewardInfo")
+            ?.optString("rewardAmount")
+            .orEmpty()
+            .ifEmpty { fallbackAwardPoint }
+        if (verifyState == CurrentMemberTaskVerifyState.CONFIRMED) {
+            if (rewardPoint.isNotBlank()) {
+                Log.member("会员任务[$taskTitle]#获得积分$rewardPoint")
+            } else {
+                Log.member("会员任务[$taskTitle]#广告任务完成")
+            }
+        } else {
+            Log.member(TAG, "会员任务[$taskTitle]#广告任务上报成功，状态待后续页面确认")
+        }
+        return@run true
+    }
+
+    private suspend fun checkMemberAdTaskFinished(
+        taskConfigId: String,
+        bizId: String
+    ): CurrentMemberTaskVerifyState {
+        if (taskConfigId.isBlank() || bizId.isBlank()) {
+            return CurrentMemberTaskVerifyState.UNCONFIRMED
+        }
+        return try {
+            val detailResponse = AntMemberRpcCall.querySingleAdTaskProcessDetail(taskConfigId, bizId)
+            val detailObject = JSONObject(detailResponse)
+            if (!ResChecker.checkRes(TAG, detailObject)) {
+                return CurrentMemberTaskVerifyState.UNCONFIRMED
+            }
+            val taskProcessObject = detailObject.optJSONObject("resultData")?.optJSONObject("taskProcessVO")
+            if (isMemberTaskProcessFinished(taskProcessObject)) {
+                CurrentMemberTaskVerifyState.CONFIRMED
+            } else {
+                CurrentMemberTaskVerifyState.UNCONFIRMED
+            }
+        } catch (_: JSONException) {
+            CurrentMemberTaskVerifyState.UNCONFIRMED
+        }
     }
 
     /**
