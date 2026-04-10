@@ -1323,79 +1323,28 @@ class AntOrchard : ModelTask() {
 
     private fun executeXLightTask(task: JSONObject, title: String): Boolean {
         try {
-            val taskDisplayConfig = task.optJSONObject("taskDisplayConfig") ?: return false
-            val targetUrl = taskDisplayConfig.optString("targetUrl")
-            if (targetUrl.isEmpty()) {
-                Log.orchard(TAG, "农场广告任务⏭️[$title] 缺少 targetUrl")
-                return false
-            }
-
-            val pageUrl = UrlUtil.getFullNestedUrl(targetUrl, "url")
-                ?: UrlUtil.getParamValue(targetUrl, "url")
-                ?: targetUrl.takeIf { it.startsWith("http") }
-            if (pageUrl.isNullOrEmpty()) {
-                Log.orchard(TAG, "农场广告任务⏭️[$title] 无法解析 pageUrl")
-                return false
-            }
-
-            val spaceCode = UrlUtil.extractParamFromUrl(pageUrl, "spaceCodeFeeds")
-                ?: UrlUtil.getParamValue(targetUrl, "spaceCodeFeeds")
-            val referToken = UrlUtil.extractParamFromUrl(pageUrl, "tokenFeeds")
-                ?: UrlUtil.getParamValue(targetUrl, "tokenFeeds")
-            if (spaceCode.isNullOrEmpty()) {
-                Log.orchard(TAG, "农场广告任务⏭️[$title] 无法解析 spaceCodeFeeds")
-                return false
-            }
-
-            val response = XLightRpcCall.xlightPlugin(
-                pageUrl = pageUrl,
-                pageFrom = XLIGHT_PAGE_FROM,
-                session = buildXLightSession(),
-                spaceCode = spaceCode,
-                referToken = referToken
-            )
-            val responseJson = JSONObject(response)
-            val playingResult = responseJson.optJSONObject("resData")?.optJSONObject("playingResult")
-                ?: responseJson.optJSONObject("playingResult")
-            if (playingResult == null) {
-                Log.orchard(TAG, "农场广告任务⏭️[$title] 未返回 playingResult")
-                return false
-            }
-
-            val playingBizId = playingResult.optString("playingBizId")
-            val eventRewardInfoList = playingResult.optJSONObject("eventRewardDetail")
-                ?.optJSONArray("eventRewardInfoList")
-            if (playingBizId.isEmpty() || eventRewardInfoList == null || eventRewardInfoList.length() == 0) {
-                Log.orchard(TAG, "农场广告任务⏭️[$title] 未返回可完成事件")
-                return false
-            }
-
+            val browseConfig = buildOrchardBrowseTaskConfig(task, title) ?: return false
             var finishedCount = 0
-            for (i in 0 until eventRewardInfoList.length()) {
-                val playEventInfo = eventRewardInfoList.optJSONObject(i) ?: continue
-                if (playEventInfo.optString("playingEventType") != "BROWSE") {
-                    continue
+            var remainingRounds = browseConfig.rounds
+            var round = 1
+
+            while (remainingRounds > 0) {
+                val finishedInRound = executeOrchardBrowseRound(browseConfig, title, round)
+                if (finishedInRound <= 0) {
+                    break
                 }
-                val finishResult = JSONObject(
-                    XLightRpcCall.finishTask(
-                        playBizId = playingBizId,
-                        playEventInfo = playEventInfo
-                    )
-                )
-                if (!ResChecker.checkRes(TAG, finishResult)) {
-                    Log.orchard(TAG, "农场广告任务⏭️[$title] 浏览事件领取失败:${finishResult.optString("desc", finishResult.optString("errMsg"))}")
-                    return finishedCount > 0
+                finishedCount += finishedInRound
+                remainingRounds = (remainingRounds - finishedInRound).coerceAtLeast(0)
+                if (remainingRounds > 0) {
+                    round++
+                    CoroutineUtils.sleepCompat(executeIntervalInt.toLong())
                 }
-                finishedCount++
-                CoroutineUtils.sleepCompat(executeIntervalInt.toLong())
             }
 
             if (finishedCount > 0) {
-                Log.orchard("农场广告任务📺[$title] 完成${finishedCount}次浏览奖励")
+                Log.orchard("农场浏览任务📺[$title] 完成${finishedCount}次浏览奖励")
                 return true
             }
-
-            Log.orchard(TAG, "农场广告任务⏭️[$title] 未找到 BROWSE 事件")
             return false
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "executeXLightTask err:", t)
@@ -1403,11 +1352,252 @@ class AntOrchard : ModelTask() {
         }
     }
 
+    private fun executeOrchardBrowseRound(
+        config: OrchardBrowseTaskConfig,
+        title: String,
+        round: Int
+    ): Int {
+        val session = buildXLightSession()
+        val processedEventKeys = mutableSetOf<String>()
+        var playingPageInfo: String? = null
+        var pageNo = 1
+        var finishedCount = 0
+
+        while (pageNo <= 5) {
+            val response = XLightRpcCall.xlightPlugin(
+                pageUrl = config.pageUrl,
+                pageFrom = XLIGHT_PAGE_FROM,
+                session = session,
+                spaceCode = config.spaceCode,
+                referToken = config.referToken,
+                searchInfo = if (config.usePagedSearchInfo) buildOrchardBrowseSearchInfo(pageNo) else null,
+                playingPageInfo = playingPageInfo,
+                pageNo = pageNo,
+                positionExtMap = config.positionExtMap
+            )
+            if (response.isBlank()) {
+                Log.orchard(TAG, "农场浏览任务⏭️[$title] 第${round}轮第${pageNo}页 xlightPlugin 无响应")
+                break
+            }
+
+            val responseJson = JSONObject(response)
+            val playingResult = responseJson.optJSONObject("resData")?.optJSONObject("playingResult")
+                ?: responseJson.optJSONObject("playingResult")
+            if (playingResult == null) {
+                Log.orchard(TAG, "农场浏览任务⏭️[$title] 第${round}轮第${pageNo}页未返回 playingResult")
+                break
+            }
+
+            val playingBizId = playingResult.optString("playingBizId")
+            val nextPlayingPageInfo = playingResult.optString("playingPageInfo").takeIf { it.isNotBlank() }
+            val eventRewardInfoList = playingResult.optJSONObject("eventRewardDetail")
+                ?.optJSONArray("eventRewardInfoList")
+            if (playingBizId.isBlank() || eventRewardInfoList == null || eventRewardInfoList.length() == 0) {
+                if (pageNo == 1 && finishedCount == 0) {
+                    Log.orchard(TAG, "农场浏览任务⏭️[$title] 第${round}轮未返回可完成事件")
+                }
+                if (nextPlayingPageInfo.isNullOrBlank()) {
+                    break
+                }
+                playingPageInfo = nextPlayingPageInfo
+                pageNo++
+                continue
+            }
+
+            val browseEvents = mutableListOf<JSONObject>()
+            for (i in 0 until eventRewardInfoList.length()) {
+                val playEventInfo = eventRewardInfoList.optJSONObject(i) ?: continue
+                if (playEventInfo.optString("playingEventType") != "BROWSE") {
+                    continue
+                }
+                val eventKey = buildBrowseEventKey(playingBizId, playEventInfo)
+                if (processedEventKeys.add(eventKey)) {
+                    browseEvents.add(playEventInfo)
+                }
+            }
+            if (browseEvents.isEmpty()) {
+                if (nextPlayingPageInfo.isNullOrBlank()) {
+                    break
+                }
+                playingPageInfo = nextPlayingPageInfo
+                pageNo++
+                continue
+            }
+
+            browseEvents.sortBy { it.optInt("order", Int.MAX_VALUE) }
+            var advancedToNextPage = false
+            for (browseEvent in browseEvents) {
+                val eventStep = browseEvent.optInt("eventStep", 15).coerceAtLeast(1)
+                val waitMillis = resolveOrchardBrowseWaitMillis(eventStep)
+                Log.orchard(
+                    TAG,
+                    "农场浏览任务⏳[$title] 第${round}/${config.rounds}轮 order=${browseEvent.optInt("order", 0)} 需等待${waitMillis}ms(${eventStep}s)"
+                )
+                CoroutineUtils.sleepCompat(waitMillis)
+
+                val finishResponse = XLightRpcCall.finishTask(
+                    playBizId = playingBizId,
+                    playEventInfo = browseEvent,
+                    iepTaskSceneCode = config.iepTaskSceneCode,
+                    iepTaskType = config.iepTaskType
+                )
+                if (finishResponse.isBlank()) {
+                    Log.orchard(
+                        TAG,
+                        "农场浏览任务❌[$title] 第${round}/${config.rounds}轮完成失败: finishTask 无响应"
+                    )
+                    return finishedCount
+                }
+                val finishResult = JSONObject(finishResponse)
+                if (!ResChecker.checkRes(TAG, finishResult)) {
+                    val errMsg = finishResult.optString("desc")
+                        .ifBlank { finishResult.optString("errMsg") }
+                        .ifBlank { finishResult.optString("resultDesc") }
+                    Log.orchard(
+                        TAG,
+                        "农场浏览任务❌[$title] 第${round}/${config.rounds}轮完成失败: $errMsg"
+                    )
+                    return finishedCount
+                }
+                finishedCount++
+                CoroutineUtils.sleepCompat(executeIntervalInt.toLong())
+                if (config.stopAfterFirstRewardInRound) {
+                    return finishedCount
+                }
+                if (!nextPlayingPageInfo.isNullOrBlank()) {
+                    // 抓包显示分页浏览链路是一页一奖，完成当前奖励后需继续翻页刷新状态。
+                    playingPageInfo = nextPlayingPageInfo
+                    pageNo++
+                    advancedToNextPage = true
+                    break
+                }
+            }
+
+            if (advancedToNextPage) {
+                continue
+            }
+            if (nextPlayingPageInfo.isNullOrBlank()) {
+                break
+            }
+            playingPageInfo = nextPlayingPageInfo
+            pageNo++
+        }
+
+        return finishedCount
+    }
+
+    private fun buildOrchardBrowseTaskConfig(task: JSONObject, title: String): OrchardBrowseTaskConfig? {
+        val taskDisplayConfig = task.optJSONObject("taskDisplayConfig") ?: return null
+        val targetUrl = taskDisplayConfig.optString("targetUrl")
+        if (targetUrl.isEmpty()) {
+            Log.orchard(TAG, "农场浏览任务⏭️[$title] 缺少 targetUrl")
+            return null
+        }
+
+        val pageUrl = UrlUtil.getFullNestedUrl(targetUrl, "url")
+            ?: UrlUtil.getParamValue(targetUrl, "url")
+            ?: targetUrl.takeIf { it.startsWith("http") }
+        if (pageUrl.isNullOrEmpty()) {
+            Log.orchard(TAG, "农场浏览任务⏭️[$title] 无法解析 pageUrl")
+            return null
+        }
+
+        val spaceCode = UrlUtil.extractParamFromUrl(pageUrl, "spaceCodeFeeds")
+            ?: UrlUtil.getParamValue(targetUrl, "spaceCodeFeeds")
+        if (spaceCode.isNullOrEmpty()) {
+            Log.orchard(TAG, "农场浏览任务⏭️[$title] 无法解析 spaceCodeFeeds")
+            return null
+        }
+
+        val referToken = UrlUtil.extractParamFromUrl(pageUrl, "tokenFeeds")
+            ?: UrlUtil.getParamValue(targetUrl, "tokenFeeds")
+        val actionType = task.optString("actionType")
+        val iepTaskSceneCode = UrlUtil.getParamValue(targetUrl, "iepTaskSceneCode")
+            ?: task.optString("sceneCode").takeIf { actionType == "VISIT" && it.isNotBlank() }
+        val iepTaskType = UrlUtil.getParamValue(targetUrl, "iepTaskType")
+            ?: task.optString("taskId").takeIf { actionType == "VISIT" && it.isNotBlank() }
+        val rightsTimes = task.optInt("rightsTimes", 0)
+        val canDoTaskTimesLimit = UrlUtil.getParamValue(targetUrl, "canDoTaskTimesLimit")?.toIntOrNull()
+            ?: task.optInt("rightsTimesLimit", 0).takeIf { it > 0 && actionType == "VISIT" }
+            ?: task.optInt("rightsTimesLimit", 0).takeIf { it > 0 }
+        val rounds = canDoTaskTimesLimit?.let { (it - rightsTimes).coerceAtLeast(0) } ?: 1
+        if (canDoTaskTimesLimit != null && rounds <= 0) {
+            Log.orchard(
+                TAG,
+                "农场浏览任务⏭️[$title] 剩余次数不足 rightsTimes=$rightsTimes rightsTimesLimit=$canDoTaskTimesLimit"
+            )
+            return null
+        }
+        val positionExtMap = JSONObject()
+        if (canDoTaskTimesLimit != null) {
+            positionExtMap.put("canDoTaskTimesLimit", canDoTaskTimesLimit.toString())
+        }
+
+        return OrchardBrowseTaskConfig(
+            pageUrl = pageUrl,
+            spaceCode = spaceCode,
+            referToken = referToken,
+            iepTaskSceneCode = iepTaskSceneCode,
+            iepTaskType = iepTaskType,
+            rounds = rounds,
+            positionExtMap = positionExtMap,
+            usePagedSearchInfo = referToken.isNullOrBlank() &&
+                    pageUrl.contains("multi-stage-task.html") &&
+                    iepTaskSceneCode != null &&
+                    iepTaskType != null,
+            stopAfterFirstRewardInRound = rounds == 1 &&
+                    referToken.isNullOrBlank() &&
+                    pageUrl.contains("multi-stage-task.html")
+        )
+    }
+
+    private fun buildBrowseEventKey(playBizId: String, playEventInfo: JSONObject): String {
+        return "$playBizId#${playEventInfo.optInt("order", -1)}#${playEventInfo.optInt("rewardId", -1)}#${playEventInfo.optInt("eventStep", 0)}"
+    }
+
+    private fun resolveOrchardBrowseWaitMillis(eventStepSeconds: Int): Long {
+        return eventStepSeconds.coerceAtLeast(1) * 1000L + 1200L
+    }
+
+    private fun buildOrchardBrowseSearchInfo(pageNo: Int): JSONObject? {
+        if (pageNo <= 1) {
+            return null
+        }
+        return JSONObject().apply {
+            put("rangeFilter", "goodsPrice:-")
+            put("tabKey", "all")
+        }
+    }
+
     private fun isXLightTask(task: JSONObject): Boolean {
         val taskDisplayConfig = task.optJSONObject("taskDisplayConfig") ?: return false
         val targetUrl = taskDisplayConfig.optString("targetUrl")
-        return targetUrl.contains("spaceCodeFeeds=") && targetUrl.contains("tokenFeeds=")
+        if (!targetUrl.contains("spaceCodeFeeds=")) {
+            return false
+        }
+        val pageUrl = UrlUtil.getFullNestedUrl(targetUrl, "url")
+            ?: UrlUtil.getParamValue(targetUrl, "url")
+            ?: targetUrl
+        if (targetUrl.contains("tokenFeeds=")) {
+            return true
+        }
+        return pageUrl.contains("multi-stage-task.html") &&
+                targetUrl.contains("iepTaskSceneCode=") &&
+                targetUrl.contains("iepTaskType=") &&
+                targetUrl.contains("canDoTaskTimesLimit=")
     }
+
+    private data class OrchardBrowseTaskConfig(
+        val pageUrl: String,
+        val spaceCode: String,
+        val referToken: String?,
+        val iepTaskSceneCode: String?,
+        val iepTaskType: String?,
+        val rounds: Int,
+        val positionExtMap: JSONObject,
+        val usePagedSearchInfo: Boolean,
+        val stopAfterFirstRewardInRound: Boolean
+    )
 
     private fun logLinkedTaskHints(responseJson: JSONObject) {
         val convertToManureTask = responseJson.optJSONObject("convertToManureTask")
