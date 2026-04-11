@@ -45,7 +45,7 @@ object EnergyRainCoroutine {
      * 执行能量雨功能
      * @param isManual 是否为手动触发
      */
-    suspend fun execEnergyRain(isManual: Boolean = false) {
+    suspend fun execEnergyRain(isManual: Boolean = false): Boolean {
         try {
             // 执行频率检查：防止短时间内重复执行
             val currentTime = System.currentTimeMillis()
@@ -57,16 +57,18 @@ object EnergyRainCoroutine {
                 delay(cooldownSeconds * 1000.toLong())
             }
 
-            energyRain(isManual)
+            val executed = energyRain(isManual)
 
             // 更新最后执行时间
             lastExecuteTime = System.currentTimeMillis()
+            return executed
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 协程取消是正常现象，不记录为错误
             Log.forest(TAG, "execEnergyRain 协程被取消")
             throw e  // 必须重新抛出以保证取消机制正常工作
         } catch (th: Throwable) {
             Log.printStackTrace(TAG, "执行能量雨出错:", th)
+            return false
         }
     }
 
@@ -74,10 +76,11 @@ object EnergyRainCoroutine {
      * 能量雨主逻辑（协程版本）
      * @param isManual 是否为手动触发
      */
-    private suspend fun energyRain(isManual: Boolean) {
+    private suspend fun energyRain(isManual: Boolean): Boolean {
         try {
             var playedCount = 0
             val maxPlayLimit = 10
+            var shouldRunPostFlow = false
 
             do {
                 val joEnergyRainHome = JSONObject(AntForestRpcCall.queryEnergyRainHome())
@@ -94,10 +97,12 @@ object EnergyRainCoroutine {
 
                 // 1️⃣ 检查是否可以开始能量雨
                 if (canPlayToday) {
-                    startEnergyRain()
-                    playedCount++
-                    randomDelay(3000, 5000) // 随机延迟3-5秒
-                    worked = true
+                    if (startEnergyRain()) {
+                        playedCount++
+                        randomDelay(3000, 5000) // 随机延迟3-5秒
+                        shouldRunPostFlow = true
+                        worked = true
+                    }
                 }
 
                 // 2️⃣ 检查是否可以赠送能量雨
@@ -181,6 +186,7 @@ object EnergyRainCoroutine {
                         if (taskResult == TaskResult.SUCCESS) {
                             randomDelay(3000, 5000) // 随机延迟3-5秒
                             playedCount++
+                            shouldRunPostFlow = true
                             worked = true
                         } else if (taskResult == TaskResult.ALREADY_DONE && !isManual) {
                             // 确定任务已完成或今日不可用，才设置标记
@@ -203,6 +209,7 @@ object EnergyRainCoroutine {
             if (playedCount >= maxPlayLimit) {
                 Log.forest(TAG, "能量雨执行达到单次任务上限($maxPlayLimit)，停止执行")
             }
+            return shouldRunPostFlow
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 协程取消是正常现象，不记录为错误
             Log.forest(TAG, "energyRain 协程被取消")
@@ -210,13 +217,14 @@ object EnergyRainCoroutine {
         } catch (th: Throwable) {
             Log.forest(TAG, "energyRain err:")
             Log.printStackTrace(TAG, th)
+            return false
         }
     }
 
     /**
      * 开始能量雨（协程版本）
      */
-    private suspend fun startEnergyRain() {
+    private suspend fun startEnergyRain(): Boolean {
         try {
             Log.forest("开始执行能量雨🌧️")
             val joStart = JSONObject(AntForestRpcCall.startEnergyRain())
@@ -237,10 +245,14 @@ object EnergyRainCoroutine {
                     val s = "收获能量雨🌧️[${sum}g]"
                     Toast.show(s)
                     Log.forest(s)
+                    randomDelay(300, 400) // 随机延迟 300-400ms
+                    return true
                 }
-                randomDelay(300, 400) // 随机延迟 300-400ms
+                Log.forest(TAG, "energyRainSettlement: $resultJson")
+                return false
             } else {
                 Log.forest(TAG, "startEnergyRain: $joStart")
+                return false
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 协程取消是正常现象，不记录为错误
@@ -249,6 +261,7 @@ object EnergyRainCoroutine {
         } catch (th: Throwable) {
             Log.forest(TAG, "startEnergyRain err:")
             Log.printStackTrace(TAG, th)
+            return false
         }
     }
 

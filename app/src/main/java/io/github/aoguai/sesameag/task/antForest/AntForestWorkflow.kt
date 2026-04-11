@@ -48,6 +48,7 @@ internal suspend fun AntForest.runForestHomeFollowUpWorkflow(selfHomeObj: JSONOb
     if (selfHomeObj == null) {
         return
     }
+    var shouldRefreshForestHomeAfterEnergyRain = false
 
     checkAndHandleWhackMole()
     tc.countDebug("拼手速")
@@ -122,7 +123,10 @@ internal suspend fun AntForest.runForestHomeFollowUpWorkflow(selfHomeObj: JSONOb
                 useEnergyRainChanceCard()
                 tc.countDebug("使用能量雨卡")
             }
-            EnergyRainCoroutine.execEnergyRain()
+            if (EnergyRainCoroutine.execEnergyRain()) {
+                shouldRefreshForestHomeAfterEnergyRain = true
+                handleEnergyRainPostFlow()
+            }
             tc.countDebug("能量雨")
         } else {
             Log.forest(FOREST_TAG, "能量雨未到执行时间，跳过")
@@ -160,8 +164,25 @@ internal suspend fun AntForest.runForestHomeFollowUpWorkflow(selfHomeObj: JSONOb
 
     doforestgame()
 
+    if (shouldRefreshForestHomeAfterEnergyRain && !hasPendingRobMultiplierEnergy()) {
+        updateSelfHomePage(homePageSource = AntForestRpcCall.BACK_FROM_ENERGY_RAIN_SOURCE)
+        tc.countDebug("能量雨后刷新主页")
+    }
+
     if (hasPendingRobMultiplierEnergy()) {
-        updateSelfHomePage(collectRobMultiplierEnergy = true)
+        updateSelfHomePage(
+            collectRobMultiplierEnergy = true,
+            robMultiplierEnergySource = if (shouldRefreshForestHomeAfterEnergyRain) {
+                AntForestRpcCall.BACK_FROM_ENERGY_RAIN_SOURCE
+            } else {
+                null
+            },
+            homePageSource = if (shouldRefreshForestHomeAfterEnergyRain) {
+                AntForestRpcCall.BACK_FROM_ENERGY_RAIN_SOURCE
+            } else {
+                null
+            }
+        )
         tc.countDebug("领取N倍卡能量")
     }
 
