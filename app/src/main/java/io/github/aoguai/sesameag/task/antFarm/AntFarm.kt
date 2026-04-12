@@ -343,8 +343,8 @@ class AntFarm : ModelTask() {
                 false
             ).withDesc("自动使用加速卡缩短进食时间。").also { useAccelerateTool = it })
         modelFields.addField(
-            IntegerModelField("remainingTime", "加速卡 | 防浪费阈值(分钟)(-1关闭)", 40, -1, null).withDesc(
-                "剩余时间大于该值时才使用加速卡；-1 关闭，0 表示只要还有剩余时间就允许加速。"
+            IntegerModelField("remainingTime", "加速卡 | 防浪费阈值(分钟)(-1按60分钟)", 40, -1, null).withDesc(
+                "剩余时间大于等于该值时才使用加速卡；-1 表示关闭自定义阈值并按默认60分钟无损模式处理，0 表示只要还有剩余时间就允许加速。"
             ).also { remainingTime = it }
         )
         modelFields.addField(
@@ -1242,10 +1242,7 @@ class AntFarm : ModelTask() {
         }
 
         // 4. 判断是否需要使用加速道具（仅在正在吃饭时尝试）
-        if (useAccelerateTool?.value == true &&
-            isAccelerateToolFlowEnabled() &&
-            AnimalFeedStatus.EATING.name == ownerAnimal.animalFeedStatus
-        ) {
+        if (useAccelerateTool?.value == true && AnimalFeedStatus.EATING.name == ownerAnimal.animalFeedStatus) {
             // 记录调试日志：加速卡判定前的关键状态
             Log.farm(
                 TAG,
@@ -2594,11 +2591,8 @@ class AntFarm : ModelTask() {
     }
 
     private fun getAccelerateToolRemainingTimeValue(): Int {
-        return remainingTime.value ?: remainingTime.defaultValue ?: 40
-    }
-
-    internal fun isAccelerateToolFlowEnabled(): Boolean {
-        return getAccelerateToolRemainingTimeValue() >= 0
+        val configuredValue = remainingTime.value ?: remainingTime.defaultValue ?: 40
+        return if (configuredValue < 0) 60 else configuredValue
     }
 
     internal fun getAccelerateToolUsageSummary(): String {
@@ -2646,7 +2640,7 @@ class AntFarm : ModelTask() {
         return when {
             thresholdMinutes < 0 -> false
             thresholdMinutes == 0 -> remainingFood > 0.0
-            else -> remainingFood > thresholdMinutes / 60.0 * foodConsumePerHour
+            else -> remainingFood >= thresholdMinutes / 60.0 * foodConsumePerHour
         }
     }
 
@@ -2657,9 +2651,6 @@ class AntFarm : ModelTask() {
      */
     private suspend fun useAccelerateTool(): Boolean {
         val remainingTimeValue = getAccelerateToolRemainingTimeValue()
-        if (remainingTimeValue < 0) {
-            return false
-        }
         // 1) 基础开关：命中统一停止标记、系统硬上限或用户软上限时直接返回
         when (detectAccelerateToolLimit(syncFlag = true)) {
             AccelerateToolLimitReason.SYSTEM_LIMIT -> {
@@ -2716,7 +2707,7 @@ class AntFarm : ModelTask() {
         var remainingFood = currentCountdown * totalConsumeSpeed
         /* 加速卡逻辑应该是消耗自己小鸡1个小时的食物消耗量，这个量只取决于自己小鸡的食物消耗速度，大约38g左右；
             计算：foodConsumeSpeed（g/s） * 3600 (g)
-            因此对于不足一个小时/指定大于剩余时间的加速应该理解为剩余饲料大于这个指定时间的自己小鸡的食物消耗量，
+            因此对于不足一个小时/指定剩余时间阈值的加速应该理解为剩余饲料大于等于这个指定时间的自己小鸡的食物消耗量，
             这种情况下即使有多只偷吃小鸡时也可以按照设置的剩余时间（remainingTime）正确判断是否继续使用加速卡。
             也就是说，即使有多只鸡在偷吃/工作，界面上显示还有remainingTime分钟吃完，那使用加速卡也可以加速掉
             剩余食物，然后再次投喂
@@ -2830,7 +2821,7 @@ class AntFarm : ModelTask() {
                 if (remainingTimeValue == 0) {
                     Log.farm("当前已无剩余时间可继续加速，将在下次喂食后再次使用加速卡")
                 } else {
-                    Log.farm("剩余可加速的时间不大于设置的${remainingTimeValue}分钟，将在下次喂食后再次使用加速卡")
+                    Log.farm("剩余可加速的时间小于设置的${remainingTimeValue}分钟，将在下次喂食后再次使用加速卡")
                 }
             }
             "SYSTEM_LIMIT" -> Log.farm("今日加速卡已达到系统上限，本轮不再继续使用")

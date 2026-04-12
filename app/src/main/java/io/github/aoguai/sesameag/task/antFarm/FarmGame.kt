@@ -33,13 +33,12 @@ object FarmGame {
             return
         }
 
-        val isAccelEnabled = antFarm.useAccelerateTool!!.value
+        val isAccelEnabled = antFarm.useAccelerateTool!!.value == true
         val isInsideTimeRange = antFarm.farmGameTrigger?.getTriggerSpec()?.let {
             TimeTriggerEvaluator.evaluateNow(it).allowNow
         } == true
-        val ignoreAcceLimitMode = !isAccelEnabled!! || antFarm.ignoreAcceLimit!!.value == true
-        val isAccelFlowEnabled = !ignoreAcceLimitMode && antFarm.isAccelerateToolFlowEnabled()
-        val isAccelLimitReached = isAccelFlowEnabled && antFarm.hasReachedAccelerateToolLimit()
+        val ignoreAcceLimitMode = !isAccelEnabled || antFarm.ignoreAcceLimit!!.value == true
+        val isAccelLimitReached = isAccelEnabled && antFarm.hasReachedAccelerateToolLimit()
 
         when {
             ignoreAcceLimitMode -> {
@@ -52,7 +51,7 @@ object FarmGame {
                     Log.farm("当前处于按时游戏改分模式，未到设定时间，跳过")
                 }
             }
-            !isAccelFlowEnabled || isAccelLimitReached || antFarm.accelerateToolCount <= 0 -> {
+            isAccelLimitReached || antFarm.accelerateToolCount <= 0 -> {
                 antFarm.syncAnimalStatus(antFarm.ownerFarmId)
                 val foodStockThreshold = AntFarm.foodStockLimit - antFarm.gameRewardMax!!.value!!
                 val reserveMin = 180
