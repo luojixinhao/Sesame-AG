@@ -2839,7 +2839,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         var shouldCooldown = false
         var firstTakeLook = true
         var firstTakeLookExposedUserId = ""
-        val actualSource = source?.takeIf { it.isNotBlank() }
+        val resolvedTakeLookSource = source?.takeIf { it.isNotBlank() }
+            ?: AntForestRpcCall.defaultTakeLookSource()
         var takeLookSessionStarted = false
         var takeLookEndRequested = false
         var takeLookEndPayload: JSONObject? = null
@@ -2854,7 +2855,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 return takeLookEndPayload
             }
             takeLookEndRequested = true
-            takeLookEndPayload = queryTakeLookEndPayload(actualSource)
+            takeLookEndPayload = queryTakeLookEndPayload(resolvedTakeLookSource)
             return takeLookEndPayload
         }
 
@@ -2901,7 +2902,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     takeLookSessionStarted = true
                     val resStr = AntForestRpcCall.takeLook(
                         buildTakeLookSkipUsers(),
-                        actualSource,
+                        resolvedTakeLookSource,
                         exposedUserId = if (takeLookStartedThisRound) firstTakeLookExposedUserId else "",
                         takeLookStart = takeLookStartedThisRound
                     )
@@ -2986,7 +2987,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     continue@loop
                 }
                 // G. 查询主页详情
-                val friendHomeObj = queryTakeLookFriendHome(friendId, actualSource, fromAct)
+                val friendHomeObj = queryTakeLookFriendHome(friendId, resolvedTakeLookSource, fromAct)
                 if (friendHomeObj == null) {
                     if (takeLookEnded) {
                         Log.forest("找能量已达到官方结束状态，结束")
@@ -3010,7 +3011,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     // 后续 takeLook 请求会带上 skipUsers，排行榜补齐也会通过 processedUsersCache 跳过本轮已确认保护的好友
                 } else {
                     // I. 收取能量
-                    collectEnergy(friendId, friendHomeObj, "takeLook", rpcSource = actualSource)
+                    collectEnergy(friendId, friendHomeObj, "takeLook", rpcSource = resolvedTakeLookSource)
                     handleFriendExtraBenefits(friendId, friendHomeObj)
                     foundCount++
                     consecutiveEmpty = 0 // 重置空计数
@@ -3031,7 +3032,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 takeLookEndPayload = requestTakeLookEndIfNeeded()
             }
             if (takeLookEndPayload != null) {
-                processTakeLookEndTaskList(actualSource, takeLookEndPayload)
+                processTakeLookEndTaskList(resolvedTakeLookSource, takeLookEndPayload)
             }
             // 逻辑结束后的状态处理
             if (shouldCooldown) {
@@ -5693,7 +5694,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     ): EnergyRainCoroutine.EnergyRainGameDriveResult {
         return try {
             val gameCenterContext = syncEnergyRainGameCenterContext(request)
-            val gameCenterDriveResult = closeEnergyRainGameCenterDeliveryTasks(request, gameCenterContext.deliveryTasks)
+            val gameCenterDriveResult = closeEnergyRainGameCenterLatestTriggerTasks(
+                request,
+                gameCenterContext.triggerTasks
+            ) ?: closeEnergyRainGameCenterDeliveryTasks(request, gameCenterContext.deliveryTasks)
             val driveTaskType = request.driveTaskType.takeIf { it.isNotBlank() }
                 ?: return gameCenterDriveResult ?: EnergyRainCoroutine.EnergyRainGameDriveResult(
                     EnergyRainCoroutine.EnergyRainGameDriveStatus.NOT_FOUND,
@@ -5774,6 +5778,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     }
 
     private data class EnergyRainGameCenterContext(
+        val triggerTasks: List<ForestLeyuanOptionalTask> = emptyList(),
         val deliveryTasks: List<EnergyRainGameCenterDeliveryTask> = emptyList()
     )
 
@@ -5793,6 +5798,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         request: EnergyRainCoroutine.EnergyRainGameDriveRequest
     ): EnergyRainGameCenterContext {
         rememberForestGameCenterApp(request.appId)
+        var triggerTasks = emptyList<ForestLeyuanOptionalTask>()
         val deliveryTasks = linkedMapOf<String, EnergyRainGameCenterDeliveryTask>()
         val appSuffix = request.appId?.takeIf { it.isNotBlank() }?.let { " appId=$it" }.orEmpty()
         val progressSuffix = " progress=${request.taskProgress}/${request.taskRequire}"
@@ -5808,9 +5814,51 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         syncEnergyRainGameCenterResponse("queryOptionalPlay") {
             AntForestRpcCall.queryOptionalPlay(currentForestGameCenterRecentAppRecords())
         }?.let { payload ->
+            triggerTasks = extractEnergyRainGameCenterTriggerTasks(payload, request.appId)
             appendEnergyRainGameCenterDeliveryTasks("queryOptionalPlay", payload, request.appId, deliveryTasks)
         }
-        return EnergyRainGameCenterContext(deliveryTasks.values.toList())
+        return EnergyRainGameCenterContext(
+            triggerTasks = triggerTasks,
+            deliveryTasks = deliveryTasks.values.toList()
+        )
+    }
+
+    private fun extractEnergyRainGameCenterTriggerTasks(
+        payload: JSONObject,
+        requestAppId: String?
+    ): List<ForestLeyuanOptionalTask> {
+        if (requestAppId.isNullOrBlank()) {
+            return emptyList()
+        }
+        return parseForestGameCenterOptionalTasks(payload).filter { task ->
+            task.sceneCode == FOREST_LEYUAN_DAILY_TASK_SCENE_CODE &&
+                task.status in FOREST_LEYUAN_PROGRESS_PENDING_STATUSES &&
+                task.appId == requestAppId
+        }
+    }
+
+    private fun closeEnergyRainGameCenterLatestTriggerTasks(
+        request: EnergyRainCoroutine.EnergyRainGameDriveRequest,
+        triggerTasks: List<ForestLeyuanOptionalTask>
+    ): EnergyRainCoroutine.EnergyRainGameDriveResult? {
+        if (triggerTasks.isEmpty()) {
+            return null
+        }
+        // queryOptionalPlay.taskTriggerPlayInfo.taskList 已成为当前 authoritative source。
+        // 这条同步收尾路径还没有对应的稳定完成 RPC，先阻断旧 IEP 候选，继续走普通驱动回流闭环。
+        val taskSummary = triggerTasks.joinToString(separator = ", ") { task ->
+            "${task.sceneCode}/${task.taskType}(${task.status})"
+        }
+        triggerTasks.forEach { task ->
+            Log.forest(
+                "能量雨游戏任务[${request.gameTaskTitle}]识别最新触发任务源" +
+                    "[${task.title}][${task.sceneCode}/${task.taskType}] status=${task.status}"
+            )
+        }
+        return EnergyRainCoroutine.EnergyRainGameDriveResult(
+            EnergyRainCoroutine.EnergyRainGameDriveStatus.NO_PROGRESS,
+            "最新触发任务源未接入已实现闭环，已跳过旧IEP候选: $taskSummary"
+        )
     }
 
     private fun syncEnergyRainGameCenterResponse(
@@ -7058,10 +7106,15 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                         Log.forest("碎片不足，无法合成动物")
                         break
                     }
-                    // 添加第一个道具ID
-                    piece.optJSONArray("propIdList")?.optString(0, "")?.let { propId ->
-                        piecePropIds.put(propId)
+                    val propId = piece.optJSONArray("propIdList")?.optString(0)?.takeIf { it.isNotBlank() }
+                    if (propId == null) {
+                        canCombineAnimalPiece = false
+                        Log.forest(
+                            "动物碎片合成暂停[$name]：碎片[${piece.optString("propType")}]未返回稳定propIdList，跳过本轮合成"
+                        )
+                        break
                     }
+                    piecePropIds.put(propId)
                 }
                 // 如果所有碎片可用，则尝试合成
                 if (canCombineAnimalPiece) {
@@ -8350,6 +8403,44 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         val appId: String?
     )
 
+    private fun parseForestGameCenterOptionalTasks(payload: JSONObject): List<ForestLeyuanOptionalTask> {
+        val taskList = payload.optJSONObject("taskTriggerPlayInfo")?.optJSONArray("taskList") ?: return emptyList()
+        return buildList {
+            for (i in 0 until taskList.length()) {
+                val rawTask = taskList.optJSONObject(i) ?: continue
+                val sceneCode = rawTask.optString("sceneCode")
+                val taskType = rawTask.optString("taskType")
+                if (sceneCode.isBlank() || taskType.isBlank()) {
+                    continue
+                }
+                val bizInfo = rawTask.optJSONObject("bizInfo") ?: JSONObject()
+                val title = sequenceOf(
+                    bizInfo.optString("title"),
+                    bizInfo.optString("taskTitle"),
+                    bizInfo.optString("desc"),
+                    rawTask.optString("taskType")
+                ).firstOrNull { it.isNotBlank() } ?: taskType
+                val targetUrl = bizInfo.optString("targetUrl")
+                val appId = extractForestTaskAppId(targetUrl)
+                val awardCount = rawTask.optInt("awardCount")
+                    .takeIf { it > 0 }
+                    ?: rawTask.optInt("nextStageAwardCount").takeIf { it > 0 }
+                    ?: rawTask.optInt("totalAwardCount")
+                add(
+                    ForestLeyuanOptionalTask(
+                        rawTask = rawTask,
+                        sceneCode = sceneCode,
+                        taskType = taskType,
+                        status = rawTask.optString("taskStatus"),
+                        title = title,
+                        appId = appId,
+                        awardCount = awardCount
+                    )
+                )
+            }
+        }
+    }
+
     private fun queryForestLeyuanOptionalTasks(): List<ForestLeyuanOptionalTask>? {
         return try {
             val response = AntForestRpcCall.queryOptionalPlay(currentForestGameCenterRecentAppRecords())
@@ -8364,41 +8455,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 Log.error(TAG, "森林乐园 queryOptionalPlay 失败: $msg")
                 return null
             }
-            val taskList = payload.optJSONObject("taskTriggerPlayInfo")?.optJSONArray("taskList") ?: return emptyList()
-            buildList {
-                for (i in 0 until taskList.length()) {
-                    val rawTask = taskList.optJSONObject(i) ?: continue
-                    val sceneCode = rawTask.optString("sceneCode")
-                    val taskType = rawTask.optString("taskType")
-                    if (sceneCode.isBlank() || taskType.isBlank()) {
-                        continue
-                    }
-                    val bizInfo = rawTask.optJSONObject("bizInfo") ?: JSONObject()
-                    val title = sequenceOf(
-                        bizInfo.optString("title"),
-                        bizInfo.optString("taskTitle"),
-                        bizInfo.optString("desc"),
-                        rawTask.optString("taskType")
-                    ).firstOrNull { it.isNotBlank() } ?: taskType
-                    val targetUrl = bizInfo.optString("targetUrl")
-                    val appId = extractForestTaskAppId(targetUrl)
-                    val awardCount = rawTask.optInt("awardCount")
-                        .takeIf { it > 0 }
-                        ?: rawTask.optInt("nextStageAwardCount").takeIf { it > 0 }
-                        ?: rawTask.optInt("totalAwardCount")
-                    add(
-                        ForestLeyuanOptionalTask(
-                            rawTask = rawTask,
-                            sceneCode = sceneCode,
-                            taskType = taskType,
-                            status = rawTask.optString("taskStatus"),
-                            title = title,
-                            appId = appId,
-                            awardCount = awardCount
-                        )
-                    )
-                }
-            }
+            parseForestGameCenterOptionalTasks(payload)
         } catch (t: Throwable) {
             Log.printStackTrace(TAG, "queryForestLeyuanOptionalTasks 异常", t)
             null

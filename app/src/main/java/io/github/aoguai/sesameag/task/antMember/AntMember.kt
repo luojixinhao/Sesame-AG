@@ -9075,7 +9075,7 @@ class AntMember : ModelTask() {
 
         private suspend fun collectMerchantPointBalls(): Boolean = CoroutineUtils.run {
             try {
-                val jo = JSONObject(AntMemberRpcCall.merchantBallQuery("normalVisit"))
+                val jo = JSONObject(AntMemberRpcCall.merchantBallQuery())
                 val evaluation = evaluateMerchantRpc(jo)
                 if (!evaluation.success) {
                     logMerchantRpcFailure("查询积分球", jo, evaluation)

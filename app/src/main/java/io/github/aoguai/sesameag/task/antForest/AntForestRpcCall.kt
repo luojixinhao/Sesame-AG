@@ -64,6 +64,8 @@ object AntForestRpcCall {
         val visitTime: Long
     )
 
+    internal fun defaultTakeLookSource(): String = HOME_TASK_SOURCE
+
     internal data class PropConsumeContext(
         val source: String,
         val version: String,
@@ -447,22 +449,43 @@ object AntForestRpcCall {
         }
     }
 
+    private fun buildFillUserRobFlagRequestData(
+        userIdList: JSONArray,
+        needFillUserInfo: Boolean? = null
+    ): String {
+        val requestBody = JSONObject().apply {
+            put("source", "chInfo_ch_appcenter__chsub_9patch")
+            put("userIdList", userIdList)
+            needFillUserInfo?.let { put("needFillUserInfo", it) }
+        }
+        return JSONArray().put(requestBody).toString()
+    }
+
     @JvmStatic
     fun queryFriendsEnergyRanking(): String {
         return try {
             val arg = JSONObject().apply {
-                put("source", "chInfo_ch_appcenter__chsub_9patch")
+                put("contactsStatus", "N")
                 put("periodType", "total")
                 put("rankType", "energyRank")
-                put("version", VERSION)
-            }
-            val correlationLocal = JSONObject().apply {
-                put("pathList", JSONArray().put("friendRanking").put("myself").put("totalDatas"))
+                put("source", DEFAULT_SOURCE)
+                put("version", "20221001")
             }
             RequestManager.requestString(
-                "alipay.antmember.forest.h5.queryEnergyRanking",
-                "[$arg]",
-                "[$correlationLocal]"
+                RpcEntity(
+                    requestMethod = "alipay.antmember.forest.h5.queryEnergyRanking",
+                    requestData = JSONArray().put(arg).toString(),
+                    relationLocal = JSONObject().apply {
+                        put(
+                            "pathList",
+                            JSONArray().apply {
+                                put("friendRanking")
+                                put("myself")
+                                put("totalDatas")
+                            }
+                        )
+                    }
+                )
             )
         } catch (e: Exception) {
             ""
@@ -544,17 +567,9 @@ object AntForestRpcCall {
     @JvmStatic
     fun fillUserRobFlag(userIdList: JSONArray): String {
         return try {
-            val arg = JSONObject().apply {
-                put("source", "chInfo_ch_appcenter__chsub_9patch")
-                put("userIdList", userIdList)
-            }
-            val joRelationLocal = JSONObject().apply {
-                put("pathList", JSONArray().put("friendRanking"))
-            }
             RequestManager.requestString(
                 "alipay.antforest.forest.h5.fillUserRobFlag",
-                "[$arg]",
-                "[$joRelationLocal]"
+                buildFillUserRobFlagRequestData(userIdList)
             )
         } catch (e: Exception) {
             ""
@@ -567,12 +582,10 @@ object AntForestRpcCall {
     @JvmStatic
     fun fillUserRobFlag(userIdList: JSONArray, needFillUserInfo: Boolean): String {
         return try {
-            val arg = JSONObject().apply {
-                put("source", "chInfo_ch_appcenter__chsub_9patch")
-                put("userIdList", userIdList)
-                put("needFillUserInfo", needFillUserInfo)
-            }
-            RequestManager.requestString("alipay.antforest.forest.h5.fillUserRobFlag", "[$arg]")
+            RequestManager.requestString(
+                "alipay.antforest.forest.h5.fillUserRobFlag",
+                buildFillUserRobFlagRequestData(userIdList, needFillUserInfo)
+            )
         } catch (e: Exception) {
             ""
         }

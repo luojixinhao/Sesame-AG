@@ -317,11 +317,14 @@ object AntMemberRpcCall {
     }
 
     @JvmStatic
-    fun merchantBallQuery(userPath: String = "normalVisit"): String {
+    fun merchantBallQuery(userPath: String = "undertakeVisit"): String {
         val args = JSONObject().apply {
             put(
                 "context",
                 JSONObject().apply {
+                    put("dispenseTaskItemCode", "ZDH_CONTINUE_QY_ZJ")
+                    put("isGuide", "true")
+                    put("underTakeTrace", "NULL")
                     put("userPath", userPath)
                 }
             )
