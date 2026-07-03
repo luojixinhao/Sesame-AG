@@ -222,6 +222,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private var showBagList: BooleanModelField? = null
 
     private var vitalityExchangeList: SelectAndCountModelField? = null
+    private var wateringEnabled: BooleanModelField? = null
+    private var waterFriendEnergyFirst: BooleanModelField? = null
+    @Volatile
+    private var preCollectWateringExecutedThisRound: Boolean = false
     private var returnWater33: IntegerModelField? = null
     private var returnWater18: IntegerModelField? = null
     private var returnWater10: IntegerModelField? = null
@@ -387,6 +391,24 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
     internal fun isTakeLookEnergyEnabled(): Boolean {
         return isCollectEnergyEnabled() && takeLookEnergy?.value != false
+    }
+
+    private fun isForestWateringEnabled(): Boolean {
+        return wateringEnabled?.value != false
+    }
+
+    internal fun shouldRunWaterFriendsBeforeCollect(): Boolean {
+        return isForestWateringEnabled() &&
+            waterFriendEnergyFirst?.value == true &&
+            !preCollectWateringExecutedThisRound
+    }
+
+    internal fun markWaterFriendsBeforeCollectExecuted() {
+        preCollectWateringExecutedThisRound = true
+    }
+
+    internal fun hasWaterFriendsBeforeCollectExecuted(): Boolean {
+        return preCollectWateringExecutedThisRound
     }
 
     private fun hasRebornProtectWorkEnabled(): Boolean {
@@ -639,6 +661,22 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 false
             ).withDesc("背包没有隐身卡时，允许按“活力值 | 兑换列表”中已勾选且名称命中的项自动补货。需同时开启“活力值 | 开启兑换”。").also {
                 stealthCardConstant = it
+            })
+        modelFields.addField(
+            BooleanModelField(
+                "wateringEnabled",
+                "浇水 | 开启",
+                true
+            ).withDesc("统一控制普通浇水、随机浇水任务、回浇和浇水金球/保护回赠收取；关闭后不影响复活金球与任务领奖。").also {
+                wateringEnabled = it
+            })
+        modelFields.addField(
+            BooleanModelField(
+                "waterFriendEnergyFirst",
+                "浇水 | 每轮收能量前先执行",
+                false
+            ).withDesc("开启后在完整森林流程中先执行好友浇水，再收自己/好友能量；仅影响正常流程，不影响“只收能量”链路。").also {
+                waterFriendEnergyFirst = it
             })
         modelFields.addField(
             IntegerModelField(
@@ -1011,6 +1049,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             GreenLife.resetForestMarketRound()
             if (showBagList?.value == true) showBag()
             initRebornWeeklyState()
+            preCollectWateringExecutedThisRound = false
             // 加载“今日统计”（按账号维度持久化），用于跨重启/多次运行累计
             selfId?.takeIf { it.isNotBlank() }?.let { uid ->
                 Statistics.load(uid)
@@ -1092,6 +1131,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         handledProtectUsers.clear()
         roundPropCheckState = null
         lastUsePropCheckTime = 0L
+        preCollectWateringExecutedThisRound = false
         forestGameCenterRecentAppRecords.clear()
         GreenLife.resetForestMarketRound()
     }
@@ -1212,13 +1252,34 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      * @param wateringBubbles 包含不同类型金球的对象数组
      */
     private fun collectWateringBubbles(wateringBubbles: JSONArray) {
+        val forestWateringEnabled = isForestWateringEnabled()
+        var wateringBubbleSkipLogged = false
+        var returnEnergySkipLogged = false
         for (i in 0..<wateringBubbles.length()) {
             try {
                 val wateringBubble = wateringBubbles.getJSONObject(i)
                 when (val bizType = wateringBubble.getString("bizType")) {
-                    "jiaoshui" -> collectWater(wateringBubble)
+                    "jiaoshui" -> {
+                        if (!forestWateringEnabled) {
+                            if (!wateringBubbleSkipLogged) {
+                                Log.forest("浇水总开关关闭，跳过浇水金球收取")
+                                wateringBubbleSkipLogged = true
+                            }
+                            continue
+                        }
+                        collectWater(wateringBubble)
+                    }
                     "fuhuo" -> collectRebornEnergy()
-                    "baohuhuizeng" -> collectReturnEnergy(wateringBubble)
+                    "baohuhuizeng" -> {
+                        if (!forestWateringEnabled) {
+                            if (!returnEnergySkipLogged) {
+                                Log.forest("浇水总开关关闭，跳过保护回赠收取")
+                                returnEnergySkipLogged = true
+                            }
+                            continue
+                        }
+                        collectReturnEnergy(wateringBubble)
+                    }
                     else -> {
                         Log.forest("未知bizType: $bizType")
                         continue
@@ -1492,6 +1553,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
      */
     internal fun waterFriends() {
         try {
+            if (!isForestWateringEnabled()) {
+                Log.forest("waterFriends: 浇水总开关关闭，跳过好友浇水")
+                return
+            }
             val taskUid = UserMap.currentUid
             if (taskUid.isNullOrBlank()) {
                 Log.forest("waterFriends: 当前用户为空，跳过浇水")
@@ -1777,11 +1842,11 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
     private fun refreshVitalityExchangeOptionsForSettings(): List<MapperEntity> {
         if (!HookReadyChecker.isCurrentProcessReadyForRpc(UserMap.currentUid)) {
+            val cachedRows = ExchangeOptionsCache.loadForSettingsCache(
+                UserMap.currentUid,
+                ExchangeOptionsRefreshBridge.TARGET_FOREST_VITALITY
+            )
             if (!HookReadyChecker.isTargetAppReadyForRpc(UserMap.currentUid)) {
-                val cachedRows = ExchangeOptionsCache.loadForSettingsCache(
-                    UserMap.currentUid,
-                    ExchangeOptionsRefreshBridge.TARGET_FOREST_VITALITY
-                )
                 Log.forest("活力值兑换🎁目标应用未启动，设置页先展示上次缓存列表；请打开目标应用后再刷新#${cachedRows.size}")
                 return cachedRows
             }
@@ -1793,10 +1858,31 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 Log.forest("活力值兑换🎁设置页使用目标应用刷新列表#${refreshResult.options.size}")
                 return refreshResult.options
             }
-            Log.forest("活力值兑换🎁远程刷新失败，不使用旧缓存#${refreshResult.message}")
+            if (cachedRows.isNotEmpty()) {
+                Log.forest("活力值兑换🎁远程刷新失败，设置页回退上次缓存快照#${cachedRows.size}#${refreshResult.message}")
+                return cachedRows
+            }
+            Log.forest("活力值兑换🎁远程刷新失败，且无可用缓存快照#${refreshResult.message}")
             return emptyList()
         }
-        val rows = refreshVitalityExchangeOptionsFromRpc()
+        val rowsResult = runCatching {
+            refreshVitalityExchangeOptionsFromRpc()
+        }.onFailure {
+            Log.printStackTrace(TAG, "refreshVitalityExchangeOptionsForSettings.currentRpc err:", it)
+        }
+        val rows = rowsResult.getOrElse { throwable ->
+            val cachedRows = ExchangeOptionsCache.loadForSettingsCache(
+                UserMap.currentUid,
+                ExchangeOptionsRefreshBridge.TARGET_FOREST_VITALITY
+            )
+            if (cachedRows.isNotEmpty()) {
+                Log.forest("活力值兑换🎁当前进程刷新失败，设置页回退上次缓存快照#${cachedRows.size}#${throwable.message}")
+                cachedRows
+            } else {
+                Log.forest("活力值兑换🎁当前进程刷新失败，且无可用缓存快照#${throwable.message}")
+                emptyList()
+            }
+        }
         Log.forest("活力值兑换🎁设置页刷新结构化列表#${rows.size}")
         return rows
     }
@@ -1813,7 +1899,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         }.onFailure {
             Log.printStackTrace(TAG, "refreshVitalityExchangeOptionsFromRpc err:", it)
         }.getOrElse {
-            emptyList()
+            throw it
         }
     }
 
@@ -2276,18 +2362,21 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     Log.forest("[$userName]被能量罩❤️保护着哟，跳过收取")
                 }
 
-                // 🆕【核心修改】检查炸弹卡 及 阈值判断逻辑
+                // 仅按本次实际可收的能量球判断是否放宽炸弹卡阈值，避免等待中的大球误触发。
                 if (!hasProtection && hasBombCard(userHomeObj, serverTime)) {
                     var bypassBomb = false
                     val bombLimit = collectBombEnergyLimit?.value ?: 0
 
-                    // 如果设定了阈值(>0)，检查是否有大额能量球值得冒险
                     if (bombLimit > 0) {
+                        val availableBubbleIdSet = availableBubbles.toHashSet()
                         val bubbles = userHomeObj.optJSONArray("bubbles")
                         if (bubbles != null) {
                             for (i in 0 until bubbles.length()) {
                                 val bubble = bubbles.getJSONObject(i)
-                                // 获取能量值 (fullEnergy通常是当前可收取的能量)
+                                val bubbleId = bubble.optLong("id")
+                                if (!availableBubbleIdSet.contains(bubbleId)) {
+                                    continue
+                                }
                                 val energy = bubble.optInt("fullEnergy", 0)
                                 if (energy >= bombLimit) {
                                     bypassBomb = true
@@ -2343,34 +2432,15 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     }
 
     /**
-     * {{ 新增辅助方法：统一判断是否满足收自己能量的阈值条件 }}
-     * @param bubbleCount 能量球数值
-     * @param canBeRobbedAgain 是否可被再次偷取（保底状态为false）
+     * 统一判断是否满足收自己能量的阈值条件。
      */
-    private fun shouldCollectSelfBubble(bubbleCount: Int, canBeRobbedAgain: Boolean): Boolean {
+    private fun shouldCollectSelfBubble(bubbleCount: Int): Boolean {
         val type = collectSelfEnergyType?.value ?: CollectSelfType.ALL
         val threshold = collectSelfEnergyThreshold?.value ?: 0
 
         return when (type) {
-            CollectSelfType.OVER_THRESHOLD -> {
-                // 模式：大于阈值才收
-                // 逻辑：只有当 [小于阈值] 且 [还能被偷] 时才跳过 (不收)
-                // 如果已经到底了(!canBeRobbedAgain)，即使小于阈值也应该收回来，防止浪费
-                if (bubbleCount < threshold && canBeRobbedAgain) {
-                    false
-                } else {
-                    // 满足阈值 OR 触发保底收取 (能量很少了，朋友偷不走，必须自己收，不然就浪费了)
-                    if (bubbleCount < threshold && !canBeRobbedAgain) {
-                        Log.forest("触发保底收取：能量[$bubbleCount g] < 阈值[$threshold g]，但已无法被偷，强制收取")
-                    }
-                    true
-                }
-            }
-            CollectSelfType.BELOW_THRESHOLD -> {
-                // 模式：小于阈值才收
-                bubbleCount < threshold
-            }
-            // CollectSelfType.ALL -> 默认 true
+            CollectSelfType.OVER_THRESHOLD -> bubbleCount >= threshold
+            CollectSelfType.BELOW_THRESHOLD -> bubbleCount < threshold
             else -> true
         }
     }
@@ -2438,12 +2508,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
             when (status) {
                 CollectStatus.AVAILABLE -> {
-                    // 🆕【修改点1】：可收取状态，统一调用阈值判断
                     if (isSelf) {
-                        // 获取是否还能被偷取的标记 (保底状态下该值为 false)
-                        val canBeRobbedAgain = bubble.optBoolean("canBeRobbedAgain", false)
-
-                        if (shouldCollectSelfBubble(bubbleCount, canBeRobbedAgain)) {
+                        if (shouldCollectSelfBubble(bubbleCount)) {
                             availableBubbles.add(bubbleId)
                         }
                     } else {
@@ -2461,14 +2527,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                         continue
                     }
 
-                    // 🆕【修改点2】：蹲点任务也必须严格遵循收自己能量的阈值配置
                     if (isSelf) {
-                        // 对于等待中的球，我们暂时假设它是可被偷的(canBeRobbedAgain=true)以进行严格检查
-                        // 逻辑：如果只收>20g，现在有个5g的在等待，应该跳过，不加入蹲点队列
-                        // 如果有明确的canBeRobbedAgain字段则使用，否则默认为true
-                        val canBeRobbed = bubble.optBoolean("canBeRobbedAgain", true)
-                        if (!shouldCollectSelfBubble(bubbleCount, canBeRobbed)) {
-                            // 可选：Log.forest("跳过等待能量[$bubbleCount g] (不满足阈值配置)")
+                        if (!shouldCollectSelfBubble(bubbleCount)) {
                             continue
                         }
                     }
@@ -3649,7 +3709,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                         val bizNo = userHome.optString("bizNo")
                         if (bizNo.isNotEmpty()) {
                             val returnCount = getReturnCount(collected)
-                            if (returnCount > 0) {
+                            if (returnCount > 0 && isForestWateringEnabled()) {
                                 // ✅ 调用 returnFriendWater 增加通知好友开关
                                 val shouldNotifyFriend = notifyFriend?.value == true
                                 returnFriendWater(userId, bizNo, 1, returnCount, shouldNotifyFriend, selfId)
@@ -4257,6 +4317,11 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         val fallbackTaskBaseInfo: JSONObject
     )
 
+    private fun deferredForestRightsHandledFlag(task: DeferredForestRightsTask): String {
+        return StatusFlags.FLAG_ANTFOREST_DEFERRED_RIGHTS_HANDLED_PREFIX +
+            task.sceneCode + "::" + task.taskType
+    }
+
     private data class ForestTaskCandidate(
         val item: TaskFlowItem,
         val sourceName: String
@@ -4565,9 +4630,15 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             return
         }
         val tasksByScene = tasks.groupBy { it.sceneCode }
-        for ((sceneCode, sceneTasks) in tasksByScene) {
+        for ((sceneCode, sceneTasksRaw) in tasksByScene) {
             if (Thread.currentThread().isInterrupted) {
                 return
+            }
+            val sceneTasks = sceneTasksRaw.filterNot { task ->
+                Status.hasFlagToday(deferredForestRightsHandledFlag(task))
+            }
+            if (sceneTasks.isEmpty()) {
+                continue
             }
             val touchIds = sceneTasks.map { it.touchId }
             val sourceCandidates = linkedSetOf<String?>().apply {
@@ -4653,10 +4724,12 @@ class AntForest : ModelTask(), EnergyCollectCallback {
         val awardResponse = responseObj.optJSONObject("resData") ?: responseObj
         when {
             isForestTaskAlreadyHandled(awardResponse) -> {
+                Status.setFlagToday(deferredForestRightsHandledFlag(task))
                 Log.forest("森林累计奖励[${task.taskTitle}]已领取")
             }
 
             isAntiepSuccess(awardResponse) -> {
+                Status.setFlagToday(deferredForestRightsHandledFlag(task))
                 Log.forest("森林累计奖励🎖️[${task.taskTitle}]领取成功")
             }
 
@@ -5013,6 +5086,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
     private fun completeOneClickWateringTask(item: TaskFlowItem): TaskFlowActionResult {
         val targetResult = queryOneClickWateringTargets(item)
         targetResult.failure?.let { return it }
+        val shouldNotifyFriend = notifyFriend?.value == true
         var wateredCount = 0
         var totalCountByDay: Int? = null
         var firstFailure: TaskFlowActionResult? = null
@@ -5021,7 +5095,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             val maskedName = UserMap.getMaskName(targetUserId)
             val response = AntForestRpcCall.transferEnergyForOneClickWatering(
                 targetUser = targetUserId,
-                notifyFriend = true,
+                notifyFriend = shouldNotifyFriend,
                 orderIndex = index
             )
             if (response.isBlank()) {
@@ -5509,6 +5583,15 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             if (phase != TaskFlowPhase.REWARD_READY && roundCompletedTaskKeys.contains(taskKey)) {
                 if (duplicateSkipLogged.add("$taskKey|completed")) {
                     Log.debug(TAG, "森林任务[${item.title}] 本轮已推进，跳过重复完成探测")
+                }
+                return true
+            }
+            if (item.type == ONE_CLICK_WATERING_TASK_TYPE &&
+                phase == TaskFlowPhase.READY_TO_COMPLETE &&
+                !isForestWateringEnabled()
+            ) {
+                if (duplicateSkipLogged.add("$taskKey|watering-disabled")) {
+                    Log.forest("森林任务[${item.title}] 浇水总开关关闭，跳过自动随机浇水完成")
                 }
                 return true
             }
@@ -7999,7 +8082,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 val serverTime = selfHomeObj.optLong("now", System.currentTimeMillis())
 
                 // ✅ 核心逻辑点：
-                // 调用 extractBubbleInfo，该方法内部调用了 shouldCollectSelfBubble(bubbleCount, canBeRobbedAgain)
+                // 调用 extractBubbleInfo，该方法内部统一执行收自己能量的阈值判断。
                 // 从而严格执行了【收自己单个能量球方式】和【阈值】的判断逻辑。
                 // 只有符合条件的 bubbleId 才会加入 availableBubbles
                 extractBubbleInfo(selfHomeObj, serverTime, availableBubbles, UserMap.currentUid)
