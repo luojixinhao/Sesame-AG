@@ -27,21 +27,11 @@ object WorkflowRootGuard {
     private var lastLoggedState: Boolean? = null
 
     fun hasGrantedRoot(): Boolean {
-        if (resolveBlockedHookFramework() != null) {
-            return false
-        }
         return resolveHookAccessSource() != null || lastGranted
     }
 
     suspend fun hasRoot(forceRefresh: Boolean = false, reason: String? = null): Boolean {
         val now = System.currentTimeMillis()
-        resolveBlockedHookFramework()?.let { blockedFramework ->
-            lastCheckAtMs = now
-            lastGranted = false
-            logState(false, reason)
-            Log.record(TAG, "⛔ 当前进程识别为 ${blockedFramework.displayName} 内置打包/补丁注入，拒绝启动工作流")
-            return false
-        }
         resolveHookAccessSource()?.let { hookSource ->
             lastCheckAtMs = now
             lastGranted = true
@@ -56,13 +46,6 @@ object WorkflowRootGuard {
 
         return checkMutex.withLock {
             val lockedNow = System.currentTimeMillis()
-            resolveBlockedHookFramework()?.let { blockedFramework ->
-                lastCheckAtMs = lockedNow
-                lastGranted = false
-                logState(false, reason)
-                Log.record(TAG, "⛔ 当前进程识别为 ${blockedFramework.displayName} 内置打包/补丁注入，拒绝启动工作流")
-                return@withLock false
-            }
             resolveHookAccessSource()?.let { hookSource ->
                 lastCheckAtMs = lockedNow
                 lastGranted = true
@@ -112,8 +95,8 @@ object WorkflowRootGuard {
                     }
 
                     ModuleStatus.FrameworkCategory.PATCH_EMBEDDED -> {
-                        Log.record(TAG, "⛔ 检测到 ${frameworkInfo.displayName} 内置打包/补丁注入，拒绝启动工作流")
-                        return false
+                        Log.record(TAG, "✅ 检测到当前进程由 ${frameworkInfo.displayName} 注入，允许启动工作流")
+                        return true
                     }
 
                     ModuleStatus.FrameworkCategory.UNKNOWN -> {
@@ -146,18 +129,13 @@ object WorkflowRootGuard {
     }
 
     private fun resolveBlockedHookFramework(): ModuleStatus.FrameworkInfo? {
-        val classLoader = ApplicationHook.classLoader ?: return null
-        val frameworkInfo = try {
-            ApplicationHook.resolveCurrentFrameworkInfo(classLoader)
-        } catch (_: Throwable) {
-            return null
-        }
-        return frameworkInfo.takeIf { it.category == ModuleStatus.FrameworkCategory.PATCH_EMBEDDED }
+        return null
     }
 
     private fun isAllowedHookFramework(category: ModuleStatus.FrameworkCategory): Boolean {
         return category == ModuleStatus.FrameworkCategory.LSPOSED ||
-            category == ModuleStatus.FrameworkCategory.LEGACY_XPOSED
+            category == ModuleStatus.FrameworkCategory.LEGACY_XPOSED ||
+            category == ModuleStatus.FrameworkCategory.PATCH_EMBEDDED
     }
 
     private fun logState(granted: Boolean, reason: String?) {
