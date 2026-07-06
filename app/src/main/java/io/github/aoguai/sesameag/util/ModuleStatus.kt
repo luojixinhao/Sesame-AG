@@ -50,6 +50,9 @@ object ModuleStatus {
             if (category != FrameworkCategory.UNKNOWN) {
                 return FrameworkInfo(normalizedOfficialName!!, category)
             }
+            // 官方 frameworkName 可用但未被 classifyFrameworkName 识别时（如 Vector、FPA 等），
+            // 说明是通过 libxposed 服务连接的有效 Hook 框架，放行并标记为 LSPOSED 类别。
+            return FrameworkInfo(normalizedOfficialName!!, FrameworkCategory.LSPOSED)
         }
         if (classLoader == null) {
             return FrameworkInfo(UNKNOWN_FRAMEWORK, FrameworkCategory.UNKNOWN)
