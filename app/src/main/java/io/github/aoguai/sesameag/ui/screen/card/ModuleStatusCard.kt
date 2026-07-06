@@ -79,21 +79,13 @@ fun ModuleStatusCard(
                         Icon(Icons.Outlined.Warning, "不受支持")
                         Column(Modifier.padding(start = 20.dp)) {
                             Text(
-                                text = when (status.reason) {
-                                    MainViewModel.ModuleStatus.UnsupportedReason.API_TOO_LOW -> "框架 API 版本过低"
-                                    MainViewModel.ModuleStatus.UnsupportedReason.NON_LSPOSED -> "当前框架不在支持范围内"
-                                },
+                                text = "框架 API 版本过低",
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(text = "${status.frameworkName} ${status.frameworkVersion} · API ${status.apiVersion}", style = MaterialTheme.typography.bodySmall)
                             Text(
-                                text = when (status.reason) {
-                                    MainViewModel.ModuleStatus.UnsupportedReason.API_TOO_LOW ->
-                                        "请改用支持 libxposed API 101+ 的LSPosed。"
-                                    MainViewModel.ModuleStatus.UnsupportedReason.NON_LSPOSED ->
-                                        "当前模块仅支持LSPosed；内置打包或补丁式分发将被拦截。"
-                                },
+                                text = "请改用支持 libxposed API 101+ 的框架或管理器。",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(text = "点击或双击卡片查看排查说明", style = MaterialTheme.typography.bodySmall)
@@ -132,17 +124,17 @@ fun ModuleStatusCard(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "当前模块仅支持LSPosed 且要求 libxposed API 101+；若管理器或框架仍停留在 API 100，模块不会生效。",
+                        text = "当前模块要求 libxposed API 101+；若管理器或框架仍停留在 API 100，模块不会生效。",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "首次使用时，请先在LSPosed 中激活模块、把目标应用加入作用域，然后重新打开目标应用或返回首页复查。",
+                        text = "首次使用时，请先在管理器中激活模块、把目标应用加入作用域，然后重新打开目标应用或返回首页复查。",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "LSPatch、NPatch 等内置打包/补丁式分发不在支持维护范围内，运行时会被直接拦截。",
+                        text = "LSPatch、NPatch 等内置打包/补丁式分发不被支持，运行时会被直接拦截。",
                         style = MaterialTheme.typography.titleSmall
                     )
                 }

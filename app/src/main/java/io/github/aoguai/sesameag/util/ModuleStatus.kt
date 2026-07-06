@@ -96,10 +96,20 @@ object ModuleStatus {
         }
     }
 
-    fun isSupportedLsposedFramework(frameworkName: String?, apiVersion: Int): Boolean {
-        return apiVersion >= 101 &&
-            frameworkName?.trim() == "LSPosed" &&
-            classifyFrameworkName(frameworkName) == FrameworkCategory.LSPOSED
+    /**
+     * 判断框架是否受支持。
+     * 所有基于 libxposed API 101+ 且非内置打包/补丁注入的框架均被视为受支持。
+     */
+    fun isSupportedFramework(frameworkName: String?, apiVersion: Int): Boolean {
+        return when (classifyFrameworkName(frameworkName)) {
+            FrameworkCategory.LSPOSED,
+            FrameworkCategory.LEGACY_XPOSED -> apiVersion >= 101
+            FrameworkCategory.PATCH_EMBEDDED -> false
+            FrameworkCategory.UNKNOWN -> {
+                // 未识别的框架（如 Vector、FPA 等自定义名），只要 API >= 101 就放行
+                apiVersion >= 101
+            }
+        }
     }
 
     // --- 内部检测逻辑 ---

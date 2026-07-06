@@ -47,9 +47,9 @@ object LsposedServiceManager {
         )
     }
 
-    fun isSupportedLsposedService(): Boolean {
+    fun isSupportedFrameworkService(): Boolean {
         val frameworkStatus = connectedFrameworkStatus() ?: return false
-        return frameworkStatus.isSupportedLsposed
+        return frameworkStatus.isSupported
     }
 
     /** 状态监听器列表 */
@@ -101,7 +101,7 @@ object LsposedServiceManager {
     }
 
     fun refreshScope(): Set<String> {
-        if (!isSupportedLsposedService()) {
+        if (!isSupportedFrameworkService()) {
             _scopePackages.set(emptySet())
             return emptySet()
         }
@@ -119,7 +119,7 @@ object LsposedServiceManager {
     }
 
     fun hasTargetScope(packageName: String = General.PACKAGE_NAME): Boolean {
-        if (!isSupportedLsposedService()) {
+        if (!isSupportedFrameworkService()) {
             return false
         }
         val scope = scopePackages.ifEmpty { refreshScope() }
@@ -135,11 +135,11 @@ object LsposedServiceManager {
             onFinished(ScopeRequestResult(false, message = "Unsupported libxposed API: ${frameworkStatus.apiVersion}"))
             return false
         }
-        if (!frameworkStatus.isSupportedLsposed) {
+        if (!frameworkStatus.isSupported) {
             onFinished(
                 ScopeRequestResult(
                     false,
-                    message = "Only official LSPosed is supported; current framework: ${frameworkStatus.frameworkName}"
+                    message = "Unsupported framework: ${frameworkStatus.frameworkName}"
                 )
             )
             return false
@@ -205,6 +205,6 @@ data class ConnectedFrameworkStatus(
     val apiVersion: Int,
     val category: ModuleStatus.FrameworkCategory
 ) {
-    val isSupportedLsposed: Boolean
-        get() = ModuleStatus.isSupportedLsposedFramework(frameworkName, apiVersion)
+    val isSupported: Boolean
+        get() = ModuleStatus.isSupportedFramework(frameworkName, apiVersion)
 }
