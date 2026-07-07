@@ -101,13 +101,14 @@ object ModuleStatus {
 
     /**
      * 判断框架是否受支持。
-     * 所有基于 libxposed API 101+ 且非内置打包/补丁注入的框架均被视为受支持。
+     * 所有基于 libxposed API 101+ 的框架均被视为受支持。
+     * 仅当框架名无法识别且无法获取 ClassLoader 时认为不支持。
      */
     fun isSupportedFramework(frameworkName: String?, apiVersion: Int): Boolean {
         return when (classifyFrameworkName(frameworkName)) {
             FrameworkCategory.LSPOSED,
-            FrameworkCategory.LEGACY_XPOSED -> apiVersion >= 101
-            FrameworkCategory.PATCH_EMBEDDED -> false
+            FrameworkCategory.LEGACY_XPOSED,
+            FrameworkCategory.PATCH_EMBEDDED -> apiVersion >= 101
             FrameworkCategory.UNKNOWN -> {
                 // 未识别的框架（如 Vector、FPA 等自定义名），只要 API >= 101 就放行
                 apiVersion >= 101
