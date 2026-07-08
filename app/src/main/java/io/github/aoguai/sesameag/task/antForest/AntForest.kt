@@ -7926,6 +7926,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             // 过去保护罩 propType 以 LIMIT_TIME_ENERGY_SHIELD / ENERGY_SHIELD 为主，
             // 但现在活动/节日保护罩会出现更多 *_ENERGY_SHIELD（如 DFYC_ENERGY_SHIELD / FMQK_ENERGY_SHIELD 等）。
             // 因此这里不再维护硬编码列表，改为依据 propGroup=shield（优先）或 propType 包含 ENERGY_SHIELD 判断。
+            val choice = shieldCard?.value ?: ApplyPropType.CLOSE
+            val now = System.currentTimeMillis()
             fun collectShieldsFromBag(bag: JSONObject?, out: MutableList<JSONObject>) {
                 val forestPropVOList = bag?.optJSONArray("forestPropVOList") ?: return
                 for (i in 0..<forestPropVOList.length()) {
@@ -7941,9 +7943,23 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     val isShield = propGroup.equals("shield", ignoreCase = true)
                             || propType.contains("ENERGY_SHIELD", ignoreCase = true)
                     if (isShield) {
-                        out.add(prop)
+                        // 当选择"限时道具"模式时，只添加限时保护罩或即将过期的保护罩
+                        if (choice == ApplyPropType.ONLY_LIMIT_TIME) {
+                            val isLimitedTime = propType.contains("LIMIT_TIME", ignoreCase = true) ||
+                                propType.contains("DAYS", ignoreCase = true) ||
+                                propType.contains("DFYC", ignoreCase = true) ||
+                                propType.contains("FMQK", ignoreCase = true)
+                            // 检查保护罩是否即将过期（剩余时间 < 7天）
+                            val expireTime = prop.optLong("recentExpireTime", 0L)
+                            val isExpiringSoon = expireTime > 0 && (expireTime - now) < SHIELD_RENEW_THRESHOLD_MS
+                            if (isLimitedTime || isExpiringSoon) {
+                                out.add(prop)
+                            }
+                        } else {
+                            out.add(prop)
+                        }
                     }
-                }
+            }
             }
 
             // 步骤1: 从背包中收集所有可用的保护罩
