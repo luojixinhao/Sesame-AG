@@ -6229,11 +6229,10 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             val needStealth =
                 stealthCard!!.value != ApplyPropType.CLOSE && stealthEndTime < now
 
-            // 保护罩判断
+            // 保护罩判断（独立判断，不依赖炸弹卡开关状态）
             val needShield =
-                (shieldCard!!.value != ApplyPropType.CLOSE) && energyBombCardType!!.value == ApplyPropType.CLOSE
-                        && shouldRenewShield(shieldEndTime, now)
-            // 炸弹卡判断
+                (shieldCard!!.value != ApplyPropType.CLOSE) && shouldRenewShield(shieldEndTime, now)
+            // 炸弹卡判断（仅在保护罩关闭时使用炸弹卡）
             val needEnergyBombCard =
                 (energyBombCardType!!.value != ApplyPropType.CLOSE) && shieldCard!!.value == ApplyPropType.CLOSE
                         && shouldRenewEnergyBomb(energyBombCardEndTime, now)
@@ -7926,7 +7925,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             // 过去保护罩 propType 以 LIMIT_TIME_ENERGY_SHIELD / ENERGY_SHIELD 为主，
             // 但现在活动/节日保护罩会出现更多 *_ENERGY_SHIELD（如 DFYC_ENERGY_SHIELD / FMQK_ENERGY_SHIELD 等）。
             // 因此这里不再维护硬编码列表，改为依据 propGroup=shield（优先）或 propType 包含 ENERGY_SHIELD 判断。
-            fun collectShieldsFromBag(bag: JSONObject?, out: MutableList<JSONObject>) {
+            fun collectShieldsFromBag(bag: JSONObject?, out: MutableList<JSONObject>, choice: Int) {
                 val forestPropVOList = bag?.optJSONArray("forestPropVOList") ?: return
                 for (i in 0..<forestPropVOList.length()) {
                     val prop = forestPropVOList.optJSONObject(i) ?: continue
@@ -7941,14 +7940,23 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     val isShield = propGroup.equals("shield", ignoreCase = true)
                             || propType.contains("ENERGY_SHIELD", ignoreCase = true)
                     if (isShield) {
-                        out.add(prop)
+                        // 根据用户选择过滤：ONLY_LIMIT_TIME 时只添加限时保护罩
+                        if (choice == ApplyPropType.ALL) {
+                            out.add(prop)
+                        } else if (choice == ApplyPropType.ONLY_LIMIT_TIME) {
+                            if (propType.contains("LIMIT_TIME", ignoreCase = true)) {
+                                out.add(prop)
+                            }
+                        }
                     }
                 }
             }
 
+            val shieldChoice = shieldCard?.value ?: ApplyPropType.CLOSE
+
             // 步骤1: 从背包中收集所有可用的保护罩
             val availableShields: MutableList<JSONObject> = ArrayList()
-            collectShieldsFromBag(bagObject, availableShields)
+            collectShieldsFromBag(bagObject, availableShields, shieldChoice)
 
             // 步骤2: 如果没有找到保护罩，尝试获取
             if (availableShields.isEmpty()) {
@@ -7956,7 +7964,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                 if (youthPrivilege?.value == true) {
                     Log.forest("尝试通过青春特权获取保护罩...")
                     if (youthPrivilege()) {
-                        collectShieldsFromBag(queryPropList(true), availableShields)
+                        collectShieldsFromBag(queryPropList(true), availableShields, shieldChoice)
                     }
                 }
 
@@ -7967,7 +7975,7 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                         shieldCardConstant?.value == true,
                         ExchangeEffectNeed.FOREST_SHIELD
                     )
-                    collectShieldsFromBag(refreshedBag, availableShields)
+                    collectShieldsFromBag(refreshedBag, availableShields, shieldChoice)
                 }
             }
 
