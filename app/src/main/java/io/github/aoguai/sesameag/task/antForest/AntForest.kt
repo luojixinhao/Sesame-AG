@@ -7940,11 +7940,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
                     val isShield = propGroup.equals("shield", ignoreCase = true)
                             || propType.contains("ENERGY_SHIELD", ignoreCase = true)
                     if (isShield) {
-                        // 根据用户选择过滤：ONLY_LIMIT_TIME 时只添加限时保护罩
+                        // 根据用户选择过滤：ONLY_LIMIT_TIME 时只添加限时保护罩（有过期时间的都算限时）
                         if (choice == ApplyPropType.ALL) {
                             out.add(prop)
                         } else if (choice == ApplyPropType.ONLY_LIMIT_TIME) {
-                            if (propType.contains("LIMIT_TIME", ignoreCase = true)) {
+                            // 只要有过期时间（recentExpireTime > 0）的都算限时道具
+                            if (propType.contains("LIMIT_TIME", ignoreCase = true) ||
+                                prop.optLong("recentExpireTime", 0) > 0) {
                                 out.add(prop)
                             }
                         }
