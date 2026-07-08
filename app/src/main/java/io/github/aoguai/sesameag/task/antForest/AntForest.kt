@@ -7926,22 +7926,6 @@ class AntForest : ModelTask(), EnergyCollectCallback {
             // 过去保护罩 propType 以 LIMIT_TIME_ENERGY_SHIELD / ENERGY_SHIELD 为主，
             // 但现在活动/节日保护罩会出现更多 *_ENERGY_SHIELD（如 DFYC_ENERGY_SHIELD / FMQK_ENERGY_SHIELD 等）。
             // 因此这里不再维护硬编码列表，改为依据 propGroup=shield（优先）或 propType 包含 ENERGY_SHIELD 判断。
-            val choice = shieldCard!!.value
-
-            fun isShieldPropPreferred(prop: JSONObject): Boolean {
-                if (choice == ApplyPropType.ALL) {
-                    return true
-                }
-                if (choice == ApplyPropType.ONLY_LIMIT_TIME) {
-                    val propType = prop.optJSONObject("propConfigVO")?.optString("propType")
-                        ?.takeIf { it.isNotBlank() }
-                        ?: prop.optString("propType")
-                    return propType.contains("LIMIT_TIME", ignoreCase = true) ||
-                            propType.contains("DAYS", ignoreCase = true)
-                }
-                return false
-            }
-
             fun collectShieldsFromBag(bag: JSONObject?, out: MutableList<JSONObject>) {
                 val forestPropVOList = bag?.optJSONArray("forestPropVOList") ?: return
                 for (i in 0..<forestPropVOList.length()) {
@@ -7956,13 +7940,13 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
                     val isShield = propGroup.equals("shield", ignoreCase = true)
                             || propType.contains("ENERGY_SHIELD", ignoreCase = true)
-                    if (isShield && isShieldPropPreferred(prop)) {
+                    if (isShield) {
                         out.add(prop)
                     }
                 }
             }
 
-            // 步骤1: 从背包中收集所有可用的保护罩（根据用户选择的消耗类型过滤）
+            // 步骤1: 从背包中收集所有可用的保护罩
             val availableShields: MutableList<JSONObject> = ArrayList()
             collectShieldsFromBag(bagObject, availableShields)
 
@@ -9095,10 +9079,8 @@ class AntForest : ModelTask(), EnergyCollectCallback {
 
         private val offsetTimeMath = Average(5)
 
-        /** 保护罩剩余有效期低于100小时时开始续用，补满到160小时以上。 */
-        private const val SHIELD_RENEW_THRESHOLD_MS = 100 * TimeFormatter.ONE_HOUR_MS
-        /** 保护罩续用目标时长：补满到160小时以上。 */
-        private const val SHIELD_TARGET_MS = 160 * TimeFormatter.ONE_HOUR_MS
+        /** 保护罩剩余有效期低于7天时可延长使用。 */
+        private const val SHIELD_RENEW_THRESHOLD_MS = 7 * TimeFormatter.ONE_DAY_MS
         var giveEnergyRainList: FriendSelectionModelField? = null //能量雨赠送列表
         var medicalHealthOption: SelectModelField? = null //医疗健康选项
         var ecoLifeOption: SelectModelField? = null
