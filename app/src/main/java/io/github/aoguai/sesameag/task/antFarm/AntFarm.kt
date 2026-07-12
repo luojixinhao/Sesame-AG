@@ -23,6 +23,7 @@ import io.github.aoguai.sesameag.hook.Toast
 import io.github.aoguai.sesameag.hook.keepalive.PersistentLaunchPolicy
 import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleDefaults
 import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleKind
+import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleRegistry
 import io.github.aoguai.sesameag.hook.keepalive.UnifiedScheduler
 import io.github.aoguai.sesameag.hook.rpc.intervallimit.RpcIntervalLimit.addIntervalLimit
 import io.github.aoguai.sesameag.model.BaseModel
@@ -48,6 +49,7 @@ import io.github.aoguai.sesameag.task.common.TaskFlowAction
 import io.github.aoguai.sesameag.task.common.TaskFlowActionResult
 import io.github.aoguai.sesameag.task.common.TaskFlowAdapter
 import io.github.aoguai.sesameag.task.common.TaskFlowDecision
+import io.github.aoguai.sesameag.task.common.DeferredReason
 import io.github.aoguai.sesameag.task.common.TaskFlowEngine
 import io.github.aoguai.sesameag.task.common.TaskFlowItem
 import io.github.aoguai.sesameag.task.common.TaskFlowPhase
@@ -79,6 +81,7 @@ import io.github.aoguai.sesameag.util.TimeTriggerEvaluator
 import io.github.aoguai.sesameag.util.TimeTriggerParseOptions
 import io.github.aoguai.sesameag.util.TimeUtil
 import io.github.aoguai.sesameag.util.UserDataStoreManager
+import io.github.aoguai.sesameag.util.WakeLockManager
 import io.github.aoguai.sesameag.util.friend.FriendCapabilityRecorder
 import io.github.aoguai.sesameag.util.friend.FriendRepository
 import io.github.aoguai.sesameag.util.maps.IdMapManager
@@ -1160,7 +1163,13 @@ class AntFarm : ModelTask() {
         UnifiedScheduler.cancelPersistentByDedupeKey(ApplicationHook.appContext, persistentFarmDedupeKey(childId))
     }
 
-    internal fun triggerPersistentChildTask(childId: String, group: String, payloadJson: String, source: String): Boolean {
+    internal fun triggerPersistentChildTask(
+        childId: String,
+        group: String,
+        payloadJson: String,
+        source: String,
+        scheduleId: String,
+    ): Boolean {
         val payload = runCatching { JSONObject(payloadJson.ifBlank { "{}" }) }.getOrDefault(JSONObject())
         val ownerUserId = payload.optString("owner_user_id").trim()
         val payloadSessionEpoch = payload.optLong("session_epoch", 0L)
@@ -1178,7 +1187,28 @@ class AntFarm : ModelTask() {
             return true
         }
         GlobalThreadPools.execute(GlobalThreadPools.computeDispatcher) {
-            runPersistentChildTask(childId, group, payload, source, currentOwnerUserId.orEmpty(), payloadSessionEpoch)
+            PersistentScheduleRegistry.markRunning(scheduleId)
+            val executionLease = ApplicationHook.appContext?.let { context ->
+                WakeLockManager.acquire(
+                    context = context,
+                    timeoutMs = PersistentScheduleDefaults.TASK_EXECUTION_WAKELOCK_MS,
+                    source = "farm_persistent_child",
+                    scheduleId = scheduleId,
+                )
+            }
+            try {
+                runPersistentChildTask(childId, group, payload, source, currentOwnerUserId.orEmpty(), payloadSessionEpoch)
+                PersistentScheduleRegistry.markFired(ApplicationHook.appContext, scheduleId)
+            } catch (t: Throwable) {
+                Log.printStackTrace(TAG, "庄园持久子任务执行失败[$group][$childId]", t)
+                PersistentScheduleRegistry.markFailed(
+                    ApplicationHook.appContext,
+                    scheduleId,
+                    t.message ?: t.javaClass.name,
+                )
+            } finally {
+                executionLease?.close()
+            }
         }
         return true
     }
@@ -1197,24 +1227,19 @@ class AntFarm : ModelTask() {
         ownerUserId: String,
         sessionEpoch: Long
     ) {
-        try {
-            if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) {
-                Log.farm("庄园持久子任务[$group][$childId]会话已切换，取消执行: owner=$ownerUserId session=$sessionEpoch")
-                return
-            }
-            Log.farm("庄园持久子任务触发[$group][$childId] source=$source")
-            cancelPersistentChildTask(childId)
-            when (group) {
-                "AS" -> runSleepChildTask()
-                "AW" -> runWakeUpChildTask()
-                "FA" -> runFeedChildTask()
-                "KC" -> runSendBackChildTask()
-                "HIRE" -> runHireChildTask()
-                "DR" -> runDonationCompetitionPersistentTask(payload)
-                else -> Log.farm("未知庄园持久子任务[$group][$childId]，跳过")
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "庄园持久子任务执行失败[$group][$childId]", t)
+        if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) {
+            Log.farm("庄园持久子任务[$group][$childId]会话已切换，取消执行: owner=$ownerUserId session=$sessionEpoch")
+            return
+        }
+        Log.farm("庄园持久子任务触发[$group][$childId] source=$source")
+        when (group) {
+            "AS" -> runSleepChildTask()
+            "AW" -> runWakeUpChildTask()
+            "FA" -> runFeedChildTask()
+            "KC" -> runSendBackChildTask()
+            "HIRE" -> runHireChildTask()
+            "DR" -> runDonationCompetitionPersistentTask(payload)
+            else -> Log.farm("未知庄园持久子任务[$group][$childId]，跳过")
         }
     }
 
@@ -3533,8 +3558,13 @@ class AntFarm : ModelTask() {
                     }
 
                     is FarmTaskClosureRoute.OwnerBusiness -> {
-                        logFarmTaskDecisionOnce(item, "由${route.ownerFlowName}业务链负责，本轮不在此处complete")
-                        TaskFlowActionResult.success(progressChanged = false)
+                        logFarmTaskDecisionOnce(item, "由${route.ownerFlowName}业务链负责，交给后续业务尾刷确认")
+                        TaskFlowActionResult.defer(
+                            deferredReason = DeferredReason.CHILD_TASK_PENDING,
+                            message = "由${route.ownerFlowName}业务链负责，等待后续尾刷确认",
+                            rpc = "AntFarm.${route.ownerFlowName}",
+                            detail = "taskId=${item.id} taskName=${item.title}"
+                        )
                     }
                 }
             }
@@ -3585,7 +3615,7 @@ class AntFarm : ModelTask() {
         val finalState = resolveFarmTaskFlagState()
         Status.setFlagToday(StatusFlags.FLAG_FARM_TASK_FINISHED, finalState)
         if (finalState == Status.TodayFlagState.RETRY_LATER) {
-            Log.farm("饲料任务在${source}后仍未收敛，保留后续重试机会")
+            Log.farm("饲料任务在${source}后明确延后，等待下一次自然调度继续处理")
             return true
         }
         Log.farm("饲料任务在${source}后已完成最终状态确认: $finalState")
@@ -3821,9 +3851,9 @@ class AntFarm : ModelTask() {
         override fun receive(item: TaskFlowItem): TaskFlowActionResult {
             val task = item.raw ?: return missingMultiStageRawResult(item, "receive")
             if (!canReceiveMultiStageAward(task)) {
-                return TaskFlowActionResult.failure(
-                    failureType = TaskRpcFailureType.BUSINESS_LIMIT,
-                    message = "容量策略暂不领取多阶段奖励",
+                return TaskFlowActionResult.defer(
+                    deferredReason = DeferredReason.CAPACITY_LIMIT,
+                    message = "容量不足，当前轮次暂不领取多阶段奖励",
                     rpc = "AntFarmRpcCall.receiveFarmTaskAward",
                     detail = "taskId=${item.id} taskName=${item.title}"
                 )
@@ -3953,7 +3983,7 @@ class AntFarm : ModelTask() {
                     continue
                 }
 
-                Log.farm("庄园任务[$title] 当前状态=$taskStatus，保留后续重试机会")
+                Log.farm("庄园任务[$title] 当前状态=$taskStatus，明确延后到下一次自然调度")
                 return Status.TodayFlagState.RETRY_LATER
             }
             Status.TodayFlagState.NO_MORE_ACTION_TODAY
@@ -4342,14 +4372,14 @@ class AntFarm : ModelTask() {
                         val isNight = TimeUtil.isNowAfterOrCompareTimeStr("2000")
                         val foodStockLeft = foodStockLimit - foodStock
                         if (foodStock >= foodStockLimit) {
-                            Log.farm("饲料[已满],暂不领取")
+                            Log.farm("饲料容量已满，标记为容量限制并结束本轮奖励扫描")
                             unreceiveTaskAward += (unreceivedTasks.size - i)
                             isFeedFull = true
                             break
                         }
 
                         if (!ignoreAcceLimit!!.value!! && (needFarmGame && foodStock >= (foodStockLimit - gameRewardMax!!.value!!))) {
-                            Log.farm("当日游戏改分未完成，预留最多${gameRewardMax!!.value}饲料空间，现有饲料${foodStock}g，需再消耗${gameRewardMax!!.value!! -(foodStockLimit-foodStock)}g")
+                            Log.farm("当日游戏改分未完成，预留最多${gameRewardMax!!.value}饲料空间，当前容量不足，结束本轮奖励扫描")
                             unreceiveTaskAward += (unreceivedTasks.size - i)
                             isFeedFull = true
                             break
@@ -4367,7 +4397,7 @@ class AntFarm : ModelTask() {
                                 }
                                 unreceiveTaskAward++
                                 if (isAscending) {
-                                    Log.farm("已按从小到大排序，后续奖励均不满足，停止寻找。")
+                                    Log.farm("当前剩余容量小于最小可领奖励，标记为容量限制并结束本轮奖励扫描")
                                     unreceiveTaskAward += (unreceivedTasks.size - i - 1)
                                     break
                                 }

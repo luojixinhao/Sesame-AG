@@ -14,6 +14,7 @@ import io.github.aoguai.sesameag.hook.HookReadyChecker
 import io.github.aoguai.sesameag.hook.keepalive.PersistentLaunchPolicy
 import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleDefaults
 import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleKind
+import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleRegistry
 import io.github.aoguai.sesameag.hook.keepalive.UnifiedScheduler
 import io.github.aoguai.sesameag.model.BaseModel
 import io.github.aoguai.sesameag.model.ModelFields
@@ -1183,7 +1184,13 @@ class AntSports : ModelTask() {
         UnifiedScheduler.cancelPersistentByDedupeKey(ApplicationHook.appContext, persistentSportsDedupeKey(childId))
     }
 
-    internal fun triggerPersistentChildTask(childId: String, group: String, payloadJson: String, source: String): Boolean {
+    internal fun triggerPersistentChildTask(
+        childId: String,
+        group: String,
+        payloadJson: String,
+        source: String,
+        scheduleId: String,
+    ): Boolean {
         val payload = runCatching { JSONObject(payloadJson.ifBlank { "{}" }) }.getOrDefault(JSONObject())
         val ownerUserId = payload.optString("owner_user_id").trim()
         val payloadSessionEpoch = payload.optLong("session_epoch", 0L)
@@ -1201,7 +1208,28 @@ class AntSports : ModelTask() {
             return true
         }
         GlobalThreadPools.execute {
-            runPersistentChildTask(childId, group, payload, source, currentOwnerUserId.orEmpty(), payloadSessionEpoch)
+            PersistentScheduleRegistry.markRunning(scheduleId)
+            val executionLease = ApplicationHook.appContext?.let { context ->
+                WakeLockManager.acquire(
+                    context = context,
+                    timeoutMs = PersistentScheduleDefaults.TASK_EXECUTION_WAKELOCK_MS,
+                    source = "sports_persistent_child",
+                    scheduleId = scheduleId,
+                )
+            }
+            try {
+                runPersistentChildTask(childId, group, payload, source, currentOwnerUserId.orEmpty(), payloadSessionEpoch)
+                PersistentScheduleRegistry.markFired(ApplicationHook.appContext, scheduleId)
+            } catch (t: Throwable) {
+                Log.printStackTrace(TAG, "运动持久子任务执行失败[$group][$childId]", t)
+                PersistentScheduleRegistry.markFailed(
+                    ApplicationHook.appContext,
+                    scheduleId,
+                    t.message ?: t.javaClass.name,
+                )
+            } finally {
+                executionLease?.close()
+            }
         }
         return true
     }
@@ -1220,20 +1248,15 @@ class AntSports : ModelTask() {
         ownerUserId: String,
         sessionEpoch: Long
     ) {
-        try {
-            if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) {
-                Log.sports("运动持久子任务[$group][$childId]会话已切换，取消执行: owner=$ownerUserId session=$sessionEpoch")
-                return
-            }
-            Log.sports("运动持久子任务触发[$group][$childId] source=$source")
-            cancelPersistentChildTask(childId)
-            when (group) {
-                "syncStep" -> runPersistentSyncStepTask(childId)
-                "BX" -> runTreasureBoxPersistentTask(childId, payload)
-                else -> Log.sports("未知运动持久子任务[$group][$childId]，跳过")
-            }
-        } catch (t: Throwable) {
-            Log.printStackTrace(TAG, "运动持久子任务执行失败[$group][$childId]", t)
+        if (!isPersistentChildSessionCurrent(ownerUserId, sessionEpoch)) {
+            Log.sports("运动持久子任务[$group][$childId]会话已切换，取消执行: owner=$ownerUserId session=$sessionEpoch")
+            return
+        }
+        Log.sports("运动持久子任务触发[$group][$childId] source=$source")
+        when (group) {
+            "syncStep" -> runPersistentSyncStepTask(childId)
+            "BX" -> runTreasureBoxPersistentTask(childId, payload)
+            else -> Log.sports("未知运动持久子任务[$group][$childId]，跳过")
         }
     }
 
@@ -6266,6 +6289,12 @@ class AntSports : ModelTask() {
     // 健康岛任务处理器（内部类）
     // ---------------------------------------------------------------------
 
+    private enum class PromoKernelPendingDecision {
+        PROCESS,
+        RETRY_ONCE,
+        DEFER_CURRENT_CYCLE
+    }
+
     /**
      * @brief 健康岛任务处理器
      *
@@ -6295,6 +6324,7 @@ class AntSports : ModelTask() {
         private val handledNeverlandBubbleEncryptValues = mutableSetOf<String>()
         private val handledNeverlandBubbleTaskIds = mutableSetOf<String>()
         private val pendingPromoKernelTaskKeys = mutableSetOf<String>()
+        private val pendingPromoKernelTaskPollCounts = mutableMapOf<String, Int>()
         // 任务大厅/签到/建造按最新抓包固定运动首页 source；泡泡可独立记忆可用辅助 source。
         private var activeNeverlandSource: String = NEVERLAND_SOURCE_SPORT_HOME
         private var activeNeverlandAuxSource: String = NEVERLAND_SOURCE_SPORT_HOME
@@ -6473,6 +6503,8 @@ class AntSports : ModelTask() {
                     }
 
                     val pendingTasks = mutableListOf<JSONObject>()
+                    val pendingPromoKernelAwaitingConfirmation = mutableListOf<String>()
+                    val deferredPromoKernelTasks = mutableListOf<String>()
                     for (i in 0 until taskList.length()) {
                         val rawTask = taskList.optJSONObject(i) ?: continue
                         val task = normalizeNeverlandCenterTask(rawTask, source)
@@ -6500,8 +6532,16 @@ class AntSports : ModelTask() {
                             continue
                         }
 
-                        if (shouldSkipPendingPromoKernelTask(task)) {
-                            continue
+                        when (inspectPendingPromoKernelTask(task)) {
+                            PromoKernelPendingDecision.RETRY_ONCE -> {
+                                pendingPromoKernelAwaitingConfirmation.add("$title[taskId=$taskId] 当前状态=$status")
+                                continue
+                            }
+                            PromoKernelPendingDecision.DEFER_CURRENT_CYCLE -> {
+                                deferredPromoKernelTasks.add("$title[taskId=$taskId] 当前状态=$status")
+                                continue
+                            }
+                            PromoKernelPendingDecision.PROCESS -> Unit
                         }
 
                         if ((type == "PROMOKERNEL_TASK" || type == "LIGHT_TASK") &&
@@ -6512,6 +6552,23 @@ class AntSports : ModelTask() {
                     }
 
                     if (pendingTasks.isEmpty()) {
+                        if (deferredPromoKernelTasks.isNotEmpty()) {
+                            Log.sports(
+                                "健康岛任务中心明确延后：" +
+                                    deferredPromoKernelTasks.joinToString("；") +
+                                    "，补1次确认刷新后仍未变化，等待下个全局周期"
+                            )
+                            break
+                        }
+                        if (pendingPromoKernelAwaitingConfirmation.isNotEmpty()) {
+                            Log.sports(
+                                "活动任务状态待确认：" +
+                                    pendingPromoKernelAwaitingConfirmation.joinToString("；") +
+                                    "，本轮仅再补1次确认刷新"
+                            )
+                            GlobalThreadPools.sleepCompat(TASK_LOOP_DELAY)
+                            continue
+                        }
                         Log.sports("没有可处理或领取的任务，退出循环")
                         Status.setFlagToday(StatusFlags.FLAG_ANTSPORTS_TASK_CENTER_DONE)
                         break
@@ -6527,6 +6584,14 @@ class AntSports : ModelTask() {
                     }
 
                     errorCount += currentBatchError
+                    if (deferredPromoKernelTasks.isNotEmpty()) {
+                        Log.sports(
+                            "健康岛任务中心明确延后：" +
+                                deferredPromoKernelTasks.joinToString("；") +
+                                "，当前批次已完成其他可做动作，等待下个全局周期"
+                        )
+                        break
+                    }
                     Log.sports("当前批次执行完毕，准备下一次刷新检查")
                     GlobalThreadPools.sleepCompat(TASK_LOOP_DELAY)
                 } catch (t: Throwable) {
@@ -6563,6 +6628,32 @@ class AntSports : ModelTask() {
             }
         }
 
+        private fun inspectPendingPromoKernelTask(task: JSONObject): PromoKernelPendingDecision {
+            if (task.optString("taskType", "") != "PROMOKERNEL_TASK") {
+                return PromoKernelPendingDecision.PROCESS
+            }
+            val taskKey = neverlandTaskKey(task)
+            if (taskKey.isBlank()) {
+                return PromoKernelPendingDecision.PROCESS
+            }
+            val status = task.optString("taskStatus", "")
+            if (status != "SIGNUP_COMPLETE" && status != "INIT") {
+                pendingPromoKernelTaskKeys.remove(taskKey)
+                pendingPromoKernelTaskPollCounts.remove(taskKey)
+                return PromoKernelPendingDecision.PROCESS
+            }
+            if (taskKey !in pendingPromoKernelTaskKeys) {
+                return PromoKernelPendingDecision.PROCESS
+            }
+            val pollCount = pendingPromoKernelTaskPollCounts[taskKey] ?: 0
+            pendingPromoKernelTaskPollCounts[taskKey] = pollCount + 1
+            return if (pollCount < 1) {
+                PromoKernelPendingDecision.RETRY_ONCE
+            } else {
+                PromoKernelPendingDecision.DEFER_CURRENT_CYCLE
+            }
+        }
+
         private fun shouldSkipPendingPromoKernelTask(task: JSONObject): Boolean {
             if (task.optString("taskType", "") != "PROMOKERNEL_TASK") {
                 return false
@@ -6574,6 +6665,7 @@ class AntSports : ModelTask() {
             val status = task.optString("taskStatus", "")
             if (status != "SIGNUP_COMPLETE" && status != "INIT") {
                 pendingPromoKernelTaskKeys.remove(taskKey)
+                pendingPromoKernelTaskPollCounts.remove(taskKey)
                 return false
             }
             return taskKey in pendingPromoKernelTaskKeys
@@ -6711,12 +6803,14 @@ class AntSports : ModelTask() {
         private fun markPromoKernelTaskPending(taskKey: String) {
             if (taskKey.isNotBlank()) {
                 pendingPromoKernelTaskKeys.add(taskKey)
+                pendingPromoKernelTaskPollCounts.putIfAbsent(taskKey, 0)
             }
         }
 
         private fun clearPromoKernelTaskPending(taskKey: String) {
             if (taskKey.isNotBlank()) {
                 pendingPromoKernelTaskKeys.remove(taskKey)
+                pendingPromoKernelTaskPollCounts.remove(taskKey)
             }
         }
 
