@@ -45,6 +45,26 @@ internal object ApplicationBroadcastDispatcher {
         if (finalProcessName != null && finalProcessName.endsWith(":widgetProvider")) {
             return
         }
+        if (!RuntimeIdentityGuard.isTrustedForExecution()) {
+            record(TAG, "execution_gate_denied: runtime_identity")
+            return
+        }
+        val nonBusinessActions = setOf(
+            ApplicationHookConstants.BroadcastActions.HOOK_READY,
+            ApplicationHookConstants.BroadcastActions.PERMISSION_SNAPSHOT,
+        )
+        if (action !in nonBusinessActions && !isCurrentAccountExecutable()) {
+            record(TAG, "execution_gate_denied: account_slot")
+            return
+        }
+
+        if (action !in nonBusinessActions &&
+            action != ApplicationHookConstants.BroadcastActions.RESTART &&
+            !WorkflowRootGuard.isExecutionAllowed()
+        ) {
+            record(TAG, "必需权限或使用协议未就绪，已拒绝执行: $action")
+            return
+        }
 
         when (action) {
             ApplicationHookConstants.BroadcastActions.RESTART -> handleRestartBroadcast(safeIntent)
@@ -59,6 +79,12 @@ internal object ApplicationBroadcastDispatcher {
             ApplicationHookConstants.BroadcastActions.REFRESH_FRIENDS -> handleRefreshFriendsBroadcast(context, safeIntent)
             ApplicationHookConstants.BroadcastActions.REFRESH_EXCHANGE_OPTIONS -> handleRefreshExchangeOptionsBroadcast(context, safeIntent)
         }
+    }
+
+    private fun isCurrentAccountExecutable(): Boolean {
+        val loader = ApplicationHook.classLoader ?: return false
+        val userId = runCatching { HookUtil.getUserId(loader) }.getOrNull()
+        return AccountSlotRegistry.isExecutableUser(userId)
     }
 
     private fun handleRestartBroadcast(intent: Intent) {
@@ -665,6 +691,28 @@ internal object ApplicationBroadcastDispatcher {
                             extraParams["toolCount"] = intent.getIntExtra("toolCount", 1)
                         }
 
+                        // 任务模块整体手动触发，无需额外参数
+                        CustomTask.ANT_FOREST,
+                        CustomTask.ANT_FARM,
+                        CustomTask.ANT_OCEAN,
+                        CustomTask.ANT_STALL,
+                        CustomTask.ANT_DODO,
+                        CustomTask.ANT_COOPERATE,
+                        CustomTask.ANT_MEMBER,
+                        CustomTask.ANT_SESAME_CREDIT,
+                        CustomTask.ANT_ORCHARD,
+                        CustomTask.GOLDEN_BEAN_TREASURE,
+                        CustomTask.ANT_FISH_POND,
+                        CustomTask.ANT_SPORTS,
+                        CustomTask.YOUTH_PRIVILEGE,
+                        CustomTask.ECO_PROTECTION,
+                        CustomTask.GREEN_FINANCE,
+                        CustomTask.MY_BANK_WELFARE,
+                        CustomTask.RESERVE,
+                        CustomTask.OTHER_TASK -> {
+                            Unit
+                        }
+
                         else -> {
                             record(TAG, "❌ 无效的任务指令: $taskName")
                         }
@@ -674,7 +722,7 @@ internal object ApplicationBroadcastDispatcher {
                         return@execute
                     }
                     if (!ApplicationHook.ensureLegalAcceptedForWorkflow()) {
-                        record(TAG, "⛔ 未勾选 LEGAL 说明确认，忽略手动任务指令: $taskName")
+                        record(TAG, "⛔ 必需权限或使用协议未就绪，忽略手动任务指令: $taskName")
                         return@execute
                     }
                     ManualTask.runSingle(task, extraParams)
@@ -687,7 +735,7 @@ internal object ApplicationBroadcastDispatcher {
                     return@execute
                 }
                 if (!ApplicationHook.ensureLegalAcceptedForWorkflow()) {
-                    record(TAG, "⛔ 未勾选 LEGAL 说明确认，忽略手动模型任务指令")
+                    record(TAG, "⛔ 必需权限或使用协议未就绪，忽略手动模型任务指令")
                     return@execute
                 }
                 for (model in Model.modelArray) {

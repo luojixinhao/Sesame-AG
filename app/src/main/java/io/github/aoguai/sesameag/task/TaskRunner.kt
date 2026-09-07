@@ -3,6 +3,7 @@ package io.github.aoguai.sesameag.task
 import android.annotation.SuppressLint
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.data.StatusFlags
+import io.github.aoguai.sesameag.hook.AccountSessionCheck
 import io.github.aoguai.sesameag.hook.AccountSessionCoordinator
 import io.github.aoguai.sesameag.hook.ApplicationHook
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
@@ -17,6 +18,7 @@ import io.github.aoguai.sesameag.task.antMember.AntMember
 import io.github.aoguai.sesameag.task.antOcean.AntOcean
 import io.github.aoguai.sesameag.task.antOrchard.AntOrchard
 import io.github.aoguai.sesameag.task.antSesameCredit.AntSesameCredit
+import io.github.aoguai.sesameag.task.goldenBean.GoldenBeanTreasure
 import io.github.aoguai.sesameag.task.antSports.AntSports
 import io.github.aoguai.sesameag.task.customTasks.ManualTask
 import io.github.aoguai.sesameag.task.youthPrivilege.YouthPrivilege
@@ -56,8 +58,6 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         private const val DEFAULT_TASK_TIMEOUT = 10 * 60 * 1000L // 10分钟
 
         private const val DEFAULT_MAX_CONCURRENCY = 1
-
-        private val TIMEOUT_WHITELIST = setOf("蚂蚁森林", "蚂蚁庄园", "运动")
     }
 
     private val taskList: List<ModelTask> = allModels.filterIsInstance<ModelTask>()
@@ -109,8 +109,9 @@ class CoroutineTaskRunner(allModels: List<Model>) {
             return@coroutineScope
         }
 
-        if (!isRunSessionCurrent()) {
-            logSessionInvalid("runner_start")
+        val startSessionCheck = runSessionCheck()
+        if (startSessionCheck !is AccountSessionCheck.Current) {
+            logSessionInvalid("runner_start", startSessionCheck)
             return@coroutineScope
         }
 
@@ -137,8 +138,9 @@ class CoroutineTaskRunner(allModels: List<Model>) {
 
             // 执行多轮任务
             for (roundIndex in 0 until rounds) {
-                if (!isRunSessionCurrent()) {
-                    logSessionInvalid("before_round_${roundIndex + 1}")
+                val roundSessionCheck = runSessionCheck()
+                if (roundSessionCheck !is AccountSessionCheck.Current) {
+                    logSessionInvalid("before_round_${roundIndex + 1}", roundSessionCheck)
                     break
                 }
                 if (ApplicationHookConstants.isOffline()) {
@@ -151,8 +153,9 @@ class CoroutineTaskRunner(allModels: List<Model>) {
 
             awaitLongRunningJobs()
 
-            if (!isRunSessionCurrent()) {
-                logSessionInvalid("after_long_running_jobs")
+            val afterLongRunningSessionCheck = runSessionCheck()
+            if (afterLongRunningSessionCheck !is AccountSessionCheck.Current) {
+                logSessionInvalid("after_long_running_jobs", afterLongRunningSessionCheck)
             } else if (CustomSettings.onlyOnceDaily.value == true) {
                 // 确保时间状态是最新的
                 TaskCommon.update()
@@ -174,10 +177,14 @@ class CoroutineTaskRunner(allModels: List<Model>) {
             withContext(NonCancellable) {
                 awaitLongRunningJobs()
             }
-            if (isRunSessionCurrent()) {
+            val finalSessionCheck = runSessionCheck()
+            if (finalSessionCheck is AccountSessionCheck.Current) {
                 scheduleNext()
             } else {
-                Log.record(TAG, "⏭ 会话已切换，跳过下次调度 owner=$runSessionOwnerUserId session=$runSessionEpoch")
+                Log.record(
+                    TAG,
+                    "⏭ ${runSessionCheckDescription(finalSessionCheck)}，跳过下次调度 owner=$runSessionOwnerUserId session=$runSessionEpoch",
+                )
             }
             printExecutionSummary(startTime, System.currentTimeMillis())
         }
@@ -188,8 +195,9 @@ class CoroutineTaskRunner(allModels: List<Model>) {
      */
     private suspend fun executeRound(round: Int, totalRounds: Int, status: CustomSettings.OnceDailyStatus) = coroutineScope {
         val roundStartTime = System.currentTimeMillis()
-        if (!isRunSessionCurrent()) {
-            logSessionInvalid("round_$round")
+        val roundSessionCheck = runSessionCheck()
+        if (roundSessionCheck !is AccountSessionCheck.Current) {
+            logSessionInvalid("round_$round", roundSessionCheck)
             return@coroutineScope
         }
         if (ApplicationHookConstants.isOffline()) {
@@ -242,8 +250,9 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         if (tasks.isEmpty()) {
             return emptyList()
         }
-        if (!isRunSessionCurrent()) {
-            logSessionInvalid("batch_${round}_$batchIndex")
+        val batchSessionCheck = runSessionCheck()
+        if (batchSessionCheck !is AccountSessionCheck.Current) {
+            logSessionInvalid("batch_${round}_$batchIndex", batchSessionCheck)
             skippedCount.addAndGet(tasks.size)
             return emptyList()
         }
@@ -260,8 +269,9 @@ class CoroutineTaskRunner(allModels: List<Model>) {
 
         return tasks.map { task ->
             async {
-                if (!isRunSessionCurrent()) {
-                    Log.record(TAG, "⏸ 任务 ${task.getName()} 因会话切换而中止")
+                val taskSessionCheck = runSessionCheck()
+                if (taskSessionCheck !is AccountSessionCheck.Current) {
+                    Log.record(TAG, "⏸ 任务 ${task.getName()} 因${runSessionCheckDescription(taskSessionCheck)}而中止")
                     skippedCount.incrementAndGet()
                     return@async
                 }
@@ -309,12 +319,12 @@ class CoroutineTaskRunner(allModels: List<Model>) {
                 .takeIf { it.isNotEmpty() }
                 ?.let(::add)
 
-            // 5) 芭芭农场先跑：施肥会先产出庄园做美食所需食材。
+            // 5) 芭芭农场先跑：施肥时为金豆夺宝保留配置额度。
             takeBatch { it is AntOrchard }
                 .takeIf { it.isNotEmpty() }
                 ?.let(::add)
 
-            // 6) 福气鱼池放在农场之后，保持独立玩法批次。
+            // 6) 福气鱼池保持独立玩法批次。
             takeBatch { it is AntFishPond }
                 .takeIf { it.isNotEmpty() }
                 ?.let(::add)
@@ -326,6 +336,11 @@ class CoroutineTaskRunner(allModels: List<Model>) {
 
             // 8) 会员与芝麻信用放在联动行为之后。
             takeBatch { it is AntMember || it is AntSesameCredit }
+                .takeIf { it.isNotEmpty() }
+                ?.let(::add)
+
+            // 9) 金豆夺宝最后处理农场肥料和芝麻炼金已确认的最新余额。
+            takeBatch { it is GoldenBeanTreasure }
                 .takeIf { it.isNotEmpty() }
                 ?.let(::add)
 
@@ -343,9 +358,10 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         val taskId = "$taskName-R$round"
         val startTime = System.currentTimeMillis()
 
-        if (!isRunSessionCurrent()) {
+        val taskSessionCheck = runSessionCheck()
+        if (taskSessionCheck !is AccountSessionCheck.Current) {
             skippedCount.incrementAndGet()
-            Log.record(TAG, "⏸ 会话已切换，跳过: $taskName")
+            Log.record(TAG, "⏸ ${runSessionCheckDescription(taskSessionCheck)}，跳过: $taskName")
             return
         }
 
@@ -362,7 +378,7 @@ class CoroutineTaskRunner(allModels: List<Model>) {
             return
         }
 
-        val isWhitelist = isLongRunningTask(task, taskName)
+        val isLongRunning = isLongRunningTask(task)
         val timeout = (BaseModel.taskTimeout.value ?: DEFAULT_TASK_TIMEOUT).toLong()
         var acquiredConcurrencySlot = false
         var acquiredLongRunningSlot = false
@@ -380,16 +396,17 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         }
 
         try {
-            if (isWhitelist) {
+            if (isLongRunning) {
                 longRunningTaskLimiter.acquire()
                 acquiredLongRunningSlot = true
             }
             taskConcurrencyLimiter.acquire()
             acquiredConcurrencySlot = true
 
-            if (!isRunSessionCurrent()) {
+            val acquiredSlotSessionCheck = runSessionCheck()
+            if (acquiredSlotSessionCheck !is AccountSessionCheck.Current) {
                 skippedCount.incrementAndGet()
-                Log.record(TAG, "⏸ 任务 ${task.getName()} 在等待并发槽位后因会话切换而中止")
+                Log.record(TAG, "⏸ 任务 ${task.getName()} 在等待并发槽位后因${runSessionCheckDescription(acquiredSlotSessionCheck)}而中止")
                 return
             }
             if (ManualTask.isManualRunning) {
@@ -406,7 +423,7 @@ class CoroutineTaskRunner(allModels: List<Model>) {
             task.addRunCents()
 
             val job = task.startTask(force = false, rounds = 1)
-            if (isWhitelist) {
+            if (isLongRunning) {
                 val longRunningJob = LongRunningJob(taskId, startTime, task, job) { releaseTaskSlots() }
                 longRunningJobs.add(longRunningJob)
                 trackedLongRunningJob = true
@@ -425,9 +442,10 @@ class CoroutineTaskRunner(allModels: List<Model>) {
 
             // 成功
             val time = System.currentTimeMillis() - startTime
-            if (!isRunSessionCurrent()) {
+            val completedTaskSessionCheck = runSessionCheck()
+            if (completedTaskSessionCheck !is AccountSessionCheck.Current) {
                 skippedCount.incrementAndGet()
-                Log.record(TAG, "⏸ 会话已切换，中断: $taskId (耗时: ${time}ms)")
+                Log.record(TAG, "⏸ ${runSessionCheckDescription(completedTaskSessionCheck)}，中断: $taskId (耗时: ${time}ms)")
             } else if (ApplicationHookConstants.isOffline()) {
                 skippedCount.incrementAndGet()
                 Log.record(TAG, "⏸ 离线模式中断: $taskId (耗时: ${time}ms)")
@@ -460,8 +478,9 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         var loggedWait = false
         while (true) {
             val longRunningJob = longRunningJobs.peek() ?: break
-            if (!isRunSessionCurrent()) {
-                Log.record(TAG, "⏸ 会话已切换，中断白名单长任务: ${longRunningJob.taskId}")
+            val longRunningSessionCheck = runSessionCheck()
+            if (longRunningSessionCheck !is AccountSessionCheck.Current) {
+                Log.record(TAG, "⏸ ${runSessionCheckDescription(longRunningSessionCheck)}，中断长任务: ${longRunningJob.taskId}")
                 longRunningJob.task.stopTask()
                 longRunningJob.job.cancel()
                 longRunningJob.releaseResourcesOnce()
@@ -470,7 +489,7 @@ class CoroutineTaskRunner(allModels: List<Model>) {
                 continue
             }
             if (ApplicationHookConstants.isOffline()) {
-                Log.record(TAG, "⏸ 离线模式中断白名单长任务: ${longRunningJob.taskId}")
+                Log.record(TAG, "⏸ 离线模式中断长任务: ${longRunningJob.taskId}")
                 longRunningJob.task.stopTask()
                 longRunningJob.job.cancel()
                 longRunningJob.releaseResourcesOnce()
@@ -480,15 +499,16 @@ class CoroutineTaskRunner(allModels: List<Model>) {
             }
             if (!loggedWait) {
                 loggedWait = true
-                Log.record(TAG, "⏳ 等待白名单长任务完成后再调度下次执行")
+                Log.record(TAG, "⏳ 等待长任务完成后再调度下次执行")
             }
             longRunningJob.job.join()
             longRunningJob.releaseResourcesOnce()
             longRunningJobs.remove(longRunningJob)
             val time = System.currentTimeMillis() - longRunningJob.startTime
-            if (!isRunSessionCurrent()) {
+            val completedLongRunningSessionCheck = runSessionCheck()
+            if (completedLongRunningSessionCheck !is AccountSessionCheck.Current) {
                 skippedCount.incrementAndGet()
-                Log.record(TAG, "⏸ 会话已切换，中断: ${longRunningJob.taskId} (耗时: ${time}ms)")
+                Log.record(TAG, "⏸ ${runSessionCheckDescription(completedLongRunningSessionCheck)}，中断: ${longRunningJob.taskId} (耗时: ${time}ms)")
             } else if (ApplicationHookConstants.isOffline()) {
                 skippedCount.incrementAndGet()
                 Log.record(TAG, "⏸ 离线模式中断: ${longRunningJob.taskId} (耗时: ${time}ms)")
@@ -500,11 +520,10 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         }
     }
 
-    private fun isLongRunningTask(task: ModelTask, taskName: String): Boolean {
+    private fun isLongRunningTask(task: ModelTask): Boolean {
         return task is AntForest ||
             task is AntFarm ||
-            task is AntSports ||
-            TIMEOUT_WHITELIST.contains(taskName)
+            task is AntSports
     }
 
     private fun scheduleNext() {
@@ -524,18 +543,31 @@ class CoroutineTaskRunner(allModels: List<Model>) {
         taskExecutionTimes.clear()
     }
 
-    private fun isRunSessionCurrent(): Boolean {
-        val ownerUserId = runSessionOwnerUserId?.trim().orEmpty()
-        if (ownerUserId.isEmpty() || runSessionEpoch <= 0L) {
-            return false
-        }
-        return AccountSessionCoordinator.isCurrentSession(ownerUserId, runSessionEpoch)
-    }
+    private fun runSessionCheck(): AccountSessionCheck =
+        AccountSessionCoordinator.checkCurrentSession(runSessionOwnerUserId, runSessionEpoch)
 
-    private fun logSessionInvalid(stage: String) {
+    private fun runSessionCheckDescription(check: AccountSessionCheck): String =
+        when (check) {
+            AccountSessionCheck.NoCurrentSession -> "当前会话不存在"
+            is AccountSessionCheck.AccountMismatch -> {
+                "账号已切换(expected=${check.requestedUserId.ifBlank { "UNKNOWN" }} current=${check.currentUserId})"
+            }
+            is AccountSessionCheck.EpochMismatch -> {
+                "会话轮次已切换(expected=${check.requestedEpoch} current=${check.currentEpoch})"
+            }
+            AccountSessionCheck.RuntimeIdentityUntrusted -> "运行时身份不可信"
+            is AccountSessionCheck.AccountSlotInactive -> "执行账号槽位已撤销(user=${check.userId})"
+            AccountSessionCheck.AccountSlotRegistryUnavailable -> "执行授权注册表不可用"
+            is AccountSessionCheck.Current -> "会话状态已恢复(user=${check.session.userId} epoch=${check.session.sessionEpoch})"
+        }
+
+    private fun logSessionInvalid(
+        stage: String,
+        check: AccountSessionCheck,
+    ) {
         Log.record(
             TAG,
-            "⏹ 会话已失效，停止统一任务闭环: stage=$stage owner=$runSessionOwnerUserId session=$runSessionEpoch current=${AccountSessionCoordinator.currentSession()}"
+            "⏹ ${runSessionCheckDescription(check)}，停止统一任务闭环: stage=$stage owner=$runSessionOwnerUserId session=$runSessionEpoch current=${AccountSessionCoordinator.currentSession()}",
         )
     }
 

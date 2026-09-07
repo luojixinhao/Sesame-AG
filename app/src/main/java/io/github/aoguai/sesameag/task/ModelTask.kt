@@ -12,6 +12,7 @@ import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.Notify.finishTaskRunning
 import io.github.aoguai.sesameag.util.Notify.startTaskRunning
 import io.github.aoguai.sesameag.util.Notify.updateRunningNextExec
+import io.github.aoguai.sesameag.util.WorkflowRootGuard
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -120,6 +121,7 @@ abstract class ModelTask : Model() {
         when (getName()) {
             "蚂蚁森林", "蚂蚁森林合种", "保护地", "生态保护" -> Log.forest(msg)
             "农场", "芭芭农场" -> Log.orchard(msg)
+            "金豆夺宝" -> Log.goldenBean(msg)
             "蚂蚁庄园" -> Log.farm(msg)
             "新村", "蚂蚁新村" -> Log.stall(msg)
             "海洋", "神奇海洋" -> Log.ocean(msg)
@@ -132,6 +134,7 @@ abstract class ModelTask : Model() {
             else -> when (getGroup()) {
                 ModelGroup.FOREST -> Log.forest(msg)
                 ModelGroup.ORCHARD -> Log.orchard(msg)
+                ModelGroup.GOLDEN_BEAN -> Log.goldenBean(msg)
                 ModelGroup.FARM -> Log.farm(msg)
                 ModelGroup.STALL -> Log.stall(msg)
                 ModelGroup.DODO -> Log.dodo(msg)
@@ -191,6 +194,9 @@ abstract class ModelTask : Model() {
      * 子类不应该直接覆盖此方法
      */
     suspend fun run() {
+        if (!WorkflowRootGuard.isExecutionAllowed()) {
+            throw CancellationException("必需权限或使用协议未就绪，任务已取消")
+        }
         runSuspend()
     }
 
@@ -276,16 +282,58 @@ abstract class ModelTask : Model() {
         force: Boolean = false,
         rounds: Int = 2
     ): Job {
+        return scheduleTask(
+            force = force,
+            rounds = rounds,
+            bypassExecutionChecks = false,
+            rejectExisting = false,
+        ) ?: error("无法创建自动任务启动任务")
+    }
+
+    /**
+     * 启动一次手动任务。
+     *
+     * 手动入口跳过自动任务的启用状态和调度检查，但仍复用任务 Job、互斥、运行状态和停止流程。
+     * @return 新启动的 Job；如果任务已经运行或正在等待启动则返回 null
+     */
+    fun startManualTask(rounds: Int = 1): Job? {
+        if (isRunning) {
+            Log.record(TAG, "任务 ${getName()} 正在运行，跳过手动启动")
+            return null
+        }
+        return scheduleTask(
+            force = false,
+            rounds = rounds,
+            bypassExecutionChecks = true,
+            rejectExisting = true,
+        )
+    }
+
+    private fun scheduleTask(
+        force: Boolean,
+        rounds: Int,
+        bypassExecutionChecks: Boolean,
+        rejectExisting: Boolean,
+    ): Job? {
         ensureTaskScope()
 
         val startJob = synchronized(startJobLock) {
             val existingJob = currentStartJob
             if (!force && existingJob != null && !existingJob.isCompleted) {
-                Log.record(TAG, "任务 ${getName()} 正在运行或等待启动，跳过重复启动")
-                existingJob
+                if (rejectExisting) {
+                    Log.record(TAG, "任务 ${getName()} 正在运行或等待启动，跳过手动启动")
+                    null
+                } else {
+                    Log.record(TAG, "任务 ${getName()} 正在运行或等待启动，跳过重复启动")
+                    existingJob
+                }
             } else {
                 taskScope!!.launch(start = CoroutineStart.LAZY) {
                     executionMutex.withLock {
+                        if (!WorkflowRootGuard.isExecutionAllowed()) {
+                            Log.record(TAG, "必需权限或使用协议未就绪，拒绝启动任务 ${getName()}")
+                            return@withLock
+                        }
                         if (isRunning && !force) {
                             Log.record(TAG, "任务 ${getName()} 正在运行，跳过启动")
                             return@withLock
@@ -294,7 +342,7 @@ abstract class ModelTask : Model() {
                             Log.record(TAG, "强制重启任务 ${getName()}")
                             stopTask()
                         }
-                        if (!isEnable() || !check()) {
+                        if (!bypassExecutionChecks && (!isEnable() || !check())) {
                             Log.record(TAG, "任务 ${getName()} 不满足执行条件")
                             return@withLock
                         }
@@ -327,7 +375,7 @@ abstract class ModelTask : Model() {
                 }
             }
         }
-        startJob.start()
+        startJob?.start()
         return startJob
     }
 
@@ -549,6 +597,9 @@ abstract class ModelTask : Model() {
                 }
 
                 if (isCancelled) return
+                if (!WorkflowRootGuard.isExecutionAllowed()) {
+                    throw CancellationException("必需权限或使用协议未就绪，子任务已取消")
+                }
 
                 // 执行任务逻辑
                 suspendRunnable?.invoke() ?: defaultRun()

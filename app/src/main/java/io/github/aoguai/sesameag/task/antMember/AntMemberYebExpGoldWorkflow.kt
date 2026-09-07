@@ -82,10 +82,11 @@ private data class YebExpGoldTaskGroup(
 
 internal fun AntMember.handleYebExpGoldTasks() {
     try {
-        var handledTask = handleYebExpGoldCertVouchers()
+        var handledTask = false
         var queryResponse = JSONObject(AntMemberYebExpGoldRpcCall.queryYebExpGoldMain())
         if (!isYebExpGoldSuccess(queryResponse)) {
             Log.member("余额宝体验金任务查询失败: ${getYebExpGoldErrorDesc(queryResponse)}")
+            handleYebExpGoldCertVouchers()
             return
         }
 
@@ -140,7 +141,7 @@ internal fun AntMember.handleYebExpGoldTasks() {
         }
 
         if (!handledTask && manualTaskTitles.isEmpty()) {
-            Log.member("余额宝体验金任务: 未发现可自动处理项目")
+            Log.member("余额宝体验金任务: 本轮未确认任务或兑换进展")
         }
         if (manualTaskTitles.isNotEmpty()) {
             Log.member("余额宝体验金任务待手动完成: ${manualTaskTitles.joinToString("、")}")
@@ -155,7 +156,7 @@ private fun handleYebExpGoldCertVouchers(): Boolean {
         return false
     }
 
-    val queryResponse = runCatching {
+    var queryResponse = runCatching {
         JSONObject(AntMemberYebExpGoldRpcCall.queryYebTrialCertVoucher())
     }.onFailure {
         Log.printStackTrace("AntMemberYebExpGold", "queryYebTrialCertVoucher err:", it)
@@ -166,70 +167,72 @@ private fun handleYebExpGoldCertVouchers(): Boolean {
         return false
     }
 
-    val pendingCount = countCanUseYebExpGoldVouchers(queryResponse)
-    if (pendingCount <= 0) {
+    var pendingCount =
+        getYebExpGoldVoucherCount(queryResponse) ?: run {
+            Log.member("余额宝体验金券查询缺少totalCount/certVoucherInfoList，停止当前链路")
+            return false
+        }
+    if (pendingCount == 0) {
+        Status.setFlagToday(StatusFlags.FLAG_ANTMEMBER_YEB_EXP_GOLD_VOUCHER_CONVERT_DONE)
         return false
     }
 
-    val convertResponse = runCatching {
-        JSONObject(AntMemberYebExpGoldRpcCall.convertYebExpGoldVoucher())
-    }.onFailure {
-        Log.printStackTrace("AntMemberYebExpGold", "convertYebExpGoldVoucher err:", it)
-    }.getOrNull() ?: return false
+    var handled = false
+    while (pendingCount > 0) {
+        val convertResponse = runCatching {
+            JSONObject(AntMemberYebExpGoldRpcCall.convertYebExpGoldVoucher())
+        }.onFailure {
+            Log.printStackTrace("AntMemberYebExpGold", "convertYebExpGoldVoucher err:", it)
+        }.getOrNull() ?: return handled
 
-    if (!isYebExpGoldVoucherConvertSuccess(convertResponse)) {
-        Log.member("余额宝体验金券使用失败: ${getYebExpGoldErrorDesc(convertResponse)}")
-        return false
-    }
-
-    val rewardText = getYebExpGoldVoucherConvertText(convertResponse)
-    Log.member("余额宝体验金💰[券自动使用]#${rewardText.ifBlank { "成功" }}")
-    Status.setFlagToday(StatusFlags.FLAG_ANTMEMBER_YEB_EXP_GOLD_VOUCHER_CONVERT_DONE)
-
-    val delayRefreshTime = convertResponse.optLong("delayRefreshTime", 0L)
-    if (delayRefreshTime > 0L) {
-        CoroutineUtils.sleepCompat(delayRefreshTime)
-    }
-
-    val refreshedVoucherResponse = runCatching {
-        JSONObject(AntMemberYebExpGoldRpcCall.queryYebTrialCertVoucher())
-    }.getOrNull()
-    if (refreshedVoucherResponse != null && isYebExpGoldSuccess(refreshedVoucherResponse)) {
-        val remainingCount = countCanUseYebExpGoldVouchers(refreshedVoucherResponse)
-        if (remainingCount > 0) {
-            Log.member("余额宝体验金券使用后仍有待使用券: $remainingCount")
+        if (!isYebExpGoldVoucherConvertSuccess(convertResponse)) {
+            Log.member("余额宝体验金券使用失败: ${getYebExpGoldErrorDesc(convertResponse)}")
+            return handled
         }
-    }
 
-    val refreshedMain = runCatching {
-        JSONObject(AntMemberYebExpGoldRpcCall.queryYebExpGoldMain())
-    }.getOrNull()
-    if (refreshedMain != null && !isYebExpGoldSuccess(refreshedMain)) {
-        Log.member("余额宝体验金券使用后主页回查失败: ${getYebExpGoldErrorDesc(refreshedMain)}")
+        handled = true
+        val rewardText = getYebExpGoldVoucherConvertText(convertResponse)
+        Log.member("余额宝体验金💰[券自动使用]#${rewardText.ifBlank { "成功" }}")
+
+        val delayRefreshTime = convertResponse.optLong("delayRefreshTime", 0L)
+        if (delayRefreshTime > 0L) {
+            CoroutineUtils.sleepCompat(delayRefreshTime)
+        }
+
+        queryResponse = runCatching {
+            JSONObject(AntMemberYebExpGoldRpcCall.queryYebTrialCertVoucher())
+        }.getOrNull() ?: run {
+            Log.member("余额宝体验金券使用后回查响应解析失败")
+            return handled
+        }
+        if (!isYebExpGoldSuccess(queryResponse)) {
+            Log.member("余额宝体验金券使用后回查失败: ${getYebExpGoldErrorDesc(queryResponse)}")
+            return handled
+        }
+        val remainingCount = getYebExpGoldVoucherCount(queryResponse)
+        if (remainingCount == null) {
+            Log.member("余额宝体验金券使用后回查缺少totalCount/certVoucherInfoList")
+            return handled
+        }
+        if (remainingCount == 0) {
+            Status.setFlagToday(StatusFlags.FLAG_ANTMEMBER_YEB_EXP_GOLD_VOUCHER_CONVERT_DONE)
+            return handled
+        }
+        if (remainingCount >= pendingCount) {
+            Log.member("余额宝体验金券使用后库存未减少: $pendingCount->$remainingCount，停止当前链路")
+            return handled
+        }
+        Log.member("余额宝体验金券使用后仍有待使用券: $remainingCount")
+        pendingCount = remainingCount
     }
-    return true
+    return handled
 }
 
-private fun countCanUseYebExpGoldVouchers(response: JSONObject): Int {
-    val equityList = response.optJSONObject("result")
-        ?.optJSONArray("equityList")
-        ?: return 0
-    var count = 0
-    for (index in 0 until equityList.length()) {
-        val voucher = equityList.optJSONObject(index) ?: continue
-        if (isCanUseYebExpGoldVoucher(voucher)) {
-            count++
-        }
+private fun getYebExpGoldVoucherCount(response: JSONObject): Int? {
+    if (response.has("totalCount") && !response.isNull("totalCount")) {
+        return response.optInt("totalCount").coerceAtLeast(0)
     }
-    return count
-}
-
-private fun isCanUseYebExpGoldVoucher(voucher: JSONObject): Boolean {
-    return listOf(
-        voucher.optString("equityStatus"),
-        voucher.optString("equityVoucherStatus"),
-        voucher.optString("finEquityStatus")
-    ).any { it.equals("CAN_USE", ignoreCase = true) }
+    return response.optJSONArray("certVoucherInfoList")?.length()
 }
 
 private fun isYebExpGoldVoucherConvertSuccess(response: JSONObject): Boolean {
@@ -526,34 +529,16 @@ private fun handleYebExpGoldExchange(queryResponse: JSONObject): Boolean {
         return false
     }
 
-    val trialAssetResponse = JSONObject(AntMemberYebExpGoldRpcCall.queryYebTrialAsset())
-    if (!isYebExpGoldSuccess(trialAssetResponse)) {
-        Log.member("余额宝体验金资产查询失败: ${getYebExpGoldErrorDesc(trialAssetResponse)}")
-        return false
-    }
-
-    val trialInfo = getYebTrialInfo(trialAssetResponse)
-    if (trialInfo == null) {
-        Log.member("余额宝体验金兑换缺少试用资产信息")
-        return false
-    }
-
-    val campId = trialInfo.optString("promoCampId")
-    val prizeId = trialInfo.optString("promoPrizeId")
-    if (campId.isBlank() || prizeId.isBlank()) {
-        Log.member("余额宝体验金兑换缺少活动参数")
-        return false
-    }
-
+    // 当前兑换活动不依赖已有的已激活资产，活动参数以成功兑换抓包的固定参数为准，否则会出现失败。
     val exchangeResponse = JSONObject(
         AntMemberYebExpGoldRpcCall.exchangeYebExpGold(
-            campId = campId,
-            prizeId = prizeId,
+            campId = "CP152735172",
+            prizeId = "PZ1144215101",
             exchangeAmount = balanceText
         )
     )
     if (!isYebExpGoldSuccess(exchangeResponse)) {
-        Log.member("余额宝体验金兑换失败: ${getYebExpGoldErrorDesc(exchangeResponse)}")
+        Log.error("AntMemberYebExpGold", "余额宝体验金兑换失败: ${getYebExpGoldErrorDesc(exchangeResponse)} rpc=com.alipay.yebscenebff.expgold.index.exchange raw=$exchangeResponse")
         return false
     }
 
@@ -561,13 +546,13 @@ private fun handleYebExpGoldExchange(queryResponse: JSONObject): Boolean {
         ?.optString("equityNo")
         .orEmpty()
     if (couponId.isBlank()) {
-        Log.member("余额宝体验金兑换成功但缺少激活凭证")
+        Log.error("AntMemberYebExpGold", "余额宝体验金兑换成功但缺少激活凭证 rpc=com.alipay.yebscenebff.expgold.index.exchange raw=$exchangeResponse")
         return false
     }
 
     val activeResponse = JSONObject(AntMemberYebExpGoldRpcCall.activeYebTrial(couponId))
     if (!isYebExpGoldSuccess(activeResponse)) {
-        Log.member("余额宝体验金激活失败: ${getYebExpGoldErrorDesc(activeResponse)}")
+        Log.error("AntMemberYebExpGold", "余额宝体验金激活失败: ${getYebExpGoldErrorDesc(activeResponse)} rpc=alipay.yebprod.promo.yebTrial.active raw=$activeResponse")
         return false
     }
 
@@ -589,19 +574,6 @@ private fun handleYebExpGoldExchange(queryResponse: JSONObject): Boolean {
     Log.member("余额宝体验金💰[兑换激活]#${amountText}元$extraInfo")
     Status.setFlagToday(StatusFlags.FLAG_ANTMEMBER_YEB_EXP_GOLD_EXCHANGE_DONE)
     return true
-}
-
-private fun getYebTrialInfo(trialAssetResponse: JSONObject): JSONObject? {
-    val trialInfoList = trialAssetResponse.optJSONArray("trialInfoList") ?: return null
-    for (index in 0 until trialInfoList.length()) {
-        val trialInfo = trialInfoList.optJSONObject(index) ?: continue
-        if (trialInfo.optString("promoCampId").isNotBlank() &&
-            trialInfo.optString("promoPrizeId").isNotBlank()
-        ) {
-            return trialInfo
-        }
-    }
-    return null
 }
 
 private fun queryYebExpGoldTaskRegistry(
@@ -741,15 +713,6 @@ private fun findYebExpGoldTaskByIdInNode(
 
 private fun markYebExpGoldTaskSource(task: JSONObject, source: YebExpGoldTaskSource) {
     task.put(YEB_TASK_SOURCE_KEY, source.name)
-}
-
-private fun getYebExpGoldTaskSource(task: JSONObject?): YebExpGoldTaskSource {
-    val sourceName = task?.optString(YEB_TASK_SOURCE_KEY).orEmpty()
-    YebExpGoldTaskSource.values().firstOrNull { it.name == sourceName }?.let { return it }
-    if (task?.optString("appletId") == AntMemberYebExpGoldRpcCall.YEB_EXP_GOLD_MAIN_QUERY_APPLET_ID) {
-        return YebExpGoldTaskSource.MAIN_QUERY
-    }
-    return YebExpGoldTaskSource.PROMO_TASK_LIST
 }
 
 private fun completeYebExpGoldTaskBySource(

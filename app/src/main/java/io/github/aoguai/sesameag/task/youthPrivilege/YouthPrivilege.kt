@@ -110,10 +110,7 @@ class YouthPrivilege : ModelTask() {
     }
 
     private fun handleCheckIn() {
-        if (Status.hasFlagToday(StatusFlags.FLAG_YOUTH_PRIVILEGE_CHECK_IN_DONE)) {
-            Log.youthPrivilege("青春特权签到今日已由服务端确认")
-            return
-        }
+        val previouslyConfirmed = Status.hasFlagToday(StatusFlags.FLAG_YOUTH_PRIVILEGE_CHECK_IN_DONE)
         val model = JSONObject(YouthPrivilegeRpcCall.queryCheckInModel())
         if (!isYouthSuccess(model)) {
             Log.error(TAG, "青春特权签到模型查询失败:$model")
@@ -133,7 +130,9 @@ class YouthPrivilege : ModelTask() {
 
             CHECKED_IN_ACTION -> {
                 Status.setFlagToday(StatusFlags.FLAG_YOUTH_PRIVILEGE_CHECK_IN_DONE)
-                Log.youthPrivilege("青春特权签到已完成#action=$action")
+                Log.youthPrivilege(
+                    if (previouslyConfirmed) "青春特权签到服务端仍确认完成" else "青春特权签到已完成#action=$action",
+                )
             }
 
             else -> Log.youthPrivilege("青春特权签到暂不处理#action=${action.ifBlank { "UNKNOWN" }} raw=$model")
@@ -249,8 +248,7 @@ class YouthPrivilege : ModelTask() {
         if (has(key) && !isNull(key)) optInt(key) else null
 
     private inner class YouthTaskFlowAdapter : TaskFlowAdapter {
-        // 报名成功后，抓包仍可能保留 TO_APPLY；用户确认的闭环要求继续调用 taskComplete。
-        private val signedUpTaskCodes = mutableSetOf<String>()
+        private val loggedUnsupportedTaskCodes = mutableSetOf<String>()
 
         override val moduleName: String = getName()
         override val flowName: String = "青春特权任务"
@@ -304,21 +302,29 @@ class YouthPrivilege : ModelTask() {
             when {
                 item.status == STATUS_COMPLETE || item.actionType == ACTION_DO_NOTHING -> TaskFlowPhase.TERMINAL
                 item.type != TASK_TYPE_BROWSER -> TaskFlowPhase.UNKNOWN
-                item.id in signedUpTaskCodes -> TaskFlowPhase.SIGNUP_COMPLETE
                 item.status == STATUS_PROCESSING || item.actionType == ACTION_COMPLETE -> TaskFlowPhase.SIGNUP_COMPLETE
                 item.status == STATUS_TO_APPLY || item.actionType == ACTION_SIGNUP -> TaskFlowPhase.SIGNUP_REQUIRED
                 else -> TaskFlowPhase.UNKNOWN
             }
 
-        override fun afterSuccess(
-            item: TaskFlowItem,
-            action: TaskFlowAction,
-            result: TaskFlowActionResult,
-        ) {
-            if (action == TaskFlowAction.SIGNUP) {
-                signedUpTaskCodes.add(item.id)
+        override fun isFlowHandledToday(): Boolean = false
+
+        override fun shouldSkip(item: TaskFlowItem): Boolean {
+            if (item.type.isBlank() || item.type == TASK_TYPE_BROWSER) {
+                return false
             }
+            if (loggedUnsupportedTaskCodes.add(item.id)) {
+                Log.youthPrivilege(
+                    "青春特权任务[跳过非浏览任务] taskCode=${item.id} " +
+                        "taskType=${item.type} status=${item.status.ifBlank { "UNKNOWN" }}",
+                )
+            }
+            return true
         }
+
+        override fun isUnresolvedWhenSkipped(item: TaskFlowItem): Boolean =
+            !isBlacklisted(item) &&
+                item.status != STATUS_COMPLETE && item.actionType != ACTION_DO_NOTHING
 
         override fun signup(item: TaskFlowItem): TaskFlowActionResult =
             executeTaskAction(item, "taskSignUp") { taskCode, taskSource, taskType ->
@@ -349,14 +355,24 @@ class YouthPrivilege : ModelTask() {
             }
             val response = JSONObject(request(taskCode, taskSource, taskType))
             if (isYouthSuccess(response)) {
-                // 动作成功仅说明服务端接受请求，TaskFlow 必须进行一次状态回查后才能判定进展。
-                return TaskFlowActionResult.success(refreshAfterAction = true, progressChanged = false)
+                // 动作成功仅说明服务端接受请求，TaskFlow 必须回查服务端状态。
+                return TaskFlowActionResult.success(
+                    refreshAfterAction = true,
+                    progressChanged = false,
+                )
             }
+            val hasRetryable = response.has("retryable") && !response.isNull("retryable")
             val failureType =
-                if (response.optBoolean("retryable")) {
-                    TaskRpcFailureType.RETRYABLE_RPC
-                } else {
-                    TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW
+                when {
+                    hasRetryable && response.optBoolean("retryable") -> TaskRpcFailureType.RETRYABLE_RPC
+                    response.optBoolean("success", true) == false &&
+                        response.optString("resultCode") == "TASK_OPERATE_ERROR" &&
+                        hasRetryable &&
+                        !response.optBoolean("retryable") -> {
+                        TaskRpcFailureType.NON_RETRYABLE_INVALID
+                    }
+
+                    else -> TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW
                 }
             return TaskFlowActionResult.failure(
                 failureType = failureType,
@@ -369,6 +385,7 @@ class YouthPrivilege : ModelTask() {
         }
 
         override fun onAllTasksDone(snapshot: TaskFlowSnapshot) {
+            Status.setFlagToday(StatusFlags.FLAG_YOUTH_PRIVILEGE_TASKS_DONE)
             Log.youthPrivilege("青春特权任务服务端已无待处理项#${snapshot.totalTasks}")
         }
 

@@ -2,6 +2,8 @@ package io.github.aoguai.sesameag.ui.dto
 
 import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.data.StatusFlags
+import io.github.aoguai.sesameag.data.TodayFlagKey
+import io.github.aoguai.sesameag.data.TodayFlagRegistry
 import io.github.aoguai.sesameag.model.ModelField
 import io.github.aoguai.sesameag.model.ModelFields
 import io.github.aoguai.sesameag.model.modelFieldExt.FriendSelectionCountModelField
@@ -16,6 +18,7 @@ import io.github.aoguai.sesameag.util.maps.UserMap
 data class ModelFieldTodayState(
     val inactive: Boolean = false,
     val reason: String = "",
+    val clearableFlagKeys: Set<TodayFlagKey> = emptySet(),
 )
 
 /**
@@ -30,6 +33,7 @@ object ModelFieldTodayStateResolver {
     private data class OptionFlagState(
         val flag: String,
         val reason: String,
+        val flagPrefix: String = "",
     )
 
     /**
@@ -43,13 +47,16 @@ object ModelFieldTodayStateResolver {
 
     private val antFarmFamilyOptionStates =
         mapOf(
-            "familySign" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SIGNED, "今日家庭签到已处理"),
             "feedFamilyAnimal" to OptionFlagState(StatusFlags.FLAG_FARM_FEED_FRIEND_LIMIT, "今日帮喂次数已达上限"),
             "sleepTogether" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SLEEP_TOGETHER, "今日一起睡觉已处理"),
             "deliverMsgSend" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_DELIVER_MSG_SEND, "今日道早安已处理"),
             "shareToFriends" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_SHARE_TO_FRIENDS, "今日家庭分享已处理"),
             "inviteFriendVisitFamily" to OptionFlagState(StatusFlags.FLAG_FARM_INVITE_FRIEND_VISIT_FAMILY, "今日好友串门邀请已处理"),
-            "batchInviteP2P" to OptionFlagState(StatusFlags.FLAG_FARM_FAMILY_BATCH_INVITE_P2P, "今日串门送扭蛋已处理"),
+            "ExchangeFamilyDecoration" to OptionFlagState(
+                flag = "",
+                reason = "今日兑换装修物品已处理",
+                flagPrefix = StatusFlags.FLAG_FARM_FAMILY_DECORATION_CHECK_DONE_PREFIX,
+            ),
         )
 
     @JvmStatic
@@ -57,8 +64,8 @@ object ModelFieldTodayStateResolver {
         modelCode: String,
         modelFields: ModelFields,
         modelField: ModelField<*>,
-    ): ModelFieldTodayState =
-        when ("$modelCode.${modelField.code}") {
+    ): ModelFieldTodayState {
+        val state = when ("$modelCode.${modelField.code}") {
             "AntForest.pkEnergy" -> {
                 flag(StatusFlags.FLAG_ANTFOREST_PK_SKIP_TODAY, "今日 PK 榜无需处理")
             }
@@ -79,6 +86,10 @@ object ModelFieldTodayStateResolver {
 
             "YouthPrivilege.youthPrivilegeCheckIn" -> {
                 flag(StatusFlags.FLAG_YOUTH_PRIVILEGE_CHECK_IN_DONE, "今日青春特权签到已处理")
+            }
+
+            "YouthPrivilege.youthPrivilegeTasks" -> {
+                flag(StatusFlags.FLAG_YOUTH_PRIVILEGE_TASKS_DONE, "今日青春特权任务已处理")
             }
 
             "AntForest.ecoLife",
@@ -134,6 +145,14 @@ object ModelFieldTodayStateResolver {
                 )
             }
 
+            "AntMember.CollectStickers" -> {
+                flag(StatusFlags.FLAG_ANTMEMBER_STICKERS_DONE, "今日账单贴纸已处理")
+            }
+
+            "AntMember.billBlockWorld" -> {
+                flag(StatusFlags.FLAG_ANTMEMBER_BILL_BLOCK_WORLD_DONE, "今日账单拼贴世界已处理")
+            }
+
             "AntMember.memberPointExchangeBenefit" -> {
                 flag(StatusFlags.FLAG_ANTMEMBER_MEMBER_BENEFIT_REFRESH_DONE, "今日会员积分兑换权益已处理")
             }
@@ -160,6 +179,10 @@ object ModelFieldTodayStateResolver {
                     StatusFlags.FLAG_MYBANK_WELFARE_EXCHANGE_REFRESH_DONE,
                     "今日网商银行福利金兑换已处理",
                 )
+            }
+
+            "MyBankWelfare.myBankWelfareTask" -> {
+                flag(StatusFlags.FLAG_MYBANK_WELFARE_TASKS_DONE, "今日网商银行福利金任务中心已处理")
             }
 
             "AntMember.enableGameCenter" -> {
@@ -315,6 +338,26 @@ object ModelFieldTodayStateResolver {
                 )
             }
 
+            "GoldenBeanTreasure.goldenBeanTreasure" -> {
+                flag(StatusFlags.FLAG_GOLDEN_BEAN_TASKS_DONE, "今日金豆夺宝任务已处理")
+            }
+
+            "GoldenBeanTreasure.goldenBeanManureExchangeDailyReserveAmount" -> {
+                limitReached(
+                    current = Status.getIntFlagToday(StatusFlags.FLAG_GOLDEN_BEAN_MANURE_EXCHANGE_AMOUNT),
+                    limit = intValue(modelField),
+                    reason = "今日肥料换豆额度已达上限",
+                )
+            }
+
+            "GoldenBeanTreasure.goldenBeanSesameExchangeDailyBeanAmount" -> {
+                limitReached(
+                    current = Status.getIntFlagToday(StatusFlags.FLAG_GOLDEN_BEAN_ZHIMA_EXCHANGE_BEAN_AMOUNT),
+                    limit = intValue(modelField),
+                    reason = "今日芝麻粒换豆金豆额度已达上限",
+                )
+            }
+
             "AntFishPond.fishPondTask" -> {
                 allFlags(
                     StatusFlags.FLAG_ANTFISHPOND_SIGN_DONE,
@@ -339,10 +382,8 @@ object ModelFieldTodayStateResolver {
                 flag(StatusFlags.FLAG_ANTSTALL_TASKS_DONE, "今日新村任务已处理")
             }
 
-            "AntFarm.doFarmTask",
-            "AntFarm.farmTaskTrigger",
-            -> {
-                flag(StatusFlags.FLAG_FARM_TASK_FINISHED, "今日饲料任务已处理")
+            "AntFarm.doFarmTask" -> {
+                flag(StatusFlags.FLAG_FARM_TASK_FINISHED, "今日支持的基础任务已完成")
             }
 
             "AntFarm.paradiseCoinExchangeBenefit",
@@ -351,18 +392,11 @@ object ModelFieldTodayStateResolver {
                 paradiseCoinExchangeState(modelFields)
             }
 
-            "AntFarm.enableChouchoule",
-            "AntFarm.chouChouLeTrigger",
-            -> {
-                allFlags(
-                    StatusFlags.FLAG_FARM_CHOUCHOULE_FINISHED,
-                    StatusFlags.FLAG_FARM_MULTI_STAGE_TASK_FINISHED,
-                    reason = "今日小鸡抽抽乐和多阶段任务已处理",
-                )
+            "AntFarm.enableChouchoule" -> {
+                flag(StatusFlags.FLAG_FARM_CHOUCHOULE_FINISHED, "本日普通及IP抽奖已处理")
             }
 
             "AntFarm.recordFarmGame",
-            "AntFarm.farmGameTrigger",
             -> {
                 flag(StatusFlags.FLAG_FARM_GAME_FINISHED, "今日小游戏改分已处理")
             }
@@ -385,7 +419,12 @@ object ModelFieldTodayStateResolver {
             "AntFarm.remainingTime",
             "AntFarm.accelerateToolDailyLimit",
             -> {
-                flag(StatusFlags.FLAG_FARM_ACCELERATE_LIMIT, "今日加速卡已达设定/系统上限")
+                val limit = intValue(modelFields["accelerateToolDailyLimit"]) ?: -1
+                when {
+                    Status.hasFlagToday(StatusFlags.FLAG_FARM_ACCELERATE_LIMIT) -> inactive("今日加速卡已达服务端上限")
+                    limit >= 0 && Status.INSTANCE.useAccelerateToolCount >= limit -> inactive("今日加速卡已达当前设定上限")
+                    else -> ModelFieldTodayState()
+                }
             }
 
             "AntFarm.useSpecialFood",
@@ -404,14 +443,6 @@ object ModelFieldTodayStateResolver {
                 farmDonationState()
             }
 
-            "AntFarm.receiveDonationCompetitionAward" -> {
-                flag(StatusFlags.FLAG_FARM_DONATION_COMPETITION_AWARD_RECEIVED, "今日捐蛋排位赛奖励已处理")
-            }
-
-            "AntFarm.signRegardless" -> {
-                flag(StatusFlags.FLAG_FARM_SIGNED, "今日庄园签到已处理")
-            }
-
             "OtherTask.credit2101",
             "OtherTask.CreditOptions",
             -> {
@@ -422,6 +453,18 @@ object ModelFieldTodayStateResolver {
                 ModelFieldTodayState()
             }
         }
+        return if (state.inactive) {
+            state.copy(
+                clearableFlagKeys = TodayFlagRegistry.fieldKeys(
+                    status = Status.INSTANCE,
+                    modelCode = modelCode,
+                    fieldCode = modelField.code,
+                ),
+            )
+        } else {
+            state
+        }
+    }
 
     private fun flag(
         flag: String,
@@ -472,9 +515,6 @@ object ModelFieldTodayStateResolver {
         }
 
     private fun specialFoodLimitState(modelFields: ModelFields): ModelFieldTodayState {
-        if (Status.hasFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_LIMIT)) {
-            return inactive("今日特殊食品使用已达上限")
-        }
         return limitReached(
             current = Status.getIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DAILY_COUNT),
             limit = intValue(modelFields["useSpecialFoodCount"]),
@@ -483,9 +523,6 @@ object ModelFieldTodayStateResolver {
     }
 
     private fun donationCompetitionSpecialFoodLimitState(modelFields: ModelFields): ModelFieldTodayState {
-        if (Status.hasFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DONATION_COMPETITION_LIMIT)) {
-            return inactive("今日排位赛特殊食品使用已达上限")
-        }
         return limitReached(
             current = Status.getIntFlagToday(StatusFlags.FLAG_FARM_SPECIAL_FOOD_DONATION_COMPETITION_DAILY_COUNT),
             limit = intValue(modelFields["donationCompetitionSpecialFoodCount"]),
@@ -629,7 +666,7 @@ object ModelFieldTodayStateResolver {
             return ModelFieldTodayState()
         }
 
-        return if (matchedStates.all { Status.hasFlagToday(it.flag) }) {
+        return if (matchedStates.all { optionStateSatisfied(it) }) {
             val reason =
                 if (matchedStates.size == 1) {
                     matchedStates.first().reason
@@ -641,6 +678,13 @@ object ModelFieldTodayStateResolver {
             ModelFieldTodayState()
         }
     }
+
+    private fun optionStateSatisfied(state: OptionFlagState): Boolean =
+        when {
+            state.flag.isNotBlank() && Status.hasFlagToday(state.flag) -> true
+            state.flagPrefix.isNotBlank() && hasFlagTodayWithPrefix(state.flagPrefix) -> true
+            else -> false
+        }
 
     private fun selectedSetFlagState(
         modelField: ModelField<*>?,

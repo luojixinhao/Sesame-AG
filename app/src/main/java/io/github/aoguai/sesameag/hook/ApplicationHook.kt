@@ -61,6 +61,7 @@ import io.github.aoguai.sesameag.util.DataStore.init
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.GlobalThreadPools.execute
 import io.github.aoguai.sesameag.util.GlobalThreadPools.shutdownAndRestart
+import io.github.aoguai.sesameag.util.CommandUtil
 import io.github.aoguai.sesameag.util.LocaleSettingsApplier
 import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.Log.error
@@ -84,18 +85,21 @@ import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.lang.AutoCloseable
 import java.lang.reflect.Method
 import java.util.Calendar
 import kotlin.concurrent.Volatile
 
 class ApplicationHook {
-    var xposedInterface: XposedInterface? = null
+    private var xposedInterface: XposedInterface? = null
         set(value) {
             field = value
             updateFrameworkRuntimeInfo(value)
         }
+
+    internal fun attachLibXposedRuntime(runtime: XposedInterface) {
+        xposedInterface = runtime
+    }
 
     private class TaskLock : AutoCloseable {
         private val acquired: Boolean
@@ -122,7 +126,7 @@ class ApplicationHook {
 
     // --- 入口方法 ---
     fun loadPackage(lpparam: PackageReadyParam) {
-        if (General.PACKAGE_NAME != lpparam.packageName) return
+        if (General.PACKAGE_NAME != lpparam.packageName || !RuntimeIdentityGuard.isPackageReady()) return
         handleHookLogic(
             lpparam.classLoader,
             lpparam.packageName,
@@ -139,13 +143,28 @@ class ApplicationHook {
         val activeLoader = loader ?: return
         classLoader = activeLoader
         finalProcessName = processName
-        val frameworkInfo = resolveCurrentFrameworkInfo(activeLoader)
+        val frameworkInfo = resolveCurrentFrameworkInfo()
         val framework = frameworkInfo.displayName
+<<<<<<< HEAD
+=======
+        val frameworkApiVersion = getFrameworkRuntimeInfo()?.apiVersion ?: 0
+        if (!ModuleStatus.isSupportedLsposedFramework(framework, frameworkApiVersion)) {
+            remotePreferences = null
+            ModuleStatusReporter.updateNow(framework = framework, packageName = packageName, reason = "unsupported_libxposed_runtime")
+            record(TAG, "⛔ 检测到不受支持的 $framework 运行时 (API $frameworkApiVersion)，停止安装 Hook")
+            return
+        }
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75
 
         // 1. 初始化配置读取
         remotePreferences = loadRemotePreferences(framework)
 
-        // 2. 进程检查
+        // 2. 进程检查。Lite 子进程只安装自然 RPC 抓包，不得进入任务运行时。
+        if (shouldHookCaptureOnlyProcess()) {
+            installCaptureOnlyHooks(activeLoader)
+            hookCaptureOnlyProcessAttach()
+            return
+        }
         if (!shouldHookProcess()) return
 
         init(Files.CONFIG_DIR)
@@ -169,25 +188,25 @@ class ApplicationHook {
     private fun loadRemotePreferences(framework: String): SharedPreferences? {
         val frameworkProperties = getFrameworkRuntimeInfo()?.properties
         if (frameworkProperties == null) {
-            logFramework(android.util.Log.INFO, "无法读取 $framework 的 capability，跳过远程偏好读取")
+            Log.runtime(TAG, "无法读取 $framework 的 capability，跳过远程偏好读取")
             return null
         }
         if (frameworkProperties.and(XposedInterface.PROP_CAP_REMOTE) == 0L) {
-            logFramework(android.util.Log.INFO, "$framework 未声明 remote capability，跳过远程偏好读取")
+            Log.runtime(TAG, "$framework 未声明 remote capability，跳过远程偏好读取")
             return null
         }
         return runCatching {
             requireXposedInterface().getRemotePreferences(SesameApplication.PREFERENCES_KEY)
         }.onFailure {
-            logFramework(android.util.Log.WARN, "读取远程偏好失败: ${it.message}", it)
+            logFrameworkWarning("读取远程偏好失败: ${it.message}", it)
         }.getOrNull()
     }
 
-    private fun shouldHookProcess(): Boolean {
-        val isMainProcess = General.PACKAGE_NAME == finalProcessName
-        return isMainProcess
-//            record(TAG, "跳过辅助进程: $finalProcessName")
-    }
+    private fun shouldHookProcess(): Boolean =
+        RuntimeIdentityGuard.isMainProcess() && RuntimeIdentityGuard.isPackageReady()
+
+    private fun shouldHookCaptureOnlyProcess(): Boolean =
+        RuntimeIdentityGuard.isCaptureOnlyProcess() && RuntimeIdentityGuard.isPackageReady()
 
     private fun initReflection(loader: ClassLoader) {
         try {
@@ -206,6 +225,49 @@ class ApplicationHook {
         }
     }
 
+    private fun installCaptureOnlyHooks(activeLoader: ClassLoader) {
+        val installed = RpcTrafficCapture.installForCaptureOnlyProcess(activeLoader)
+        val application = runCatching {
+            val activityThread = Class.forName("android.app.ActivityThread")
+            activityThread.getDeclaredMethod("currentApplication").invoke(null) as? Application
+        }.getOrNull()
+        application?.let { Log.init(it) }
+        Log.runtime(
+            TAG,
+            "capture_only_hook_install: process=$finalProcessName installed=$installed applicationReady=${application != null}",
+        )
+    }
+
+    private fun hookCaptureOnlyProcessAttach() {
+        try {
+            val attachMethod = findMethod(Application::class.java, "attach", Context::class.java)
+            requireXposedInterface().hook(attachMethod).intercept { chain ->
+                val result = chain.proceed()
+                val context = chain.args[0] as? Context ?: return@intercept result
+                val identityDecision = RuntimeIdentityGuard.verifyApplicationAttach(context)
+                if (!identityDecision.accepted || !RuntimeIdentityGuard.isCaptureOnlyProcess()) {
+                    val reasonCode = identityDecision.reasonCode ?: "identity_not_verified"
+                    val message =
+                        "capture_instance_rejected: $reasonCode process=$processName process_role=capture_only"
+                    logFrameworkWarning(message)
+                    android.util.Log.w(TAG, message)
+                    return@intercept result
+                }
+                XposedEnv.runtimeIdentity = RuntimeIdentityGuard.trustedIdentity()
+                Log.init(context)
+                val activeLoader = classLoader ?: return@intercept result
+                val installed = RpcTrafficCapture.installForCaptureOnlyProcess(activeLoader)
+                Log.runtime(
+                    TAG,
+                    "capture_only_hook_ready: process=$finalProcessName installed=$installed",
+                )
+                result
+            }
+        } catch (e: Exception) {
+            Log.printStackTrace(TAG, "Capture-only attach hook failed", e)
+        }
+    }
+
     private fun hookApplicationAttach(packageName: String?) {
         try {
             val attachMethod = findMethod(Application::class.java, "attach", Context::class.java)
@@ -213,6 +275,15 @@ class ApplicationHook {
                 val result = chain.proceed()
                 val context = chain.args[0] as? Context ?: return@intercept result
                 val application = chain.getThisObject() as? Application
+                val identityDecision = RuntimeIdentityGuard.verifyApplicationAttach(context)
+                if (!identityDecision.accepted) {
+                    val reasonCode = identityDecision.reasonCode ?: "identity_not_verified"
+                    val message = "instance_rejected: $reasonCode process=$processName process_role=main"
+                    logFrameworkWarning(message)
+                    android.util.Log.w(TAG, message)
+                    return@intercept result
+                }
+                XposedEnv.runtimeIdentity = RuntimeIdentityGuard.trustedIdentity()
                 appContext = context
                 mainHandler = Handler(Looper.getMainLooper())
                 Log.init(context)
@@ -229,9 +300,6 @@ class ApplicationHook {
                     AuthCodeHelper.init(classLoader!!)
 
                     initVersionInfo(packageName)
-                    if (VersionHook.hasVersion() && alipayVersion.compareTo(AlipayVersion("10.7.26.8100")) == 0) {
-                        HookUtil.bypassAccountLimit(classLoader!!)
-                    }
                 }
                 result
             }
@@ -481,7 +549,7 @@ class ApplicationHook {
                 val s = chain.getThisObject() as? Service ?: return@intercept result
                 if (General.CURRENT_USING_SERVICE == s.javaClass.getCanonicalName()) {
                     // TODO: 目前观察到用户手动划掉目标应用后台时，也会走到这里。
-                    // 如果直接 restartByBroadcast()/reOpenApp()，会把“用户主动退出”误判成“异常退出需要恢复”，
+                    // 如果直接 reOpenApp()，会把“用户主动退出”误判成“异常退出需要恢复”，
                     // 进而出现目标应用/模块后台被反复复活的问题。后续可增加独立配置开关，
                     // 由用户决定“宿主前台服务销毁后是否自动恢复目标应用/执行链路”。
                     updateRunningStatus("目标应用前台服务被销毁")
@@ -607,10 +675,13 @@ class ApplicationHook {
 
         internal fun isReadyForExec(): Boolean {
             val session = AccountSessionCoordinator.currentSession()
-            return init &&
+            return RuntimeIdentityGuard.isTrustedForExecution() &&
+                AccountSlotRegistry.isExecutableUser(session?.userId) &&
+                init &&
                 Config.isLoaded() &&
                 service != null &&
                 WorkflowRootGuard.hasGrantedRoot() &&
+                WorkflowRootGuard.isExecutionAllowed() &&
                 !ApplicationHookConstants.isOffline() &&
                 session?.workflowAllowed == true &&
                 session.userId == currentUid
@@ -718,6 +789,9 @@ class ApplicationHook {
             val safeUserId = userId.trim()
             if (safeUserId.isEmpty()) {
                 return HookUtil.FriendRefreshResult(success = false, message = "刷新好友失败：账号为空")
+            }
+            if (!WorkflowRootGuard.isExecutionAllowed()) {
+                return HookUtil.FriendRefreshResult(success = false, message = "必需权限或使用协议未就绪，无法刷新好友")
             }
             val loader =
                 classLoader ?: return HookUtil.FriendRefreshResult(
@@ -1066,6 +1140,10 @@ class ApplicationHook {
                     record(TAG, "⏳ Service 未就绪，延后初始化: $reason")
                     return false
                 }
+                if (!RuntimeIdentityGuard.isTrustedForExecution()) {
+                    record(TAG, "instance_rejected: ${RuntimeIdentityGuard.lastReasonCode() ?: "identity_not_verified"}")
+                    return false
+                }
 
                 val activeClassLoader = classLoader ?: return false
                 val userId = HookUtil.getUserId(activeClassLoader)
@@ -1082,12 +1160,14 @@ class ApplicationHook {
                     userId,
                     allowPersistedReuse = allowPersistedSessionReuse,
                 )
-                appContext?.let { context ->
-                    PersistentScheduleRegistry.activateSession(
-                        context = context,
-                        ownerUserId = userId,
-                        sessionEpoch = AccountSessionCoordinator.currentSessionEpoch(),
-                    )
+                val admission = when (val result = AccountSlotRegistry.admitRuntimeUser(userId)) {
+                    is AccountSlotAdmission.Denied -> {
+                        record(TAG, "execution_gate_denied: ${result.reasonCode} process_role=main")
+                        destroyHandlerInternal("account_slot_${result.reasonCode}", invalidateSession = true)
+                        return false
+                    }
+
+                    is AccountSlotAdmission.Allowed -> result
                 }
                 if (init) {
                     if (shouldCaptureReloadState(reason)) {
@@ -1113,11 +1193,9 @@ class ApplicationHook {
                     // ignore
                 }
 
-                ensureScheduler()
+                // Model metadata is required by Config.load(), but session work waits for a stable slot.
                 Model.initAllModel()
 
-                pendingInit = false
-                pendingInitReason = null
                 UserMap.setCurrentUserId(userId)
                 load(userId)
                 // 冷启动期目标应用社交库(AliAccountDaoOp)可能尚未加载完，过早 getAllFriends() 会拿到
@@ -1127,17 +1205,57 @@ class ApplicationHook {
                 runCatching { UserMap.load(userId) }.onFailure {
                     printStackTrace(TAG, "初始化加载本地好友快照失败", it)
                 }
-                scheduleDeferredFriendCenterSync(userId, reason)
                 record(TAG, "Sesame-AG 开始初始化...")
 
                 Config.load(userId)
                 LocaleSettingsApplier.apply(appContext)
                 Logback.reloadFileLogging(enableCaptureAppender = true)
                 val activeUserSnapshot = AccountSessionCoordinator.ensureActiveUserSnapshot(userId, activeClassLoader)
+                if (admission.requiresConfirmation) {
+                    when (val confirmation = AccountSlotRegistry.confirmRuntimeUser(userId)) {
+                        AccountSlotRuntimeConfirmation.Confirmed -> Unit
+                        AccountSlotRuntimeConfirmation.PendingPersistence,
+                        AccountSlotRuntimeConfirmation.Expired,
+                        AccountSlotRuntimeConfirmation.RegistryUnavailable -> {
+                            val reasonCode = when (confirmation) {
+                                AccountSlotRuntimeConfirmation.PendingPersistence ->
+                                    "account_slot_provision_unconfirmed"
+                                AccountSlotRuntimeConfirmation.Expired -> "account_slot_provision_expired"
+                                AccountSlotRuntimeConfirmation.RegistryUnavailable ->
+                                    "account_slot_registry_unavailable"
+                                AccountSlotRuntimeConfirmation.Confirmed -> error("unreachable")
+                            }
+                            record(TAG, "execution_gate_denied: $reasonCode process_role=main")
+                            destroyHandlerInternal("account_slot_$reasonCode", invalidateSession = true)
+                            return false
+                        }
+                    }
+                }
+                val executionCheck = AccountSlotRegistry.checkExecutableUser(userId)
+                if (executionCheck !is AccountSlotExecutionCheck.Allowed) {
+                    val reasonCode = when (executionCheck) {
+                        is AccountSlotExecutionCheck.Inactive -> "account_slot_inactive"
+                        AccountSlotExecutionCheck.InvalidUserId -> "account_slot_invalid_user_id"
+                        AccountSlotExecutionCheck.RegistryUnavailable -> "account_slot_registry_unavailable"
+                        is AccountSlotExecutionCheck.Allowed -> error("unreachable")
+                    }
+                    record(TAG, "execution_gate_rejected_before_apply: $reasonCode process_role=main")
+                    destroyHandlerInternal("account_slot_recheck", invalidateSession = true)
+                    return false
+                }
+
+                ensureScheduler()
                 val legalAccepted = Config.isLoaded() && Config.isLegalAcceptedForCurrentVersion()
                 // 不再以 LEGAL 勾选状态强制阻止工作流：只要有执行权限且非离线即可允许工作流
                 val workflowAllowed =
+<<<<<<< HEAD
                     WorkflowRootGuard.hasGrantedRoot() &&
+=======
+                    RuntimeIdentityGuard.isTrustedForExecution() &&
+                        WorkflowRootGuard.hasGrantedRoot() &&
+                        WorkflowRootGuard.isExecutionAllowed() &&
+                        legalAccepted &&
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75
                         !ApplicationHookConstants.isOffline()
                 AccountSessionCoordinator.applySession(
                     context = appContext,
@@ -1148,6 +1266,8 @@ class ApplicationHook {
                     reason = reason,
                 )
                 sessionApplied = true
+                pendingInit = false
+                pendingInitReason = null
 
                 if (!Config.isLoaded()) return false
                 if (!ensureRootAccessForWorkflow(reason)) {
@@ -1159,6 +1279,7 @@ class ApplicationHook {
                 if (!ensureRpcVersionSupported()) {
                     return false
                 }
+                scheduleDeferredFriendCenterSync(userId, reason)
 
                 // Phase 7：DataStore watcher 生命周期治理（用户切换/重载后重启 watcher，避免丢失跨进程同步能力）
                 try {
@@ -1203,9 +1324,9 @@ class ApplicationHook {
                 pendingInit = false
                 pendingInitReason = null
                 EnergyWaitingManager.restoreForCurrentSession("init_ready")
-                handlePersistentLaunchAfterInit(appContext!!)
+                val deferGenericStartupTrigger = handlePersistentLaunchAfterInit(appContext!!)
                 ModuleStatusReporter.requestUpdate(reason = "ready")
-                ApplicationHookEntry.onInitCompleted(reason)
+                ApplicationHookEntry.onInitCompleted(reason, deferGenericStartupTrigger)
                 return true
             } catch (th: Throwable) {
                 if (sessionApplied) {
@@ -1219,14 +1340,17 @@ class ApplicationHook {
             }
         }
 
-        private fun handlePersistentLaunchAfterInit(context: Context) {
+        private fun handlePersistentLaunchAfterInit(context: Context): Boolean {
             val launchScheduleId = pendingPersistentLaunchScheduleId
             if (launchScheduleId.isNullOrBlank()) {
                 UnifiedScheduler.reconcilePersistentSchedules(
                     context,
                     mode = PersistentReconcileMode.FIRE_ALARM_DUE,
                 )
-                return
+                return PersistentScheduleRegistry.hasActiveModuleChild(
+                    AccountSessionCoordinator.currentUserId(),
+                    AccountSessionCoordinator.currentSessionEpoch(),
+                )
             }
             record(TAG, "初始化完成，处理持久调度唤醒任务[$launchScheduleId]")
             val schedule = PersistentScheduleRegistry.get(launchScheduleId)
@@ -1238,6 +1362,10 @@ class ApplicationHook {
                 record(TAG, "初始化完成但持久调度任务不存在[$launchScheduleId]")
                 pendingPersistentLaunchScheduleId = null
             }
+            return PersistentScheduleRegistry.hasActiveModuleChild(
+                AccountSessionCoordinator.currentUserId(),
+                AccountSessionCoordinator.currentSessionEpoch(),
+            )
         }
 
         private fun checkBatteryPermission() {
@@ -1326,7 +1454,7 @@ class ApplicationHook {
         }
 
         private fun ensureRootAccessForWorkflow(reason: String): Boolean {
-            if (WorkflowRootGuard.hasGrantedRoot()) {
+            if (WorkflowRootGuard.hasGrantedRoot() && WorkflowRootGuard.isExecutionAllowed()) {
                 pendingInit = false
                 pendingInitReason = null
                 AccountSessionCoordinator.refreshWorkflowState(appContext, "root_granted_cached")
@@ -1343,20 +1471,31 @@ class ApplicationHook {
             record(TAG, "⏳ 正在检查执行权限，暂不启动工作流: $reason")
             execute {
                 try {
-                    val granted = WorkflowRootGuard.hasRoot(forceRefresh = true, reason = reason)
+                    val context = appContext ?: return@execute
+                    val executorStatus = CommandUtil.awaitServiceStatus(context)
+                    if (executorStatus is CommandUtil.ServiceStatus.Loading ||
+                        executorStatus is CommandUtil.ServiceStatus.Error
+                    ) {
+                        record(TAG, "⏳ 执行权限服务尚未就绪，保留待初始化状态: $reason")
+                        return@execute
+                    }
+                    val granted = WorkflowRootGuard.hasRoot(forceRefresh = true, reason = reason) &&
+                        executorStatus is CommandUtil.ServiceStatus.Active &&
+                        WorkflowRootGuard.isExecutionAllowed()
                     if (!granted) {
-                        updateRunningStatus("未检测到可用执行权限，已禁止工作流")
+                        updateRunningStatus("必需权限或使用协议未就绪，已禁止工作流")
                         ApplicationHookConstants.clearPendingTriggers("root_denied")
                         AccountSessionCoordinator.refreshWorkflowState(appContext, "root_denied")
                         return@execute
                     }
 
-                    val retryReason = pendingInitReason ?: reason
-                    rootCheckInProgress = false
-                    if (service != null && !init) {
-                        record(TAG, "✅ 执行权限检查通过，继续初始化: $retryReason")
-                        if (initHandler(retryReason)) {
-                            init = true
+                    ApplicationHookConstants.submitEntry("execution_permission_ready") {
+                        val retryReason = pendingInitReason ?: reason
+                        if (service != null && (!init || pendingInit)) {
+                            record(TAG, "✅ 执行权限检查通过，继续初始化: $retryReason")
+                            if (initHandler(retryReason)) {
+                                init = true
+                            }
                         }
                     }
                 } catch (th: Throwable) {
@@ -1375,14 +1514,27 @@ class ApplicationHook {
                 Config.load(userId)
                 LocaleSettingsApplier.apply(appContext)
             }
-            if (Config.isLegalAcceptedForCurrentVersion()) {
+            val legalAccepted = Config.isLegalAcceptedForCurrentVersion()
+            if (legalAccepted && WorkflowRootGuard.isExecutionAllowed()) {
                 AccountSessionCoordinator.refreshWorkflowState(appContext, "legal_accepted", legalAccepted = true)
             } else {
                 // 即使未勾选，也不阻止工作流运行；仅刷新状态以供界面/日志显示
                 AccountSessionCoordinator.refreshWorkflowState(appContext, "legal_unaccepted", legalAccepted = false)
                 record(TAG, "⚠️ 未勾选已阅读 LICENSE 与 LEGAL 说明，但允许工作流继续")
             }
+<<<<<<< HEAD
             return true
+=======
+
+            pendingInit = false
+            pendingInitReason = null
+            val message = "必需权限或使用协议未就绪，已禁止工作流"
+            record(TAG, "⛔ $message")
+            updateRunningStatus(message)
+            ApplicationHookConstants.clearPendingTriggers("execution_prerequisites_missing")
+            AccountSessionCoordinator.refreshWorkflowState(appContext, "execution_prerequisites_missing", legalAccepted = legalAccepted)
+            return false
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75
         }
 
         private fun stopHandler() {
@@ -1421,32 +1573,13 @@ class ApplicationHook {
             }
         }
 
-        fun sendBroadcast(action: String?) {
-            if (appContext != null) appContext!!.sendBroadcast(Intent(action))
-        }
-
-        fun sendBroadcastShell(
-            api: String?,
-            message: String?,
-        ) {
-            if (appContext == null) return
-            val intent = Intent("io.github.aoguai.sesameag.SHELL")
-            intent.putExtra(api, message)
-            appContext!!.sendBroadcast(intent, null)
-        }
-
-        @JvmStatic
-        fun reLoginByBroadcast() {
-            sendBroadcast(ApplicationHookConstants.BroadcastActions.RE_LOGIN)
-        }
-
-        fun restartByBroadcast() {
-            sendBroadcast(ApplicationHookConstants.BroadcastActions.RESTART)
-        }
-
         fun reOpenApp() {
             ensureScheduler()
             UnifiedScheduler.scheduleLongDelay(20000L, "重新登录") {
+                if (!WorkflowRootGuard.isExecutionAllowed()) {
+                    record(TAG, "必需权限或使用协议未就绪，已取消重新登录")
+                    return@scheduleLongDelay
+                }
                 val ownerUserId = AccountSessionCoordinator.currentUserId() ?: currentUid
                 if (!ScheduledTaskRouter.allowRuntimeForegroundLaunch(ownerUserId, "reopen_app")) {
                     record(TAG, "已跳过重新拉起目标应用：前台拉起开关关闭或处于频控")
@@ -1648,11 +1781,13 @@ class ApplicationHook {
 
         private fun getFrameworkRuntimeInfo(): FrameworkRuntimeInfo? = frameworkRuntimeInfo
 
-        internal fun resolveCurrentFrameworkName(loader: ClassLoader? = classLoader): String =
-            resolveCurrentFrameworkInfo(loader).displayName
+        internal fun resolveCurrentFrameworkInfo(): ModuleStatus.FrameworkInfo =
+            ModuleStatus.resolveFrameworkInfo(frameworkRuntimeInfo?.name)
 
-        internal fun resolveCurrentFrameworkInfo(loader: ClassLoader? = classLoader): ModuleStatus.FrameworkInfo =
-            ModuleStatus.resolveFrameworkInfo(frameworkRuntimeInfo?.name, loader)
+        internal fun hasSupportedLibXposedRuntime(): Boolean {
+            val runtimeInfo = frameworkRuntimeInfo ?: return false
+            return ModuleStatus.isSupportedLsposedFramework(runtimeInfo.name, runtimeInfo.apiVersion ?: 0)
+        }
 
         private fun updateFrameworkRuntimeInfo(xposedInterface: XposedInterface?) {
             frameworkInterface = xposedInterface
@@ -1696,16 +1831,15 @@ class ApplicationHook {
             }
         }
 
-        private fun logFramework(
-            priority: Int,
+        private fun logFrameworkWarning(
             message: String,
             throwable: Throwable? = null,
         ) {
             val logger = frameworkInterface ?: return
             if (throwable != null) {
-                logger.log(priority, TAG, message, throwable)
+                logger.log(android.util.Log.WARN, TAG, message, throwable)
             } else {
-                logger.log(priority, TAG, message)
+                logger.log(android.util.Log.WARN, TAG, message)
             }
         }
     }

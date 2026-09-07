@@ -1,31 +1,27 @@
 package io.github.aoguai.sesameag.util
 
-
-import java.io.InputStream
-
 /**
- * 模块状态与框架检测工具类
+ * 模块状态与 libxposed 运行时解析。
  *
- * 职责：
- * 1. 提供 UI 层调用的接口 getActivatedStatus()，默认返回 "Not Activated"。
- * 2. 提供 Hook 层调用的统一框架解析入口 resolveFrameworkName(...)。
- * 3. 保留 detectFramework(ClassLoader) 作为官方字段不可用时的兜底探测。
+ * 只使用框架通过 libxposed 提供的官方名称和 API 版本。
  */
 object ModuleStatus {
-    private const val UNKNOWN_FRAMEWORK = "Unknown Activated"
+    // This object also runs in the standalone settings process, where the compileOnly API jar is absent.
+    const val MIN_SUPPORTED_LIBXPOSED_API = 102
+
+    private const val UNKNOWN_FRAMEWORK = "Unknown"
 
     enum class FrameworkCategory {
         LSPOSED,
-        LEGACY_XPOSED,
-        PATCH_EMBEDDED,
-        UNKNOWN
+        UNSUPPORTED,
     }
 
     data class FrameworkInfo(
         val displayName: String,
-        val category: FrameworkCategory
+        val category: FrameworkCategory,
     )
 
+<<<<<<< HEAD
     /**
      * 获取当前激活状态 (UI 层调用入口)
      *
@@ -88,17 +84,22 @@ object ModuleStatus {
             // 3. 兜底：虽然被 Hook 了但无法识别框架
             else -> FrameworkInfo(UNKNOWN_FRAMEWORK, FrameworkCategory.UNKNOWN)
         }
+=======
+    fun resolveFrameworkInfo(officialFrameworkName: String?): FrameworkInfo {
+        val displayName = officialFrameworkName?.trim()?.takeIf { it.isNotBlank() } ?: UNKNOWN_FRAMEWORK
+        return FrameworkInfo(displayName, classifyFrameworkName(displayName))
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75
     }
 
     fun classifyFrameworkName(frameworkName: String?): FrameworkCategory {
-        return when (frameworkName?.trim()) {
-            "LSPosed" -> FrameworkCategory.LSPOSED
-            "EdXposed", "Xposed" -> FrameworkCategory.LEGACY_XPOSED
-            "LSPatch", "NPatch" -> FrameworkCategory.PATCH_EMBEDDED
-            else -> FrameworkCategory.UNKNOWN
+        return if (frameworkName?.trim() == "LSPosed") {
+            FrameworkCategory.LSPOSED
+        } else {
+            FrameworkCategory.UNSUPPORTED
         }
     }
 
+<<<<<<< HEAD
     /**
      * 判断框架是否受支持。
      * 所有基于 libxposed API 101+ 的框架均被视为受支持。
@@ -165,3 +166,10 @@ object ModuleStatus {
         }
     }
 }
+=======
+    fun isSupportedLsposedFramework(frameworkName: String?, apiVersion: Int): Boolean {
+        return apiVersion >= MIN_SUPPORTED_LIBXPOSED_API &&
+            classifyFrameworkName(frameworkName) == FrameworkCategory.LSPOSED
+    }
+}
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75

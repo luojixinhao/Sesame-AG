@@ -4,18 +4,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,44 +25,46 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import io.github.aoguai.sesameag.entity.UserEntity
 import io.github.aoguai.sesameag.ui.MainActivity
 import io.github.aoguai.sesameag.ui.compose.CommonAlertDialog
-import io.github.aoguai.sesameag.ui.extension.openUrl
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthSnapshot
 import io.github.aoguai.sesameag.ui.screen.card.ModuleStatusCard
 import io.github.aoguai.sesameag.ui.screen.card.OneWordCard
 import io.github.aoguai.sesameag.ui.screen.card.ServicesStatusCard
 import io.github.aoguai.sesameag.ui.viewmodel.MainViewModel
 import io.github.aoguai.sesameag.util.CommandUtil.ServiceStatus
-import io.github.aoguai.sesameag.util.LogChannel
 import io.github.aoguai.sesameag.util.OfficialBuildVerifier
-import io.github.aoguai.sesameag.util.ToastUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun HomeContent(
-    hasActiveUser: Boolean,
+    activeUser: UserEntity?,
     moduleStatus: MainViewModel.ModuleStatus,
     serviceStatus: ServiceStatus,
     permissionHealth: PermissionHealthSnapshot,
     oneWord: String,
     isOneWordLoading: Boolean,
     isLegalAccepted: Boolean,
+    isSavingLegalAcceptance: Boolean,
     onLegalAcceptedChange: (Boolean) -> Unit,
     onOneWordClick: () -> Unit,
     onEvent: (MainActivity.MainUiEvent) -> Unit,
 ) {
     val context = LocalContext.current
-    var isServiceCardExpanded by remember { mutableStateOf(false) }
-    var showOfficialSignatureDialog by remember { mutableStateOf(false) }
+    var isServiceCardExpanded by rememberSaveable { mutableStateOf(false) }
+    var showOfficialSignatureDialog by rememberSaveable { mutableStateOf(false) }
 
-    val isOfficiallySigned =
-        remember(context.applicationContext) {
+    val isOfficiallySigned by produceState(
+        initialValue = false,
+        key1 = context.applicationContext,
+    ) {
+        value = withContext(Dispatchers.IO) {
             OfficialBuildVerifier.isOfficiallySigned(context.applicationContext)
         }
+    }
 
-    var isStatusCardExpanded by remember { mutableStateOf(false) }
-    val legalNoticeUrl = "https://github.com/Sesame-AG/Sesame-AG/blob/dev/LEGAL.md"
     LazyColumn(
         modifier =
             Modifier
@@ -80,7 +83,7 @@ fun HomeContent(
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.error,
                     fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                 )
                 if (isOfficiallySigned) {
                     Text(
@@ -88,47 +91,27 @@ fun HomeContent(
                         modifier =
                             Modifier
                                 .padding(top = 4.dp)
+                                .heightIn(min = 48.dp)
+                                .wrapContentHeight(Alignment.CenterVertically)
                                 .clickable { showOfficialSignatureDialog = true },
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelLarge,
                         textDecoration = TextDecoration.Underline,
                     )
                 }
-            }
-        }
-        if (!hasActiveUser) {
-            item {
-                Text(
-                    text = "尚未读取到当前目标应用账号。请先打开目标应用并完成登录，再返回模块首页载入账号与配置。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
         }
         // 1. 模块状态
         item {
             ModuleStatusCard(
                 status = moduleStatus,
-                expanded = isStatusCardExpanded,
-                onClick = {
-                    if (
-                        moduleStatus is MainViewModel.ModuleStatus.NotActivated ||
-                        moduleStatus is MainViewModel.ModuleStatus.Unsupported
-                    ) {
-                        isStatusCardExpanded = !isStatusCardExpanded // 此处不可省略
-                    }
-                },
-                onDoubleClick = {
-                    if (
-                        moduleStatus is MainViewModel.ModuleStatus.NotActivated ||
-                        moduleStatus is MainViewModel.ModuleStatus.Unsupported
-                    ) {
-                        isStatusCardExpanded = !isStatusCardExpanded
-                    }
-                },
+                permissionHealth = permissionHealth,
+                hasActiveUser = !activeUser?.userId.isNullOrBlank(),
+                isLegalAccepted = isLegalAccepted,
+                isSavingLegalAcceptance = isSavingLegalAcceptance,
+                onRefresh = { onEvent(MainActivity.MainUiEvent.RefreshEnvironment) },
+                onLegalAcceptedChange = onLegalAcceptedChange,
             )
         }
 
@@ -137,54 +120,20 @@ fun HomeContent(
             ServicesStatusCard(
                 status = serviceStatus,
                 permissionHealth = permissionHealth,
+                ownerUserId = activeUser?.userId,
                 expanded = isServiceCardExpanded,
-                onClick = {
-                    onEvent(
-                        MainActivity.MainUiEvent.RequestPermissionCheck { canToggleDetails ->
-                            if (canToggleDetails) {
-                                isServiceCardExpanded = !isServiceCardExpanded // 此处不可省略
-                            }
-                        },
-                    )
-                },
-                onDoubleClick = { isServiceCardExpanded = !isServiceCardExpanded },
+                onClick = { isServiceCardExpanded = !isServiceCardExpanded },
+                onRefresh = { onEvent(MainActivity.MainUiEvent.RefreshEnvironment) },
+                onRequest = { onEvent(MainActivity.MainUiEvent.RequestPermission(it)) },
             )
         }
 
-        // 3. LEGAL 说明确认
+        // 3. 一言
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = isLegalAccepted,
-                    onCheckedChange = onLegalAcceptedChange,
-                )
-                Text(
-                    text = "我已阅读、理解并接受 LICENSE 与 LEGAL 中的相关说明",
-                    modifier =
-                        Modifier
-                            .weight(1f)
-                            .clickable { context.openUrl(legalNoticeUrl) },
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 10.sp,
-                    textDecoration = TextDecoration.Underline,
-                )
-            }
-        }
-
-        // 4. 一言
-        item {
-            OneWordCard( // 提取出的一言卡片组件
+            OneWordCard(
                 oneWord = oneWord,
                 isLoading = isOneWordLoading,
                 onClick = onOneWordClick,
-                onLongClick = {
-                    onEvent(MainActivity.MainUiEvent.OpenLog(LogChannel.DEBUG))
-                    ToastUtil.showToast(context, "准备起飞🛫")
-                },
             )
         }
     }

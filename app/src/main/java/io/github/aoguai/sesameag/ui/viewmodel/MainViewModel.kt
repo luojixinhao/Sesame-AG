@@ -8,10 +8,13 @@ import android.content.IntentFilter
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import io.github.aoguai.sesameag.SesameApplication.Companion.PREFERENCES_KEY
 import io.github.aoguai.sesameag.data.Config
+import io.github.aoguai.sesameag.data.Status
 import io.github.aoguai.sesameag.entity.UserEntity
+import io.github.aoguai.sesameag.hook.AccountSlotRegistry
+import io.github.aoguai.sesameag.hook.AccountSlotSnapshot
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.rpc.capture.RpcTrafficCapture
 import io.github.aoguai.sesameag.service.ConnectionState
 import io.github.aoguai.sesameag.service.LsposedServiceManager
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthSnapshot
@@ -57,6 +60,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val apiVersion: Int,
             val reason: UnsupportedReason
         ) : ModuleStatus()
+        data class PrerequisitesMissing(
+            val frameworkName: String,
+            val frameworkVersion: String,
+            val apiVersion: Int,
+        ) : ModuleStatus()
         data class Activated(
             val frameworkName: String,     // 框架名称
             val frameworkVersion: String,  // 版本号
@@ -67,12 +75,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 
     companion object {
-        const val TAG = "MainViewModel"
+        private const val TAG = "MainViewModel"
     }
 
     // 1. 定义状态
-    private val prefs = application.getSharedPreferences(PREFERENCES_KEY, Context.MODE_PRIVATE)
-
     private val _oneWord = MutableStateFlow("正在获取句子...")
     val oneWord: StateFlow<String> = _oneWord.asStateFlow()
 
@@ -88,8 +94,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _userList = MutableStateFlow<List<UserEntity>>(emptyList())
     val userList: StateFlow<List<UserEntity>> = _userList.asStateFlow()
 
+    private val _accountSlots = MutableStateFlow(AccountSlotRegistry.snapshot())
+    val accountSlots: StateFlow<AccountSlotSnapshot> = _accountSlots.asStateFlow()
+
     private val _isLegalAccepted = MutableStateFlow(false)
     val isLegalAccepted: StateFlow<Boolean> = _isLegalAccepted.asStateFlow()
+
+    private val _isSavingLegalAcceptance = MutableStateFlow(false)
+    val isSavingLegalAcceptance = _isSavingLegalAcceptance.asStateFlow()
 
     private val _permissionHealth = MutableStateFlow(PermissionHealthSnapshot.EMPTY)
     val permissionHealth: StateFlow<PermissionHealthSnapshot> = _permissionHealth.asStateFlow()
@@ -115,6 +127,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var isInitialized = false
     private var accountContextReceiverRegistered = false
 
+    init {
+        LsposedServiceManager.init()
+        LsposedServiceManager.addConnectionListener(serviceListener)
+    }
+
     fun initAppLogic(): Boolean {
         if (isInitialized) return false
         isInitialized = true
@@ -130,8 +147,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             refreshModuleFrameworkStatus()
             refreshActiveUser()
             refreshLegalAcceptanceState()
-            // 注册监听
-            LsposedServiceManager.addConnectionListener(serviceListener)
             startConfigDirectoryObserver()
         }
         return true
@@ -148,7 +163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 刷新模块框架激活状态
      */
-    private fun refreshModuleFrameworkStatus() {
+    fun refreshModuleFrameworkStatus() {
         val lspState = LsposedServiceManager.connectionState
         if (lspState !is ConnectionState.Connected) {
             _moduleStatus.value = ModuleStatus.NotActivated
@@ -161,18 +176,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+<<<<<<< HEAD
         _moduleStatus.value = if (frameworkStatus.isSupported) {
             ModuleStatus.Activated(
                 frameworkName = frameworkStatus.frameworkName,
                 frameworkVersion = frameworkStatus.frameworkVersion,
                 apiVersion = frameworkStatus.apiVersion
             )
+=======
+        _moduleStatus.value = if (frameworkStatus.isSupportedLsposed) {
+            if (_permissionHealth.value.areRequiredPermissionsGranted &&
+                _isLegalAccepted.value && !_isSavingLegalAcceptance.value
+            ) {
+                ModuleStatus.Activated(
+                    frameworkName = frameworkStatus.frameworkName,
+                    frameworkVersion = frameworkStatus.frameworkVersion,
+                    apiVersion = frameworkStatus.apiVersion
+                )
+            } else {
+                ModuleStatus.PrerequisitesMissing(
+                    frameworkName = frameworkStatus.frameworkName,
+                    frameworkVersion = frameworkStatus.frameworkVersion,
+                    apiVersion = frameworkStatus.apiVersion,
+                )
+            }
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75
         } else {
             ModuleStatus.Unsupported(
                 frameworkName = frameworkStatus.frameworkName,
                 frameworkVersion = frameworkStatus.frameworkVersion,
                 apiVersion = frameworkStatus.apiVersion,
+<<<<<<< HEAD
                 reason = ModuleStatus.UnsupportedReason.API_TOO_LOW
+=======
+                reason = if (!frameworkStatus.hasRequiredApi) {
+                    ModuleStatus.UnsupportedReason.API_TOO_LOW
+                } else {
+                    ModuleStatus.UnsupportedReason.NON_LSPOSED
+                }
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75
             )
         }
     }
@@ -271,13 +313,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshUserConfigs() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val latestUserIds = SesameAgUtil.getFolderList(Files.CONFIG_DIR.absolutePath)
+                val latestUserIds = Files.listExistingUserConfigIds()
                 val newList = mutableListOf<UserEntity>()
                 for (userId in latestUserIds) {
                     UserMap.loadSelf(userId)
                     UserMap.get(userId)?.let { newList.add(it) }
                 }
                 _userList.value = newList
+                _accountSlots.value = AccountSlotRegistry.snapshot()
+                refreshActiveUser()
+                refreshLegalAcceptanceState()
             } catch (e: Exception) {
                 Log.e(TAG, "Error reloading user configs", e)
             }
@@ -322,7 +367,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearAllTodayFlags(userId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = Status.clearAllTodayFlagsForUser(userId)
+            if (result.isSuccess && result.written) {
+                getApplication<Application>().sendBroadcast(
+                    Intent(ApplicationHookConstants.BroadcastActions.RESTART).apply {
+                        putExtra("userId", result.userId)
+                    },
+                )
+            }
+            val message = when {
+                !result.isSuccess -> result.errorMessage ?: "每日标识清除失败"
+                !result.written -> "没有可删除的每日标识"
+                else -> "已删除 ${result.removedCount} 个每日标识"
+            }
+            withContext(Dispatchers.Main) {
+                ToastUtil.showUiToast(getApplication(), message)
+            }
+        }
+    }
+
+    fun setExecutableAccountSlot(userId: String?, enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = if (enabled) {
+                AccountSlotRegistry.addExecutableSlot(getApplication<Application>(), userId)
+            } else {
+                AccountSlotRegistry.removeExecutableSlot(getApplication<Application>(), userId)
+            }
+            if (!result.replaced) {
+                val message = when (result.reasonCode) {
+                    "registry_unavailable" -> "可执行账号配置暂不可读取，请稍后重试"
+                    "account_slot_full" -> "可执行槽位已满"
+                    "unknown_slot_candidate" -> "账号配置已变化，请刷新后重试"
+                    else -> "可执行账号操作失败，请稍后重试"
+                }
+                ToastUtil.showUiToast(getApplication(), message)
+            }
+            refreshUserConfigs()
+        }
+    }
+
     fun setLegalAccepted(accepted: Boolean) {
+        if (!_isSavingLegalAcceptance.compareAndSet(false, true)) return
+        refreshModuleFrameworkStatus()
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val targetUserId = resolveActiveUserId()
@@ -338,6 +426,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (!saveSuccess) {
                     Log.e(TAG, "Save legal acceptance failed")
+                    ToastUtil.showUiToast(getApplication(), "保存失败，请重试")
                     refreshLegalAcceptanceState()
                     return@launch
                 }
@@ -352,7 +441,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Update legal acceptance failed", e)
+                ToastUtil.showUiToast(getApplication(), "保存失败，请重试")
                 refreshLegalAcceptanceState()
+            } finally {
+                _isSavingLegalAcceptance.value = false
+                refreshModuleFrameworkStatus()
             }
         }
     }
@@ -365,6 +458,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 Log.e(TAG, "Read legal acceptance failed", e)
                 _isLegalAccepted.value = false
+            } finally {
+                refreshModuleFrameworkStatus()
             }
         }
     }
@@ -389,6 +484,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updatePermissionHealth(snapshot: PermissionHealthSnapshot) {
         _permissionHealth.value = snapshot
+        refreshModuleFrameworkStatus()
     }
 
     fun clearAllLogs(context: Context) {
@@ -400,6 +496,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val failedCount = logFiles.count { file ->
                 file.exists() && !Files.clearFile(file)
             }
+            RpcTrafficCapture.resetCaptureSession()
 
             withContext(Dispatchers.Main) {
                 ToastUtil.showUiToast(
@@ -425,9 +522,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun resolveExistingUserConfigIds(): List<String> {
-        return SesameAgUtil.getFolderList(Files.CONFIG_DIR.absolutePath)
+        return Files.listExistingUserConfigIds()
             .map { it.trim() }
-            .filter { it.isNotEmpty() && Files.getConfigV2File(it).exists() }
+            .filter { it.isNotEmpty() }
             .distinct()
     }
 

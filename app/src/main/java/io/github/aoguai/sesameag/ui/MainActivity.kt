@@ -6,17 +6,19 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
-import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
@@ -24,32 +26,44 @@ import androidx.lifecycle.repeatOnLifecycle
 import io.github.aoguai.sesameag.SesameApplication.Companion.PREFERENCES_KEY
 import io.github.aoguai.sesameag.SesameApplication.Companion.hasPermissions
 import io.github.aoguai.sesameag.data.General
+import io.github.aoguai.sesameag.data.Config
+import io.github.aoguai.sesameag.hook.AccountSlotRegistry
 import io.github.aoguai.sesameag.hook.ApplicationHookConstants
+import io.github.aoguai.sesameag.hook.keepalive.PersistentScheduleRegistry
+import io.github.aoguai.sesameag.hook.keepalive.UnifiedScheduler
 import io.github.aoguai.sesameag.service.ConnectionState
 import io.github.aoguai.sesameag.service.LsposedServiceManager
-import io.github.aoguai.sesameag.ui.extension.openUrl
-import io.github.aoguai.sesameag.ui.extension.performNavigationToSettings
+import io.github.aoguai.sesameag.model.Model
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthItem
 import io.github.aoguai.sesameag.ui.permissions.PermissionHealthSnapshot
 import io.github.aoguai.sesameag.ui.permissions.PermissionPolicy
 import io.github.aoguai.sesameag.ui.permissions.PermissionRequirement
 import io.github.aoguai.sesameag.ui.permissions.PermissionStatus
 import io.github.aoguai.sesameag.ui.screen.MainScreen
+import io.github.aoguai.sesameag.ui.navigation.LogSource
 import io.github.aoguai.sesameag.ui.theme.AppTheme
 import io.github.aoguai.sesameag.ui.theme.ThemeManager
 import io.github.aoguai.sesameag.ui.viewmodel.MainViewModel
+import io.github.aoguai.sesameag.task.customTasks.CustomTask
 import io.github.aoguai.sesameag.util.CommandUtil
+import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.IconManager
+import io.github.aoguai.sesameag.util.Log
 import io.github.aoguai.sesameag.util.LogChannel
+import io.github.aoguai.sesameag.util.Logback
 import io.github.aoguai.sesameag.util.PermissionUtil
 import io.github.aoguai.sesameag.util.ToastUtil
+import io.github.aoguai.sesameag.util.UserDataStoreManager
+import io.github.aoguai.sesameag.util.maps.UserMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
-import java.io.File
 
 class MainActivity : ComponentActivity() {
     private data class ExactAlarmManifestState(
@@ -79,13 +93,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private val viewModel: MainViewModel by viewModels()
+    private val clearModuleDataFailures = MutableStateFlow<List<String>>(emptyList())
     private val runtimePermissionsLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             onRuntimePermissionRequestFinished(result)
         }
-    private val exactAlarmPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            onExactAlarmPermissionRequestFinished(result.resultCode)
+    private val permissionSettingsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            pendingPermissionRequest = null
+            requestTargetPermissionSnapshot(clearCached = true)
+            continuePermissionQueueOrAuto()
         }
     private var pendingPermissionRequest: PermissionRequirement? = null
     private var activePermissionMode: PermissionRequestMode? = null
@@ -93,27 +110,12 @@ class MainActivity : ComponentActivity() {
     private val requestedPermissionsThisVisibility = linkedSetOf<PermissionRequirement>()
     private val requestedPermissionsThisQueue = linkedSetOf<PermissionRequirement>()
     private val deniedPermissionsThisVisibility = linkedSetOf<PermissionRequirement>()
-    private val grantedPermissionsThisVisibility = linkedSetOf<PermissionRequirement>()
     private var latestTargetPermissionSnapshot: TargetPermissionSnapshot? = null
-    private var awaitingTargetPermissionSnapshot = false
     private var pendingTargetPermissionSnapshotToken: Long = 0L
-    private var pendingPermissionCheckCallback: ((Boolean) -> Unit)? = null
 
     private val autoCriticalPermissions = listOf(
         PermissionRequirement.MODULE_FILE,
-        PermissionRequirement.MODULE_NOTIFICATION,
         PermissionRequirement.LSPOSED_TARGET_SCOPE
-    )
-
-    private val manualPermissionOrder = listOf(
-        PermissionRequirement.MODULE_FILE,
-        PermissionRequirement.MODULE_NOTIFICATION,
-        PermissionRequirement.LSPOSED_TARGET_SCOPE,
-        PermissionRequirement.MODULE_EXACT_ALARM,
-        PermissionRequirement.TARGET_EXACT_ALARM,
-        PermissionRequirement.MODULE_BATTERY,
-        PermissionRequirement.TARGET_BATTERY,
-        PermissionRequirement.SHELL_EXECUTOR
     )
 
     private val lspConnectionListener: (ConnectionState) -> Unit = { state ->
@@ -150,12 +152,8 @@ class MainActivity : ComponentActivity() {
                     null
                 }
             ).takeIf { it.available && it.contextPackage == General.PACKAGE_NAME }
-            awaitingTargetPermissionSnapshot = false
             pendingTargetPermissionSnapshotToken = 0L
             refreshPermissionHealth()
-            if (activePermissionMode == PermissionRequestMode.MANUAL_CARD && pendingPermissionRequest == null) {
-                finishPermissionCheckFromCard()
-            }
         }
     }
 
@@ -182,7 +180,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         ContextCompat.registerReceiver(
             this,
             targetPermissionSnapshotReceiver,
@@ -219,8 +220,10 @@ class MainActivity : ComponentActivity() {
             val moduleStatus by viewModel.moduleStatus.collectAsStateWithLifecycle()
             //  获取实时的 UserEntity 列表
             val userList by viewModel.userList.collectAsStateWithLifecycle()
+            val accountSlots by viewModel.accountSlots.collectAsStateWithLifecycle()
             val permissionHealth by viewModel.permissionHealth.collectAsStateWithLifecycle()
             val isDynamicColor by ThemeManager.isDynamicColor.collectAsStateWithLifecycle()
+            val clearFailurePaths by clearModuleDataFailures.collectAsStateWithLifecycle()
 
             // AppTheme 会处理状态栏颜色
             AppTheme(dynamicColor = isDynamicColor) {
@@ -234,12 +237,34 @@ class MainActivity : ComponentActivity() {
                     isDynamicColor = isDynamicColor, // 传给 MainScreen
                     // 传入回调
                     userList = userList, // 传入列表
-                    // 🔥 处理跳转逻辑
-                    onNavigateToSettings = { selectedUser ->
-                        performNavigationToSettings(selectedUser)
-                    },
-                    onEvent = { event -> handleEvent(event) }
+                    accountSlots = accountSlots,
+                    onPrepareManualTasks = ::ensureManualTaskConfigLoaded,
+                    onRunManualTask = ::runManualTask,
+                    clearModuleDataFailurePaths = clearFailurePaths,
+                    onDismissClearModuleDataFailure = { clearModuleDataFailures.value = emptyList() },
+                    onEvent = { event -> handleEvent(event) },
+                    onExitRequested = ::finish,
                 )
+            }
+        }
+        requestHighestSupportedFrameRate()
+    }
+
+    private fun requestHighestSupportedFrameRate() {
+        val modes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display?.supportedModes
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.supportedModes
+        }
+        val requestedFrameRate = modes?.maxOfOrNull { it.refreshRate } ?: return
+        if (requestedFrameRate <= 60f) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            window.decorView.setRequestedFrameRate(requestedFrameRate)
+        } else {
+            window.attributes = window.attributes.apply {
+                preferredRefreshRate = requestedFrameRate
             }
         }
     }
@@ -250,11 +275,12 @@ class MainActivity : ComponentActivity() {
     sealed class MainUiEvent {
         data object RefreshOneWord : MainUiEvent()
         data class OpenLog(val channel: LogChannel) : MainUiEvent()
-        data object OpenGithub : MainUiEvent()
         data class ToggleIconHidden(val isHidden: Boolean) : MainUiEvent()
         data object OpenExtend : MainUiEvent()
         data object ClearConfig : MainUiEvent()
-        data class RequestPermissionCheck(val onCompleted: (Boolean) -> Unit = {}) : MainUiEvent()
+        data object RefreshEnvironment : MainUiEvent()
+        data class RequestPermission(val requirement: PermissionRequirement) : MainUiEvent()
+        data object OpenTargetApp : MainUiEvent()
     }
 
     /**
@@ -263,10 +289,24 @@ class MainActivity : ComponentActivity() {
     private fun handleEvent(event: MainUiEvent) {
         when (event) {
             MainUiEvent.RefreshOneWord -> viewModel.fetchOneWord()
-            is MainUiEvent.OpenLog -> openLogChannel(event.channel)
-            MainUiEvent.OpenGithub -> openUrl(General.PROJECT_HOMEPAGE_URL)
-            is MainUiEvent.RequestPermissionCheck -> {
-                requestAllPermissionsFromCard(event.onCompleted)
+            is MainUiEvent.OpenLog -> Unit
+            MainUiEvent.RefreshEnvironment -> {
+                CommandUtil.connect(applicationContext)
+                refreshEnvironment()
+            }
+            is MainUiEvent.RequestPermission -> requestPermissionFromCard(event.requirement)
+            MainUiEvent.OpenTargetApp -> {
+                try {
+                    val intent = packageManager.getLaunchIntentForPackage(General.PACKAGE_NAME)
+                    if (intent != null) {
+                        startActivity(intent)
+                    } else {
+                        ToastUtil.showToast(this, "暂时无法打开目标应用")
+                    }
+                } catch (e: Exception) {
+                    Log.printStackTrace("MainActivity", "打开目标应用失败", e)
+                    ToastUtil.showToast(this, "暂时无法打开目标应用")
+                }
             }
             is MainUiEvent.ToggleIconHidden -> {
                 val shouldHide = event.isHidden
@@ -275,25 +315,98 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this, "设置已保存，可能需要重启桌面才能生效", Toast.LENGTH_SHORT).show()
             }
 
-            MainUiEvent.OpenExtend -> startActivity(Intent(this, ExtendActivity::class.java))
+            MainUiEvent.OpenExtend -> Unit
             MainUiEvent.ClearConfig -> {
-                // 🔥 这里只负责执行逻辑，不再负责弹窗
-                if (Files.delFile(Files.CONFIG_DIR)) {
-                    ToastUtil.showToast(this, "🙂 清空配置成功")
-                    // 可选：重载配置或刷新 UI
-                    viewModel.refreshUserConfigs()
-                } else {
-                    ToastUtil.showToast(this, "😭 清空配置失败")
+                clearModuleDataFailures.value = emptyList()
+                lifecycleScope.launch(Dispatchers.IO) {
+                    runCatching { DataStore.shutdown() }
+                    runCatching { UserDataStoreManager.shutdownAll() }
+                    runCatching { PersistentScheduleRegistry.clearAll(applicationContext) }
+                    runCatching { UnifiedScheduler.cleanup() }
+
+                    val fileResult = Files.clearAllModuleData(applicationContext)
+                    val preferencesCleared =
+                        getSharedPreferences(PREFERENCES_KEY, MODE_PRIVATE)
+                            .edit()
+                            .clear()
+                            .commit()
+                    val failedPaths = fileResult.failedPaths.toMutableList()
+                    if (!preferencesCleared) {
+                        failedPaths += "SharedPreferences:$PREFERENCES_KEY"
+                    }
+                    if (failedPaths.isNotEmpty()) {
+                        Log.runtime(
+                            "MainActivity",
+                            "清除模块数据失败: count=${failedPaths.size}, first=${failedPaths.first()}"
+                        )
+                    }
+
+                    runCatching {
+                        Logback.reloadFileLogging(enableCaptureAppender = true)
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        viewModel.refreshUserConfigs()
+                        if (failedPaths.isEmpty()) {
+                            ThemeManager.resetToDefaults()
+                            IconManager.syncIconState(this@MainActivity, false)
+                            sendBroadcast(
+                                Intent(ApplicationHookConstants.BroadcastActions.RESTART).apply {
+                                    putExtra("configReload", true)
+                                }
+                            )
+                            ToastUtil.showToast(this@MainActivity, "已清除全部模块数据，正在恢复默认配置")
+                            recreate()
+                        } else {
+                            clearModuleDataFailures.value = failedPaths.toList()
+                        }
+                    }
                 }
             }
         }
     }
 
-    private fun openLogChannel(channel: LogChannel) {
-        openLogFile(Files.getLogFile(channel))
+    // --- 辅助方法 ---
+
+    private suspend fun ensureManualTaskConfigLoaded() = withContext(Dispatchers.IO) {
+        Model.initAllModel()
+        val activeUser = DataStore.get("activedUser", io.github.aoguai.sesameag.entity.UserEntity::class.java)
+        activeUser?.userId?.let { userId ->
+            UserMap.setCurrentUserId(userId)
+            Config.load(userId)
+        }
     }
 
-    // --- 辅助方法 ---
+    private fun runManualTask(task: CustomTask, params: Map<String, Any>): LogSource? {
+        val activeUserId = DataStore.get("activedUser", io.github.aoguai.sesameag.entity.UserEntity::class.java)?.userId
+        if (!AccountSlotRegistry.isExecutableUser(activeUserId)) {
+            ToastUtil.showToast(this, "当前账号不在可执行槽位，无法运行手动任务")
+            return null
+        }
+        return try {
+            val intent = Intent(ApplicationHookConstants.BroadcastActions.MANUAL_TASK)
+            intent.putExtra("task", task.name)
+            params.forEach { (key, value) ->
+                when (value) {
+                    is Int -> intent.putExtra(key, value)
+                    is String -> intent.putExtra(key, value)
+                    is Boolean -> intent.putExtra(key, value)
+                }
+            }
+            sendBroadcast(intent)
+            ToastUtil.showToast(this, "已发送指令: ${task.displayName}")
+            val logFile = Files.getLogFile(LogChannel.RECORD)
+            if (logFile.exists()) {
+                LogSource.FilePath(logFile.absolutePath)
+            } else {
+                ToastUtil.showToast(this, "日志文件尚未生成")
+                null
+            }
+        } catch (e: Exception) {
+            ToastUtil.showToast(this, "发送失败: ${e.message}")
+            null
+        }
+    }
 
     private fun setupShizuku() {
         Shizuku.addRequestPermissionResultListener(shizukuListener)
@@ -308,23 +421,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshEnvironment() {
+        LsposedServiceManager.refreshScope()
+        viewModel.refreshModuleFrameworkStatus()
+        hasPermissions = PermissionUtil.checkFilePermissions(this)
+        if (hasPermissions) {
+            viewModel.initAppLogic()
+            viewModel.refreshUserConfigs()
+        }
+        requestTargetPermissionSnapshot(clearCached = true)
+        refreshPermissionHealth()
+    }
+
     override fun onResume() {
         super.onResume()
-        val pendingBeforeResume = pendingPermissionRequest
-        requestTargetPermissionSnapshot(clearCached = true)
-        LsposedServiceManager.refreshScope()
+        refreshEnvironment()
         if (
-            pendingBeforeResume == PermissionRequirement.LSPOSED_TARGET_SCOPE &&
+            pendingPermissionRequest == PermissionRequirement.LSPOSED_TARGET_SCOPE &&
             LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)
         ) {
             markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
-        } else if (!shouldKeepPendingPermissionOnResume(pendingBeforeResume)) {
+        } else if (pendingPermissionRequest == PermissionRequirement.SHELL_EXECUTOR) {
             pendingPermissionRequest = null
         }
         CommandUtil.connect(applicationContext)
         continuePermissionQueueOrAuto()
-        if (hasPermissions) viewModel.refreshUserConfigs()
-        refreshPermissionHealth()
     }
 
     override fun onStop() {
@@ -335,7 +456,6 @@ class MainActivity : ComponentActivity() {
         if (!isChangingConfigurations && pendingPermissionRequest == null) {
             requestedPermissionsThisVisibility.clear()
             deniedPermissionsThisVisibility.clear()
-            grantedPermissionsThisVisibility.clear()
         }
     }
 
@@ -347,17 +467,6 @@ class MainActivity : ComponentActivity() {
         LsposedServiceManager.removeConnectionListener(lspConnectionListener)
         Shizuku.removeRequestPermissionResultListener(shizukuListener)
         runCatching { unregisterReceiver(targetPermissionSnapshotReceiver) }
-    }
-
-    private fun openLogFile(logFile: File) {
-        if (!logFile.exists()) {
-            ToastUtil.showToast(this, "日志文件不存在: ${logFile.name}")
-            return
-        }
-        val intent = Intent(this, LogViewerActivity::class.java).apply {
-            data = logFile.toUri()
-        }
-        startActivity(intent)
     }
 
     private fun onRuntimePermissionRequestFinished(result: Map<String, Boolean>) {
@@ -373,71 +482,52 @@ class MainActivity : ComponentActivity() {
         continuePermissionQueueOrAuto()
     }
 
-    private fun onExactAlarmPermissionRequestFinished(resultCode: Int) {
-        val permission = pendingPermissionRequest
-        if (
-            permission == PermissionRequirement.MODULE_EXACT_ALARM ||
-            permission == PermissionRequirement.TARGET_EXACT_ALARM
-        ) {
-            if (resultCode == android.app.Activity.RESULT_OK) {
-                grantedPermissionsThisVisibility.add(permission)
-                deniedPermissionsThisVisibility.remove(permission)
-            } else {
-                grantedPermissionsThisVisibility.remove(permission)
-                deniedPermissionsThisVisibility.add(permission)
-            }
+    private fun requestPermissionFromCard(permission: PermissionRequirement) {
+        val targetPackage = when (permission) {
+            PermissionRequirement.TARGET_EXACT_ALARM, PermissionRequirement.TARGET_BATTERY -> General.PACKAGE_NAME
+            else -> packageName
         }
-        pendingPermissionRequest = null
-        continuePermissionQueueOrAuto()
-    }
-
-    private fun requestAllPermissionsFromCard(onCompleted: (Boolean) -> Unit = {}) {
-        pendingPermissionCheckCallback = onCompleted
-        activePermissionMode = PermissionRequestMode.MANUAL_CARD
-        activePermissionOrder = manualPermissionOrder
-        requestedPermissionsThisQueue.clear()
-        LsposedServiceManager.refreshScope()
-        CommandUtil.connect(applicationContext)
-        awaitingTargetPermissionSnapshot = requestTargetPermissionSnapshot(clearCached = true)
-        if (awaitingTargetPermissionSnapshot) {
-            refreshPermissionHealth()
-            lifecycleScope.launch {
-                delay(350)
-                if (
-                    awaitingTargetPermissionSnapshot &&
-                    activePermissionMode == PermissionRequestMode.MANUAL_CARD &&
-                    pendingPermissionRequest == null
-                ) {
-                    awaitingTargetPermissionSnapshot = false
-                    pendingTargetPermissionSnapshotToken = 0L
-                    finishPermissionCheckFromCard()
-                }
+        val settingsIntent = when (permission) {
+            PermissionRequirement.MODULE_FILE -> Intent(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
+                else Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+            ).setData(Uri.parse("package:$targetPackage"))
+            PermissionRequirement.MODULE_NOTIFICATION -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, targetPackage)
+            PermissionRequirement.MODULE_EXACT_ALARM, PermissionRequirement.TARGET_EXACT_ALARM -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).setData(Uri.parse("package:$targetPackage"))
+                } else null
+            }
+            PermissionRequirement.MODULE_BATTERY, PermissionRequirement.TARGET_BATTERY ->
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            else -> null
+        }
+        if (settingsIntent != null) {
+            if (targetPackage != packageName && !PermissionUtil.isPackageInstalled(this, targetPackage)) {
+                ToastUtil.showToast(this, "未检测到目标应用")
+                return
+            }
+            val fallbackAction = when (permission) {
+                PermissionRequirement.MODULE_FILE -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                } else null
+                PermissionRequirement.MODULE_EXACT_ALARM, PermissionRequirement.TARGET_EXACT_ALARM ->
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM
+                else -> null
+            }
+            if (!PermissionUtil.startActivitySafely(this, settingsIntent, fallbackAction, permissionSettingsLauncher)) {
+                ToastUtil.showToast(this, "暂时无法打开系统设置")
             }
             return
         }
-        finishPermissionCheckFromCard()
-    }
-
-    private fun finishPermissionCheckFromCard() {
-        val requested = runPermissionQueue(manualPermissionOrder, PermissionRequestMode.MANUAL_CARD)
-        val snapshot = refreshPermissionHealth()
-        if (!requested && !snapshot.hasCriticalIssue && snapshot.attentionCount == 0) {
-            ToastUtil.showToast(this, "权限检查已完成")
-        }
-        completePendingPermissionCheck(!requested && !snapshot.hasRequestableIssue)
-    }
-
-    private fun completePendingPermissionCheck(canToggleDetails: Boolean) {
-        pendingPermissionCheckCallback?.invoke(canToggleDetails)
-        pendingPermissionCheckCallback = null
+        if (pendingPermissionRequest != null) return
+        clearActivePermissionQueue()
+        runPermissionQueue(listOf(permission), PermissionRequestMode.MANUAL_CARD)
     }
 
     private fun continuePermissionQueueOrAuto() {
         if (pendingPermissionRequest != null) {
-            refreshPermissionHealth()
-            return
-        }
-        if (activePermissionMode == PermissionRequestMode.MANUAL_CARD && awaitingTargetPermissionSnapshot) {
             refreshPermissionHealth()
             return
         }
@@ -473,7 +563,11 @@ class MainActivity : ComponentActivity() {
             if (requestPermission(permission)) {
                 return true
             }
+            deniedPermissionsThisVisibility.add(permission)
             markRequestFinished(permission)
+            if (permission != PermissionRequirement.LSPOSED_TARGET_SCOPE) {
+                ToastUtil.showToast(this, "暂时无法发起请求，请重试")
+            }
         }
 
         if (
@@ -512,11 +606,25 @@ class MainActivity : ComponentActivity() {
     private fun requestPermission(permission: PermissionRequirement): Boolean {
         return when (permission) {
             PermissionRequirement.MODULE_FILE -> {
-                PermissionUtil.checkOrRequestFilePermissions(this, runtimePermissionsLauncher)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R &&
+                    permission in deniedPermissionsThisVisibility &&
+                    !shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                ) {
+                    PermissionUtil.openAppSettings(this, permissionSettingsLauncher)
+                } else {
+                    PermissionUtil.checkOrRequestFilePermissions(this, runtimePermissionsLauncher, permissionSettingsLauncher)
+                }
             }
 
             PermissionRequirement.MODULE_NOTIFICATION -> {
-                PermissionUtil.checkOrRequestNotificationPermission(this, runtimePermissionsLauncher)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    permission in deniedPermissionsThisVisibility &&
+                    !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+                ) {
+                    PermissionUtil.openAppSettings(this, permissionSettingsLauncher)
+                } else {
+                    PermissionUtil.checkOrRequestNotificationPermission(this, runtimePermissionsLauncher, permissionSettingsLauncher)
+                }
             }
 
             PermissionRequirement.LSPOSED_TARGET_SCOPE -> requestLsposedTargetScope()
@@ -525,7 +633,7 @@ class MainActivity : ComponentActivity() {
                 PermissionUtil.checkOrRequestExactAlarmPermissions(
                     this,
                     packageName,
-                    exactAlarmPermissionLauncher
+                    permissionSettingsLauncher
                 )
             }
 
@@ -533,16 +641,16 @@ class MainActivity : ComponentActivity() {
                 PermissionUtil.checkOrRequestExactAlarmPermissions(
                     this,
                     General.PACKAGE_NAME,
-                    exactAlarmPermissionLauncher
+                    permissionSettingsLauncher
                 )
             }
 
             PermissionRequirement.MODULE_BATTERY -> {
-                PermissionUtil.checkOrRequestBatteryPermissions(this, packageName)
+                PermissionUtil.checkOrRequestBatteryPermissions(this, packageName, permissionSettingsLauncher)
             }
 
             PermissionRequirement.TARGET_BATTERY -> {
-                PermissionUtil.checkOrRequestBatteryPermissions(this, General.PACKAGE_NAME)
+                PermissionUtil.checkOrRequestBatteryPermissions(this, General.PACKAGE_NAME, permissionSettingsLauncher)
             }
 
             PermissionRequirement.SHELL_EXECUTOR -> requestShellExecutor()
@@ -554,9 +662,11 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 markRequestFinished(PermissionRequirement.LSPOSED_TARGET_SCOPE)
                 if (result.success) {
-                    ToastUtil.showToast(this, "LSPosed 作用域已更新")
-                } else if (result.message.isNotBlank()) {
-                    ToastUtil.showToast(this, "LSPosed 作用域申请失败: ${result.message}")
+                    ToastUtil.showToast(this, "已添加目标应用")
+                } else {
+                    deniedPermissionsThisVisibility.add(PermissionRequirement.LSPOSED_TARGET_SCOPE)
+                    Log.runtime("MainActivity", "LSPosed scope request failed: ${result.message}")
+                    ToastUtil.showToast(this, "添加失败，请重试或在 LSPosed 中选择目标应用")
                 }
                 continuePermissionQueueOrAuto()
             }
@@ -594,18 +704,30 @@ class MainActivity : ComponentActivity() {
         }
         if (!PermissionUtil.isPackageInstalled(this, General.PACKAGE_NAME)) {
             latestTargetPermissionSnapshot = null
-            awaitingTargetPermissionSnapshot = false
             pendingTargetPermissionSnapshotToken = 0L
             return false
         }
         val requestToken = System.nanoTime()
         pendingTargetPermissionSnapshotToken = requestToken
-        sendBroadcast(
-            Intent(ApplicationHookConstants.BroadcastActions.PERMISSION_SNAPSHOT).apply {
-                setPackage(General.PACKAGE_NAME)
-                putExtra("requestToken", requestToken)
+        try {
+            sendBroadcast(
+                Intent(ApplicationHookConstants.BroadcastActions.PERMISSION_SNAPSHOT).apply {
+                    setPackage(General.PACKAGE_NAME)
+                    putExtra("requestToken", requestToken)
+                }
+            )
+        } catch (e: Exception) {
+            pendingTargetPermissionSnapshotToken = 0L
+            Log.printStackTrace("MainActivity", "Target permission refresh failed", e)
+            return false
+        }
+        lifecycleScope.launch {
+            delay(350)
+            if (pendingTargetPermissionSnapshotToken == requestToken) {
+                pendingTargetPermissionSnapshotToken = 0L
+                refreshPermissionHealth()
             }
-        )
+        }
         return true
     }
 
@@ -613,12 +735,6 @@ class MainActivity : ComponentActivity() {
         if (pendingPermissionRequest == permission) {
             pendingPermissionRequest = null
         }
-    }
-
-    private fun shouldKeepPendingPermissionOnResume(permission: PermissionRequirement?): Boolean {
-        return permission == PermissionRequirement.LSPOSED_TARGET_SCOPE ||
-            permission == PermissionRequirement.MODULE_EXACT_ALARM ||
-            permission == PermissionRequirement.TARGET_EXACT_ALARM
     }
 
     private fun clearActivePermissionQueue() {
@@ -642,10 +758,6 @@ class MainActivity : ComponentActivity() {
             targetPermissionSnapshot?.targetBatteryIgnored == true ||
                 PermissionUtil.checkBatteryPermissions(this, General.PACKAGE_NAME)
             )
-        val targetExactAlarmGrantedThisVisibility =
-            PermissionRequirement.TARGET_EXACT_ALARM in grantedPermissionsThisVisibility
-        val targetExactAlarmDeniedThisVisibility =
-            PermissionRequirement.TARGET_EXACT_ALARM in deniedPermissionsThisVisibility
         val targetExactAlarmManifest = packageExactAlarmManifestState(General.PACKAGE_NAME)
         val targetExactAlarmPermissionStatus = targetExactAlarmStatus(
             targetInstalled = targetInstalled,
@@ -654,22 +766,6 @@ class MainActivity : ComponentActivity() {
             hookExactAlarmAllowed = targetPermissionSnapshot?.targetExactAlarmAllowed,
             requesting = requesting
         )
-        val targetExactAlarmDescription = when {
-            !targetInstalled -> "未检测到目标应用，安装并打开后才能检查目标应用的精确闹钟状态"
-            targetExactAlarmGrantedThisVisibility -> "本次返回模块后已收到目标应用精确闹钟授权结果"
-            targetPermissionSnapshot?.targetExactAlarmAllowed == true -> "目标应用已上报精确闹钟可用"
-            targetExactAlarmDeniedThisVisibility -> "本次返回模块后仍未授予目标应用精确闹钟，请在目标应用系统设置页内完成授权"
-            targetPermissionSnapshot?.targetExactAlarmAllowed == false -> {
-                "目标应用已上报精确闹钟未授权，请在目标应用系统设置页内完成授权"
-            }
-            targetBatteryIgnored -> "目标包已在电池优化白名单内，系统允许使用精确闹钟"
-            targetExactAlarmManifest.isAlwaysGranted -> "当前目标包无需额外授权即可使用精确闹钟"
-            targetExactAlarmManifest.requiresManualSettingsCheck -> {
-                "Android 无法可靠读取跨包授权结果，请先打开目标应用触发授权，再到系统设置里人工确认"
-            }
-
-            else -> "目标包未声明可由模块引导的精确闹钟授权入口，通常需要在系统设置中手动确认"
-        }
         val items = listOf(
             PermissionHealthItem(
                 requirement = PermissionRequirement.MODULE_FILE,
@@ -679,9 +775,12 @@ class MainActivity : ComponentActivity() {
                     requesting
                 ),
                 policy = PermissionPolicy.AUTO_CRITICAL,
-                title = "模块文件访问",
-                description = "用于读取与写入配置、日志和调试数据；首次使用请先完成这一项",
-                actionLabel = "申请文件权限"
+                title = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) "所有文件访问" else "文件访问",
+                description = "读取和保存配置、日志",
+                actionLabel = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R &&
+                    PermissionRequirement.MODULE_FILE in deniedPermissionsThisVisibility &&
+                    !shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                ) "打开设置" else "授权文件访问"
             ),
             PermissionHealthItem(
                 requirement = PermissionRequirement.MODULE_NOTIFICATION,
@@ -690,18 +789,26 @@ class MainActivity : ComponentActivity() {
                     PermissionUtil.checkNotificationPermission(this),
                     requesting
                 ),
-                policy = PermissionPolicy.AUTO_CRITICAL,
+                policy = PermissionPolicy.MANUAL_CARD,
                 title = "模块通知",
-                description = "用于显示运行、异常和命令服务通知；授权后返回本页即可继续检查",
-                actionLabel = "申请通知权限"
+                description = "接收模块通知",
+                actionLabel = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    (PermissionRequirement.MODULE_NOTIFICATION in deniedPermissionsThisVisibility &&
+                        !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) ||
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                ) "打开设置" else "开启通知"
             ),
             PermissionHealthItem(
                 requirement = PermissionRequirement.LSPOSED_TARGET_SCOPE,
                 status = lsposedScopeStatus(targetInstalled, requesting),
                 policy = PermissionPolicy.AUTO_CRITICAL,
-                title = "LSPosed 目标应用作用域",
-                description = "仅LSPosed 支持自动申请与校验作用域；首次使用请把目标应用加入作用域后重新打开目标应用或返回本页复查",
-                actionLabel = if (targetInstalled) "申请作用域" else null
+                title = "目标应用作用域",
+                description = if (targetInstalled) {
+                    "在目标应用中启用模块"
+                } else {
+                    "安装目标应用，或在应用隐藏设置中将其设为可见"
+                },
+                actionLabel = if (targetInstalled) "添加目标应用" else null
             ),
             PermissionHealthItem(
                 requirement = PermissionRequirement.MODULE_EXACT_ALARM,
@@ -712,16 +819,18 @@ class MainActivity : ComponentActivity() {
                 ),
                 policy = PermissionPolicy.MANUAL_CARD,
                 title = "模块精确闹钟",
-                description = "用于提高模块侧持久调度的准点性；系统弹出授权页后返回本页即可",
-                actionLabel = "申请精确闹钟"
+                description = "提高定时任务准点性",
+                actionLabel = "打开设置"
             ),
             PermissionHealthItem(
                 requirement = PermissionRequirement.TARGET_EXACT_ALARM,
                 status = targetExactAlarmPermissionStatus,
                 policy = PermissionPolicy.MANUAL_CARD,
                 title = "目标应用精确闹钟",
-                description = targetExactAlarmDescription,
-                actionLabel = if (targetInstalled) "申请目标精确闹钟" else null,
+                description = "提高定时任务准点性",
+                actionLabel = if (targetInstalled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    targetExactAlarmManifest.requestsScheduleExactAlarm
+                ) "打开设置" else null,
                 requestWhenUnavailable = targetInstalled &&
                     targetExactAlarmManifest.requiresManualSettingsCheck &&
                     targetExactAlarmPermissionStatus == PermissionStatus.UNAVAILABLE
@@ -735,8 +844,8 @@ class MainActivity : ComponentActivity() {
                 ),
                 policy = PermissionPolicy.MANUAL_CARD,
                 title = "模块电池优化豁免",
-                description = "降低模块侧后台服务和调度被系统限制的概率；通常需要在系统设置中确认",
-                actionLabel = "申请模块电池权限"
+                description = "减少后台任务被系统延迟",
+                actionLabel = "打开设置"
             ),
             PermissionHealthItem(
                 requirement = PermissionRequirement.TARGET_BATTERY,
@@ -751,16 +860,17 @@ class MainActivity : ComponentActivity() {
                 },
                 policy = PermissionPolicy.MANUAL_CARD,
                 title = "目标应用电池优化豁免",
-                description = "降低目标应用进程和 Hook 工作流被系统限制的概率；处理完后请回到模块复查",
-                actionLabel = if (targetInstalled) "申请目标电池权限" else null
+                description = "减少后台任务被系统延迟",
+                actionLabel = if (targetInstalled) "打开设置" else null
             ),
             PermissionHealthItem(
                 requirement = PermissionRequirement.SHELL_EXECUTOR,
                 status = shellExecutorStatus(requesting),
-                policy = PermissionPolicy.MANUAL_CARD,
-                title = "Root/Shizuku 执行器",
-                description = "用于诊断和辅助命令，不影响普通自动任务；需要时再处理即可",
-                actionLabel = if (isShizukuPermissionMissing()) "申请 Shizuku 授权" else null
+                policy = PermissionPolicy.MANUAL_CRITICAL,
+                title = "Root/Shizuku",
+                description = "Root 与 Shizuku 任一可用即可",
+                actionLabel = if (isShizukuPermissionMissing()) "授权 Shizuku" else "连接",
+                requestWhenUnavailable = true
             )
         )
         return PermissionHealthSnapshot(items = items)
@@ -788,16 +898,20 @@ class MainActivity : ComponentActivity() {
     ): PermissionStatus {
         if (!targetInstalled) return PermissionStatus.UNAVAILABLE
         val frameworkStatus = LsposedServiceManager.connectedFrameworkStatus() ?: return PermissionStatus.UNAVAILABLE
+<<<<<<< HEAD
         if (frameworkStatus.apiVersion < 101) return PermissionStatus.UNSUPPORTED
         if (!frameworkStatus.isSupported) return PermissionStatus.UNSUPPORTED
+=======
+        if (!frameworkStatus.isSupportedLsposed) return PermissionStatus.UNSUPPORTED
+>>>>>>> c9bcd6a38ab66cb5470405b09c522c4173762e75
         if (LsposedServiceManager.hasTargetScope(General.PACKAGE_NAME)) {
             markPermissionGranted(PermissionRequirement.LSPOSED_TARGET_SCOPE)
             return PermissionStatus.GRANTED
         }
-        return if (requesting == PermissionRequirement.LSPOSED_TARGET_SCOPE) {
-            PermissionStatus.REQUESTING
-        } else {
-            PermissionStatus.MISSING
+        return when {
+            requesting == PermissionRequirement.LSPOSED_TARGET_SCOPE -> PermissionStatus.REQUESTING
+            PermissionRequirement.LSPOSED_TARGET_SCOPE in deniedPermissionsThisVisibility -> PermissionStatus.DENIED
+            else -> PermissionStatus.MISSING
         }
     }
 
@@ -846,17 +960,13 @@ class MainActivity : ComponentActivity() {
         if (
             hookExactAlarmAllowed == true ||
             manifestState.isAlwaysGranted ||
-            targetBatteryIgnored ||
-            PermissionRequirement.TARGET_EXACT_ALARM in grantedPermissionsThisVisibility
+            targetBatteryIgnored
         ) {
             markPermissionGranted(PermissionRequirement.TARGET_EXACT_ALARM)
             return PermissionStatus.GRANTED
         }
         if (requesting == PermissionRequirement.TARGET_EXACT_ALARM) {
             return PermissionStatus.REQUESTING
-        }
-        if (PermissionRequirement.TARGET_EXACT_ALARM in deniedPermissionsThisVisibility) {
-            return PermissionStatus.DENIED
         }
         if (hookExactAlarmAllowed == false) return PermissionStatus.MISSING
         if (!manifestState.requiresManualSettingsCheck) {

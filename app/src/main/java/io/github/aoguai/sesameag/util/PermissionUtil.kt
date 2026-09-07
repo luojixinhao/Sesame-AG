@@ -13,6 +13,7 @@ import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.result.ActivityResultLauncher
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.github.aoguai.sesameag.BuildConfig
 import io.github.aoguai.sesameag.hook.ApplicationHook
@@ -30,6 +31,11 @@ object PermissionUtil {
         Manifest.permission.WRITE_EXTERNAL_STORAGE
     )
 
+    /**
+     * 检查指定应用是否可被模块侧看到。
+     *
+     * 返回 false 也可能是应用列表隐藏类模块拦截了包管理器查询。
+     */
     fun isPackageInstalled(context: Context, packageName: String): Boolean {
         if (packageName.isBlank()) return false
         return runCatching {
@@ -62,7 +68,8 @@ object PermissionUtil {
      */
     fun checkOrRequestFilePermissions(
         activity: Activity,
-        permissionLauncher: ActivityResultLauncher<Array<String>>
+        permissionLauncher: ActivityResultLauncher<Array<String>>,
+        settingsLauncher: ActivityResultLauncher<Intent>? = null
     ): Boolean {
         if (checkFilePermissions(activity)) return true
         if (!ensureModulePermissionRequestHost(activity, "file")) return false
@@ -73,7 +80,7 @@ object PermissionUtil {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     data = Uri.parse("package:${activity.packageName}")
                 }
-                return startActivitySafely(activity, intent, Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                return startActivitySafely(activity, intent, Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION, settingsLauncher)
             } else {
                 permissionLauncher.launch(PERMISSIONS_STORAGE)
                 return true
@@ -115,16 +122,6 @@ object PermissionUtil {
         }.onFailure {
             Log.printStackTrace(TAG, "检查精确闹钟权限失败: $targetPackage", it)
         }.getOrDefault(false)
-    }
-
-    /**
-     * 请求精确闹钟权限。
-     *
-     * 仅允许从模块前台 Activity 发起；自动调度链路只能读取权限状态。
-     */
-    @JvmStatic
-    fun checkOrRequestAlarmPermissions(activity: Activity): Boolean {
-        return checkOrRequestExactAlarmPermissions(activity)
     }
 
     @JvmStatic
@@ -176,20 +173,11 @@ object PermissionUtil {
         }.getOrDefault(false)
     }
 
-    /**
-     * 请求加入电池优化白名单。
-     *
-     * 仅允许从模块前台 Activity 发起；自动调度链路只能读取权限状态。
-     */
-    @JvmStatic
-    fun checkOrRequestBatteryPermissions(activity: Activity): Boolean {
-        return checkOrRequestBatteryPermissions(activity, activity.packageName)
-    }
-
     @JvmStatic
     fun checkOrRequestBatteryPermissions(
         activity: Activity,
-        packageName: String
+        packageName: String,
+        settingsLauncher: ActivityResultLauncher<Intent>? = null
     ): Boolean {
         val targetPackage = packageName.takeIf { it.isNotBlank() } ?: activity.packageName
         if (checkBatteryPermissions(activity, targetPackage)) return true
@@ -201,7 +189,7 @@ object PermissionUtil {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$targetPackage")
             }
-            return startActivitySafely(activity, intent, Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            return startActivitySafely(activity, intent, Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS, settingsLauncher)
         } catch (e: Exception) {
             Log.printStackTrace(TAG, "请求电池优化权限失败", e)
         }
@@ -214,11 +202,9 @@ object PermissionUtil {
      * 检查通知权限 (Android 13+)
      */
     fun checkNotificationPermission(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true // 旧版本默认允许
-        }
+        return NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
     }
 
     /**
@@ -228,12 +214,15 @@ object PermissionUtil {
      */
     fun checkOrRequestNotificationPermission(
         activity: Activity,
-        permissionLauncher: ActivityResultLauncher<Array<String>>
+        permissionLauncher: ActivityResultLauncher<Array<String>>,
+        settingsLauncher: ActivityResultLauncher<Intent>? = null
     ): Boolean {
         if (checkNotificationPermission(activity)) return true
         if (!ensureModulePermissionRequestHost(activity, "notification")) return false
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
             try {
                 permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
                 return true
@@ -242,7 +231,21 @@ object PermissionUtil {
             }
             return false
         }
-        return true
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        }
+        return startActivitySafely(activity, intent, intentLauncher = settingsLauncher)
+    }
+
+    fun openAppSettings(
+        activity: Activity,
+        settingsLauncher: ActivityResultLauncher<Intent>
+    ): Boolean {
+        if (!ensureModulePermissionRequestHost(activity, "app_settings")) return false
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.parse("package:${activity.packageName}")
+        }
+        return startActivitySafely(activity, intent, intentLauncher = settingsLauncher)
     }
 
     // --- 内部辅助方法 ---
@@ -250,7 +253,7 @@ object PermissionUtil {
     /**
      * 安全启动 Activity，自动处理 Flag 和 异常
      */
-    private fun startActivitySafely(
+    internal fun startActivitySafely(
         context: Context,
         intent: Intent,
         fallbackAction: String? = null,

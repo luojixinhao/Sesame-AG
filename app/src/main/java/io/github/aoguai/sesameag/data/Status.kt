@@ -20,6 +20,16 @@ import kotlin.collections.component2
 import kotlin.collections.get
 import kotlin.collections.set
 
+data class TodayFlagClearResult(
+    val userId: String,
+    val removedCount: Int = 0,
+    val written: Boolean = false,
+    val errorMessage: String? = null,
+) {
+    val isSuccess: Boolean
+        get() = errorMessage == null
+}
+
 class Status {
 
     /**
@@ -48,7 +58,6 @@ class Status {
     var vitalityStoreList: MutableMap<String, Int> = HashMap() // 注意命名规范首字母小写
 
     // =========================== farm
-    var answerQuestion: Boolean = false
     var feedFriendLogList: MutableMap<String, Int> = HashMap()
     var visitFriendLogList: MutableMap<String, Int> = HashMap()
 
@@ -56,7 +65,6 @@ class Status {
     // 2025/12/4 GSMT 用来存储int类型数据，无需再重复定义
     var intFlagMap: MutableMap<String, Int> = HashMap()
 
-    var dailyAnswerList: MutableSet<String> = HashSet()
     var useAccelerateToolCount: Int = 0
 
     /** 小鸡换装 */
@@ -65,7 +73,6 @@ class Status {
 
     // ============================= stall
     var stallHelpedCountLogList: MutableMap<String, Int> = HashMap()
-    var spreadManureList: MutableSet<String> = HashSet()
     var stallP2PHelpedList: MutableSet<String> = HashSet()
     var canStallDonate: Boolean = true
 
@@ -81,9 +88,6 @@ class Status {
 
     /** 模块化标记与计数存储 (Key: 模块名, Value: Map<标记名, 次数>) */
     var moduleFlags: MutableMap<String, MutableMap<String, Int>> = HashMap()
-
-    /** 口碑签到 */
-    var kbSignIn: Long = 0
 
     /** 上次任务启动时间 */
     var lastTaskTime: Long = 0L
@@ -181,24 +185,6 @@ class Status {
                 flag.substring(0, index) to flag.substring(index + 2)
             } else {
                 "general" to flag
-            }
-        }
-
-        /**
-         * 🚀 核心新增：加载一个独立的状态实例而不影响 INSTANCE
-         */
-        @JvmStatic
-        fun loadStandalone(userId: String): Status? {
-            try {
-                val statusFile = Files.getStatusFile(userId) ?: return null
-                if (!statusFile.exists()) return null
-                val json = Files.readFromFile(statusFile)
-                if (json.isBlank()) return null
-                val status = JsonUtil.parseObject(json, Status::class.java)
-                return status
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to load standalone status for $userId", e)
-                return null
             }
         }
 
@@ -312,60 +298,6 @@ class Status {
             save()
         }
 
-        /**
-         * 输出今日“被浇水”统计（明细 + 汇总），结果写入森林日志。
-         */
-        @JvmStatic
-        fun getWateredFriendToday() {
-            val uid = UserMap.currentUid
-            if (uid.isNullOrBlank()) return
-
-            val prefix = "$uid-"
-            val entries = INSTANCE.wateredFriendLogList.entries.filter { it.key.startsWith(prefix) }
-
-            var friendCount = 0
-            var totalTimes = 0
-
-            for ((key, times) in entries) {
-                val friendId = key.removePrefix(prefix)
-                val friendName = UserMap.get(friendId)?.showName ?: UserMap.getMaskName(friendId) ?: friendId
-                val safeTimes = times.coerceAtLeast(0)
-                Log.forest("统计被水🍯被[$friendName]浇水${safeTimes}次")
-                friendCount += 1
-                totalTimes += safeTimes
-            }
-
-            val selfName = UserMap.get(uid)?.showName ?: UserMap.getMaskName(uid) ?: uid
-            Log.forest("统计被水🍯共计被${friendCount}个好友浇水${totalTimes}次#[$selfName]")
-        }
-
-        /**
-         * 输出今日“浇水”统计（明细 + 汇总），结果写入森林日志。
-         */
-        @JvmStatic
-        fun getWateringFriendToday() {
-            val uid = UserMap.currentUid
-            if (uid.isNullOrBlank()) return
-
-            val prefix = "$uid-"
-            val entries = INSTANCE.wateringFriendLogList.entries.filter { it.key.startsWith(prefix) }
-
-            var friendCount = 0
-            var totalTimes = 0
-
-            for ((key, times) in entries) {
-                val friendId = key.removePrefix(prefix)
-                val friendName = UserMap.get(friendId)?.showName ?: UserMap.getMaskName(friendId) ?: friendId
-                val safeTimes = times.coerceAtLeast(0)
-                Log.forest("统计浇水🚿给[$friendName]浇水${safeTimes}次")
-                friendCount += 1
-                totalTimes += safeTimes
-            }
-
-            val selfName = UserMap.get(uid)?.showName ?: UserMap.getMaskName(uid) ?: uid
-            Log.forest("统计浇水🚿共计给${friendCount}个好友浇水${totalTimes}次#[$selfName]")
-        }
-
         @JvmStatic
         fun getReserveTimes(id: String): Int {
             return INSTANCE.reserveLogList[id] ?: 0
@@ -404,19 +336,6 @@ class Status {
         @JvmStatic
         fun ancientTreeToday(cityCode: String) {
             if (INSTANCE.ancientTreeCityCodeList.add(cityCode)) {
-                save()
-            }
-        }
-
-        @JvmStatic
-        fun canAnswerQuestionToday(): Boolean {
-            return !INSTANCE.answerQuestion
-        }
-
-        @JvmStatic
-        fun answerQuestionToday() {
-            if (!INSTANCE.answerQuestion) {
-                INSTANCE.answerQuestion = true
                 save()
             }
         }
@@ -497,18 +416,6 @@ class Status {
         }
 
         @JvmStatic
-        fun canSpreadManureToday(uid: String): Boolean {
-            return !INSTANCE.spreadManureList.contains(uid)
-        }
-
-        @JvmStatic
-        fun spreadManureToday(uid: String) {
-            if (INSTANCE.spreadManureList.add(uid)) {
-                save()
-            }
-        }
-
-        @JvmStatic
         fun canAntStallAssistFriendToday(): Boolean {
             return !INSTANCE.antStallAssistFriend.contains(UserMap.currentUid)
         }
@@ -569,26 +476,6 @@ class Status {
         @JvmStatic
         fun doubleToday() {
             INSTANCE.doubleTimes += 1
-            save()
-        }
-
-        @JvmStatic
-        fun canKbSignInToday(): Boolean {
-            return INSTANCE.kbSignIn < currentDayTimestamp
-        }
-
-        @JvmStatic
-        fun KbSignInToday() {
-            val todayZero = currentDayTimestamp
-            if (INSTANCE.kbSignIn != todayZero) {
-                INSTANCE.kbSignIn = todayZero
-                save()
-            }
-        }
-
-        @JvmStatic
-        fun setDadaDailySet(dailyAnswerList: MutableSet<String>) {
-            INSTANCE.dailyAnswerList = dailyAnswerList
             save()
         }
 
@@ -959,6 +846,97 @@ class Status {
             }
         }
 
+        /**
+         * Clears the general daily flag stores for [userId] without changing the active account.
+         * It intentionally preserves all non-flag runtime collections in status.json.
+         */
+        @Synchronized
+        @JvmStatic
+        fun clearAllTodayFlagsForUser(userId: String): TodayFlagClearResult =
+            mutateTodayFlagsForUser(userId) { status ->
+                val removedCount = status.moduleFlags.values.sumOf { it.size } + status.intFlagMap.size
+                if (removedCount > 0) {
+                    status.moduleFlags.clear()
+                    status.intFlagMap.clear()
+                }
+                removedCount
+            }
+
+        /** Clears every registered daily flag that belongs to the given configuration module. */
+        @Synchronized
+        @JvmStatic
+        fun clearModuleTodayFlagsForUser(userId: String, modelCode: String): TodayFlagClearResult =
+            mutateTodayFlagsForUser(userId) { status ->
+                removeTodayFlagKeys(status, TodayFlagRegistry.moduleKeys(status, modelCode))
+            }
+
+        /** Clears only the concrete daily flags currently associated with one configuration field. */
+        @Synchronized
+        @JvmStatic
+        fun clearFieldTodayFlagsForUser(
+            userId: String,
+            modelCode: String,
+            fieldCode: String,
+        ): TodayFlagClearResult =
+            mutateTodayFlagsForUser(userId) { status ->
+                removeTodayFlagKeys(status, TodayFlagRegistry.fieldKeys(status, modelCode, fieldCode))
+            }
+
+        private fun mutateTodayFlagsForUser(
+            userId: String,
+            mutation: (Status) -> Int,
+        ): TodayFlagClearResult {
+            val targetUserId = userId.trim()
+            if (targetUserId.isEmpty()) {
+                return TodayFlagClearResult(userId = userId, errorMessage = "账号标识无效")
+            }
+            val statusFile = Files.getStatusFile(targetUserId)
+                ?: return TodayFlagClearResult(userId = targetUserId, errorMessage = "无法定位账号每日状态文件")
+            if (!statusFile.exists()) {
+                return TodayFlagClearResult(userId = targetUserId, errorMessage = "账号每日状态文件不存在")
+            }
+
+            return try {
+                val raw = Files.readFromFile(statusFile)
+                if (raw.isBlank()) {
+                    TodayFlagClearResult(userId = targetUserId, errorMessage = "账号每日状态文件为空")
+                } else {
+                    val detachedStatus = JsonUtil.copyMapper().readValue(raw, Status::class.java)
+                    val removedCount = mutation(detachedStatus)
+                    if (removedCount <= 0) {
+                        TodayFlagClearResult(userId = targetUserId)
+                    } else if (!Files.write2File(JsonUtil.formatJson(detachedStatus), statusFile)) {
+                        TodayFlagClearResult(userId = targetUserId, errorMessage = "每日状态文件写入失败")
+                    } else {
+                        // The active in-memory Status may refer to this account, so force its next load to read disk.
+                        lastModifiedTime = 0L
+                        lastUid = null
+                        TodayFlagClearResult(
+                            userId = targetUserId,
+                            removedCount = removedCount,
+                            written = true,
+                        )
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.printStackTrace(TAG, "清除账号[$targetUserId]每日标识失败", t)
+                TodayFlagClearResult(
+                    userId = targetUserId,
+                    errorMessage = t.message ?: "每日状态文件格式有误",
+                )
+            }
+        }
+
+        private fun removeTodayFlagKeys(status: Status, keys: Set<TodayFlagKey>): Int {
+            var removedCount = 0
+            keys.forEach { key ->
+                val flags = status.moduleFlags[key.module] ?: return@forEach
+                if (flags.remove(key.name) != null) removedCount++
+                if (flags.isEmpty()) status.moduleFlags.remove(key.module)
+            }
+            return removedCount
+        }
+
         @JvmStatic
         fun getIntFlagToday(flag: String): Int? {
             return INSTANCE.getIntFlagTodayInstance(flag)
@@ -1013,21 +991,5 @@ class Status {
             return !hasFlagToday(StatusFlags.FLAG_FARM_PARADISE_COIN_EXCHANGE_LIMIT_PREFIX + spuId)
         }
 
-        @JvmStatic
-        fun getFlagModuleNames(): List<String> {
-            return INSTANCE.moduleFlags.keys.toList()
-        }
-
-        @JvmStatic
-        fun getFlagsByModule(module: String): List<String> {
-            return INSTANCE.moduleFlags[module]?.keys?.filter { !it.contains("_") }?.toList() ?: emptyList()
-        }
-
-        @JvmStatic
-        fun clearModuleFlags(module: String) {
-            if (INSTANCE.moduleFlags.remove(module) != null) {
-                save()
-            }
-        }
     }
 }

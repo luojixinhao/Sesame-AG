@@ -45,7 +45,7 @@ class BaseModel : Model() {
         modelFields.addField(setMaxErrorCount) // 异常次数阈值
         modelFields.addField(customRpcScheduleEnable) // 自定义RPC(配置文件+定时执行)
         modelFields.addField(debugMode) // 是否开启抓包调试模式
-        modelFields.addField(captureLogFileMaxSizeMb) // 抓包日志文件滚动大小
+        modelFields.addField(logTotalSizeCapMb) // 日志归档总容量上限
         modelFields.addField(sendHookData) // 启用Hook数据转发
         modelFields.addField(sendHookDataUrl) // Hook数据转发地址
 
@@ -243,17 +243,17 @@ class BaseModel : Model() {
             )
 
         /**
-         * 抓包日志文件滚动大小
+         * 所有日志归档文件的总容量上限
          */
-        val captureLogFileMaxSizeMb: IntegerModelField =
+        val logTotalSizeCapMb: IntegerModelField =
             IntegerModelField(
-                "captureLogFileMaxSizeMb",
-                "抓包日志文件大小上限(MB,-1不限)",
-                7,
-                -1,
+                "logTotalSizeCapMb",
+                "日志归档总容量上限(MB)",
+                256,
+                1,
                 null,
             ).withDesc(
-                "沿用现有日志文件滚动策略；抓包日志文件达到该大小后自动滚动清理。填 -1 表示不按文件大小切分，仅按日期归档。",
+                "限制常规滚动日志归档文件的总容量；多进程共用的抓包日志保持单文件，由导出或清空操作管理。",
             )
 
         /**

@@ -18,6 +18,7 @@ import io.github.aoguai.sesameag.task.TaskCommon
 import io.github.aoguai.sesameag.task.TaskStatus
 import io.github.aoguai.sesameag.task.antForest.AntForest
 import io.github.aoguai.sesameag.task.common.DeferredReason
+import io.github.aoguai.sesameag.task.common.GameCenterPlayRpcCall
 import io.github.aoguai.sesameag.task.common.TaskFlowAction
 import io.github.aoguai.sesameag.task.common.TaskFlowActionResult
 import io.github.aoguai.sesameag.task.common.TaskFlowAdapter
@@ -63,20 +64,6 @@ class AntOcean : ModelTask() {
         ENERGY_LACK(2, "能量不足"),
         ;
 
-        companion object {
-            /**
-             * 根据字符串获取对应枚举
-             */
-            fun fromString(value: String): ApplyAction? {
-                for (action in values()) {
-                    if (action.name.equals(value, ignoreCase = true)) {
-                        return action
-                    }
-                }
-                Log.error("ApplyAction", "Unknown applyAction: $value")
-                return null
-            }
-        }
     }
 
     /**
@@ -228,7 +215,6 @@ class AntOcean : ModelTask() {
     private var selfOceanCleanRetried = false
     private var noticeLinkedRefreshNeeded = false
     private var oceanHomeRefreshNeeded = false
-    private var oceanTasksDoneInvalidatedThisRun = false
 
     override fun getName(): String = "海洋"
 
@@ -340,8 +326,6 @@ class AntOcean : ModelTask() {
             selfOceanCleanRetried = false
             noticeLinkedRefreshNeeded = false
             oceanHomeRefreshNeeded = false
-            oceanTasksDoneInvalidatedThisRun = false
-
             if (!queryOceanStatus()) {
                 return
             }
@@ -599,22 +583,13 @@ class AntOcean : ModelTask() {
         }
 
     private fun isHelpCleanLimit(jo: JSONObject): Boolean {
-        val resultCode = jo.optString("resultCode").ifBlank { jo.optString("code") }
-        val desc = extractOceanResultDesc(jo)
-        return resultCode == "HELP_CLEAN_LIMIT" ||
-            resultCode == "HELP_CLEAN_ALL_FRIEND_LIMIT" ||
-            desc.contains("清理好友海域的次数已达上限") ||
-            desc.contains("清理次数已达20次上限") ||
-            desc.contains("已达20次上限")
+        val resultCode = extractOceanTaskFailureCode(jo)
+        return resultCode == "HELP_CLEAN_LIMIT" || resultCode == "HELP_CLEAN_ALL_FRIEND_LIMIT"
     }
 
     private fun isOceanFriendNotOpen(jo: JSONObject): Boolean {
-        val resultCode = jo.optString("resultCode").ifBlank { jo.optString("code") }
-        val desc = extractOceanResultDesc(jo)
-        return resultCode == "USER_NOT_OPEN" ||
-            resultCode == "NOT_OPEN" ||
-            desc.contains("未开通") ||
-            desc.contains("未完成引导")
+        val resultCode = extractOceanTaskFailureCode(jo)
+        return resultCode == "USER_NOT_OPEN" || resultCode == "NOT_OPEN"
     }
 
     private fun markHelpCleanLimit(jo: JSONObject) {
@@ -627,45 +602,30 @@ class AntOcean : ModelTask() {
 
     private fun isSelfCleanTask(taskType: String): Boolean = taskType == "CLEAN_RUBBISH_2_EVERY_DAY"
 
-    private fun isHelpFriendCleanTask(
-        taskType: String,
-        taskTitle: String,
-    ): Boolean {
+    private fun isHelpFriendCleanTask(taskType: String): Boolean {
         val normalizedTaskType = taskType.uppercase()
         return normalizedTaskType.contains("HELP_CLEAN") ||
             normalizedTaskType.contains("FRIENDRUBBISHCLEAN") ||
             normalizedTaskType.contains("FRIEND_RUBBISH_CLEAN") ||
-            normalizedTaskType.contains("CLEAN_FRIEND") ||
-            taskTitle.contains("帮好友清理") ||
-            taskTitle.contains("帮助好友清理") ||
-            taskTitle.contains("好友清理") ||
-            (taskTitle.contains("好友") && taskTitle.contains("清理") && taskTitle.contains("垃圾"))
+            normalizedTaskType.contains("CLEAN_FRIEND")
     }
 
     private fun isConsecutiveVisitTask(
         taskType: String,
-        taskTitle: String,
-    ): Boolean =
-        taskType == "VISISIT_3DAYS_CONSECUTIVE" ||
-            (
-                (taskTitle.contains("连续3天") || taskTitle.contains("连续三天")) &&
-                    taskTitle.contains("来海洋")
-            )
+    ): Boolean = taskType == "VISISIT_3DAYS_CONSECUTIVE"
+
+    private fun isOceanQuestionTask(taskType: String): Boolean = taskType == "ANTOCEAN_DATI_PINTU_722_new"
 
     private fun isOceanActionTask(
         taskType: String,
-        taskTitle: String,
     ): Boolean =
-        !isHelpFriendCleanTask(taskType, taskTitle) &&
+        !isHelpFriendCleanTask(taskType) &&
             (
                 isSelfCleanTask(taskType) ||
-                    taskType.startsWith("CLEAN_") ||
-                    taskTitle.contains("清理好友") ||
-                    taskTitle.contains("清理海域")
+                    taskType.startsWith("CLEAN_")
             )
 
     private fun markOceanTasksDoneInvalidated() {
-        oceanTasksDoneInvalidatedThisRun = true
         Status.removeFlag(StatusFlags.FLAG_ANTOCEAN_TASKS_DONE)
     }
 
@@ -1289,6 +1249,11 @@ class AntOcean : ModelTask() {
 
     private fun collectEnergy(bubbleVOList: JSONArray) {
         val antForest = getModel(AntForest::class.java)
+//        复用森林收取能量总开关 当没有打开时，不执行
+        if (antForest == null || !antForest.isCollectEnergyEnabled()) {
+            Log.runtime(TAG, "神奇海洋🌊能量球 收能量未开启，跳过收取")
+            return
+        }
         // 逐条处理：单个能量球字段缺失/结构变化只跳过该条并记录，不再因一个异常中断整段收取（根因A）
         for (i in 0 until bubbleVOList.length()) {
             try {
@@ -1306,7 +1271,8 @@ class AntOcean : ModelTask() {
                     Log.runtime(TAG, "神奇海洋🌊能量球[$bubbleId]缺少有效能量值，跳过收取")
                     continue
                 }
-                if (antForest != null && !antForest.shouldCollectSelfBubble(energy)) {
+                if (!antForest.shouldCollectSelfBubble(energy)) {
+                    Log.runtime(TAG, "神奇海洋🌊能量球[$bubbleId]能量值低于阈值，跳过收取")
                     continue
                 }
                 val s = AntOceanRpcCall.collectEnergy(bubbleId.toString(), userId)
@@ -1755,6 +1721,17 @@ class AntOcean : ModelTask() {
                 return
             }
             if (!ResChecker.checkRes(TAG, jo)) {
+                if (isFriendPieceReceiveLimit(jo)) {
+                    Log.error(
+                        TAG,
+                        "神奇海洋🌊[送碎片]#好友=$userId 已被其他用户送过，跳过当前好友并继续后续选择",
+                    )
+                } else {
+                    Log.error(
+                        TAG,
+                        "神奇海洋🌊[送碎片]#好友=$userId 请求失败:" + extractOceanTaskFailureMessage(jo),
+                    )
+                }
                 return
             }
             extractNestedJsonArray(jo, "normalRewardVOS")?.let { checkReward(it) }
@@ -1994,16 +1971,11 @@ class AntOcean : ModelTask() {
     }
 
     private suspend fun receiveTaskAward(): TaskFlowRunResult? {
-        if (Status.hasFlagToday(StatusFlags.FLAG_ANTOCEAN_TASKS_DONE) && !oceanTasksDoneInvalidatedThisRun) {
-            Log.ocean("海洋任务🌊[今日已确认完成，跳过重复查询]")
-            return null
-        }
         try {
             val adapter = OceanTaskFlowAdapter()
             val result = TaskFlowEngine(adapter, roundSleepMs = 500L).run()
-            if (result.completed && !result.interrupted && adapter.canMarkTasksDone()) {
+            if (!result.stopped && !result.interrupted && adapter.canMarkTasksDoneForToday()) {
                 Status.setFlagToday(StatusFlags.FLAG_ANTOCEAN_TASKS_DONE)
-                oceanTasksDoneInvalidatedThisRun = false
                 Log.ocean("海洋任务🌊今日已确认完成")
             }
             refreshOceanHomeIfNeeded("任务领奖/清理后")
@@ -2026,9 +1998,7 @@ class AntOcean : ModelTask() {
 
         override val moduleName: String = TASK_BLACKLIST_MODULE
         override val flowName: String = "神奇海洋任务"
-
-        override fun isFlowHandledToday(): Boolean =
-            Status.hasFlagToday(StatusFlags.FLAG_ANTOCEAN_TASKS_DONE) && !oceanTasksDoneInvalidatedThisRun
+        override val continueCurrentRoundOnRetryableFailure: Boolean = true
 
         override fun query(): JSONObject {
             val response = AntOceanRpcCall.queryTaskList()
@@ -2073,6 +2043,7 @@ class AntOcean : ModelTask() {
                         .put("bizInfo", bizInfo)
                         .put("awardCount", awardCount)
                         .put("extend", extendInfo)
+                        .put("prodPlayParam", task.opt("prodPlayParam"))
                         .put("rightsTimes", task.opt("rightsTimes"))
                         .put("rightsTimesLimit", task.opt("rightsTimesLimit"))
                         .put("alreadyReceiveAwardCount", extendInfo.opt("alreadyReceiveAwardCount"))
@@ -2089,7 +2060,7 @@ class AntOcean : ModelTask() {
                             task.optString("actionType").ifBlank {
                                 bizInfo.optString("actionType")
                             },
-                        blacklistKeys = listOf(taskType, taskTitle).filter { it.isNotBlank() },
+                        blacklistKeys = listOf(taskType),
                         raw = raw,
                         progress = "award=$awardCount progress=${taskProgress ?: 0}/${taskRequire ?: 0}",
                         current = taskProgress,
@@ -2114,11 +2085,11 @@ class AntOcean : ModelTask() {
                     TaskFlowPhase.TERMINAL
                 }
 
-                item.status == TaskStatus.TODO.name && isConsecutiveVisitTask(item.type, item.title) -> {
+                item.status == TaskStatus.TODO.name && isConsecutiveVisitTask(item.type) -> {
                     mapConsecutiveVisitPhase(item)
                 }
 
-                item.status == TaskStatus.TODO.name && isHelpFriendCleanTask(item.type, item.title) -> {
+                item.status == TaskStatus.TODO.name && isHelpFriendCleanTask(item.type) -> {
                     TaskFlowPhase.READY_TO_COMPLETE
                 }
 
@@ -2126,7 +2097,7 @@ class AntOcean : ModelTask() {
                     TaskFlowPhase.READY_TO_COMPLETE
                 }
 
-                item.status == TaskStatus.TODO.name && isOceanActionTask(item.type, item.title) -> {
+                item.status == TaskStatus.TODO.name && isOceanActionTask(item.type) -> {
                     TaskFlowPhase.BUSINESS_ACTION
                 }
 
@@ -2141,7 +2112,7 @@ class AntOcean : ModelTask() {
 
         override fun shouldSkipByTodayState(item: TaskFlowItem): Boolean {
             if (Status.hasFlagToday(StatusFlags.FLAG_ANTOCEAN_HELP_CLEAN_ALL_FRIEND_LIMIT) &&
-                isHelpFriendCleanTask(item.type, item.title) &&
+                isHelpFriendCleanTask(item.type) &&
                 !isRewardReadyStatus(item.status) &&
                 !isRewardReceivedStatus(item.status) &&
                 item.status != TaskStatus.TODO.name
@@ -2183,7 +2154,6 @@ class AntOcean : ModelTask() {
                     rpc = "AntOceanRpcCall.receiveTaskAward",
                     raw = response,
                     detail = oceanTaskActionDetail(item, "receiveTaskAward"),
-                    stopCurrentRound = true,
                 )
             if (isOceanTaskRewardNotReady(result)) {
                 logOceanTaskOnce("海洋任务🌊[${item.title}]奖励未就绪，等待服务端刷新后再领取")
@@ -2194,7 +2164,6 @@ class AntOcean : ModelTask() {
                     rpc = "AntOceanRpcCall.receiveTaskAward",
                     raw = result.toString(),
                     detail = oceanTaskActionDetail(item, "receiveTaskAward"),
-                    stopCurrentRound = true,
                 )
             }
             if (isOceanTaskRpcSuccess(result)) {
@@ -2212,11 +2181,11 @@ class AntOcean : ModelTask() {
         }
 
         override fun complete(item: TaskFlowItem): TaskFlowActionResult {
-            if (isHelpFriendCleanTask(item.type, item.title)) {
+            if (isHelpFriendCleanTask(item.type)) {
                 return completeHelpFriendCleanTask(item)
             }
 
-            if (isConsecutiveVisitTask(item.type, item.title)) {
+            if (isConsecutiveVisitTask(item.type)) {
                 mapConsecutiveVisitPhase(item)
                 return TaskFlowActionResult.success(progressChanged = false)
             }
@@ -2236,7 +2205,7 @@ class AntOcean : ModelTask() {
                 }
             }
 
-            if (item.title.contains("答题")) {
+            if (isOceanQuestionTask(item.type)) {
                 return if (answerQuestion()) {
                     TaskFlowActionResult.success()
                 } else {
@@ -2249,6 +2218,9 @@ class AntOcean : ModelTask() {
                 }
             }
 
+            oceanGamePlayContract(item)?.let { contract ->
+                return finishOceanGameTask(item, contract)
+            }
             return finishOceanTask(item)
         }
 
@@ -2292,23 +2264,49 @@ class AntOcean : ModelTask() {
             Log.error(TAG, message)
         }
 
-        fun canMarkTasksDone(): Boolean {
+        fun canMarkTasksDoneForToday(): Boolean {
             if (!querySucceeded || unknownPhaseSeen || unknownFailureSeen) {
                 return false
             }
             for (item in latestItems) {
+                val phase = mapPhase(item)
+                if (Status.hasFlagToday(StatusFlags.FLAG_ANTOCEAN_HELP_CLEAN_ALL_FRIEND_LIMIT) &&
+                    isHelpFriendCleanTask(item.type) &&
+                    phase != TaskFlowPhase.REWARD_READY &&
+                    phase != TaskFlowPhase.TERMINAL
+                ) {
+                    return false
+                }
                 if (shouldSkipByTodayState(item)) {
                     continue
                 }
-                val phase = mapPhase(item)
                 if (phase == TaskFlowPhase.UNKNOWN) {
                     return false
                 }
-                if (phase != TaskFlowPhase.TERMINAL) {
-                    return false
+                if (phase == TaskFlowPhase.TERMINAL) {
+                    continue
                 }
+                if (isConsecutiveVisitTaskWaitingForLaterDay(item, phase)) {
+                    continue
+                }
+                if (phase != TaskFlowPhase.REWARD_READY && isBlacklisted(item)) {
+                    continue
+                }
+                return false
             }
             return true
+        }
+
+        private fun isConsecutiveVisitTaskWaitingForLaterDay(
+            item: TaskFlowItem,
+            phase: TaskFlowPhase,
+        ): Boolean {
+            val limit = item.limit ?: return false
+            val current = item.current ?: return false
+            return phase == TaskFlowPhase.BUSINESS_ACTION &&
+                item.status == TaskStatus.TODO.name &&
+                isConsecutiveVisitTask(item.type) &&
+                current < limit
         }
     }
 
@@ -2327,14 +2325,14 @@ class AntOcean : ModelTask() {
 
     private fun shouldBypassOceanBlacklist(item: TaskFlowItem): Boolean =
         isRewardReceivedStatus(item.status) ||
-            isHelpFriendCleanTask(item.type, item.title) ||
-            isConsecutiveVisitTask(item.type, item.title)
+            isHelpFriendCleanTask(item.type) ||
+            isConsecutiveVisitTask(item.type)
 
     private fun completeHelpFriendCleanTask(item: TaskFlowItem): TaskFlowActionResult {
         if (cleanOcean?.value != true) {
             logOceanTaskOnce("海洋任务🌊[${item.title}]好友清理未开启，等待手动完成")
-            return TaskFlowActionResult.failure(
-                failureType = TaskRpcFailureType.BUSINESS_LIMIT,
+            return TaskFlowActionResult.defer(
+                deferredReason = DeferredReason.PREREQUISITE_PENDING,
                 message = "好友清理未开启，等待手动完成",
                 rpc = "AntOcean.completeHelpFriendCleanTask",
                 detail = oceanTaskActionDetail(item, "helpFriendCleanTask"),
@@ -2342,8 +2340,8 @@ class AntOcean : ModelTask() {
         }
         if (Status.hasFlagToday(StatusFlags.FLAG_ANTOCEAN_HELP_CLEAN_ALL_FRIEND_LIMIT)) {
             logOceanTaskOnce("海洋任务🌊[${item.title}]帮助清理次数已达上限，等待后续任务状态刷新")
-            return TaskFlowActionResult.failure(
-                failureType = TaskRpcFailureType.BUSINESS_LIMIT,
+            return TaskFlowActionResult.defer(
+                deferredReason = DeferredReason.CAPACITY_LIMIT,
                 message = "帮助清理次数已达上限",
                 rpc = "AntOcean.completeHelpFriendCleanTask",
                 detail = oceanTaskActionDetail(item, "helpFriendCleanTask"),
@@ -2377,8 +2375,8 @@ class AntOcean : ModelTask() {
             if (!ResChecker.checkRes(TAG, sailingAwayResult)) {
                 if (isHelpCleanLimit(sailingAwayResult)) {
                     markHelpCleanLimit(sailingAwayResult)
-                    return TaskFlowActionResult.failure(
-                        failureType = TaskRpcFailureType.BUSINESS_LIMIT,
+                    return TaskFlowActionResult.defer(
+                        deferredReason = DeferredReason.CAPACITY_LIMIT,
                         message = "帮助清理次数已达上限",
                         rpc = "AntOceanRpcCall.sailingAway",
                         detail = oceanTaskActionDetail(item, "helpFriendCleanTask"),
@@ -2399,8 +2397,8 @@ class AntOcean : ModelTask() {
                     sailingAwayResult.optJSONObject("resData")?.optString("friendId").orEmpty()
                 }
             if (friendUserId.isBlank()) {
-                return TaskFlowActionResult.failure(
-                    failureType = TaskRpcFailureType.BUSINESS_LIMIT,
+                return TaskFlowActionResult.defer(
+                    deferredReason = DeferredReason.PREREQUISITE_PENDING,
                     message = "任务入口未返回可清理好友",
                     rpc = "AntOceanRpcCall.sailingAway",
                     detail = oceanTaskActionDetail(item, "helpFriendCleanTask"),
@@ -2421,8 +2419,8 @@ class AntOcean : ModelTask() {
                 return TaskFlowActionResult.success(refreshAfterAction = true)
             }
             if (cleanResult.limitReached || Status.hasFlagToday(StatusFlags.FLAG_ANTOCEAN_HELP_CLEAN_ALL_FRIEND_LIMIT)) {
-                return TaskFlowActionResult.failure(
-                    failureType = TaskRpcFailureType.BUSINESS_LIMIT,
+                return TaskFlowActionResult.defer(
+                    deferredReason = DeferredReason.CAPACITY_LIMIT,
                     message = "帮助清理次数已达上限",
                     rpc = "AntOcean.completeHelpFriendCleanTask",
                     detail = oceanTaskActionDetail(item, "helpFriendCleanTask"),
@@ -2431,40 +2429,107 @@ class AntOcean : ModelTask() {
             skipUsers.put(friendUserId, "clean")
         }
 
-        return TaskFlowActionResult.failure(
-            failureType = TaskRpcFailureType.BUSINESS_LIMIT,
+        return TaskFlowActionResult.defer(
+            deferredReason = DeferredReason.PREREQUISITE_PENDING,
             message = "任务入口未找到符合清理规则的好友，等待手动完成",
             rpc = "AntOcean.completeHelpFriendCleanTask",
             detail = oceanTaskActionDetail(item, "helpFriendCleanTask"),
         )
     }
 
-    private fun canRetrySelfOceanCleanTask(): Boolean =
-        cleanOcean?.value == true &&
-            !selfOceanCleanRetried &&
-            !currentOceanUserId.isNullOrBlank()
+    private fun finishOceanTask(item: TaskFlowItem): TaskFlowActionResult =
+        handleOceanTaskFinish(
+            item = item,
+            response = AntOceanRpcCall.finishTask(item.sceneCode, item.type),
+            rpc = "AntOceanRpcCall.finishTask",
+        )
 
-    private fun finishOceanTask(item: TaskFlowItem): TaskFlowActionResult {
-        val response = AntOceanRpcCall.finishTask(item.sceneCode, item.type)
+    private fun finishOceanGameTask(
+        item: TaskFlowItem,
+        contract: GameCenterPlayRpcCall.Contract,
+    ): TaskFlowActionResult {
+        val durationAck =
+            try {
+                GameCenterPlayRpcCall.submitForAck(contract)
+            } catch (t: Throwable) {
+                return TaskFlowActionResult.failure(
+                    failureType = TaskRpcFailureType.RETRYABLE_RPC,
+                    message = "海洋游戏时长上报异常",
+                    rpc = "GameCenterPlayRpcCall.submit",
+                    detail = oceanTaskActionDetail(item, "playDuration") + " error=${t.message}",
+                )
+            }
+        val durationResponse = durationAck.response
+            ?: return TaskFlowActionResult.failure(
+                failureType = durationAck.failureType,
+                message = "海洋游戏时长动作响应无法解析",
+                rpc = "GameCenterPlayRpcCall.submit",
+                raw = durationAck.raw,
+                detail = oceanTaskActionDetail(item, "playDuration"),
+            )
+        if (!durationAck.accepted) {
+            return TaskFlowActionResult.failure(
+                failureType = durationAck.failureType,
+                code = durationResponse.optString("resultCode", durationResponse.optString("errorCode")),
+                message = durationResponse.optString("resultDesc", durationResponse.optString("desc", durationAck.raw)),
+                rpc = "GameCenterPlayRpcCall.submit",
+                raw = durationAck.raw,
+                detail = oceanTaskActionDetail(item, "playDuration"),
+                continueCurrentRoundOnFailure = durationAck.failureType == TaskRpcFailureType.RETRYABLE_RPC,
+            )
+        }
+        Log.ocean("海洋任务🌊[${item.title}]时长上报已接受，继续任务完成闭环")
+        return handleOceanTaskFinish(
+            item = item,
+            response = AntOceanRpcCall.finishGameTask(item.sceneCode, item.type),
+            rpc = "AntOceanRpcCall.finishGameTask",
+        )
+    }
+
+    private fun handleOceanTaskFinish(
+        item: TaskFlowItem,
+        response: String,
+        rpc: String,
+    ): TaskFlowActionResult {
         val result =
             JsonUtil.parseJSONObjectOrNull(response) ?: return TaskFlowActionResult.failure(
                 failureType = TaskRpcFailureType.RETRYABLE_RPC,
                 message = "finishTask返回空或无法解析",
-                rpc = "AntOceanRpcCall.finishTask",
+                rpc = rpc,
                 raw = response,
                 detail = oceanTaskActionDetail(item, "finishTask"),
-                stopCurrentRound = true,
             )
         if (isOceanTaskRpcSuccess(result)) {
-            Log.ocean("海洋任务🌊完成[${item.title}]")
-            return TaskFlowActionResult.success()
+            Log.ocean("海洋任务🌊完成请求已受理[${item.title}]，等待任务列表确认")
+            return TaskFlowActionResult.defer(
+                deferredReason = DeferredReason.STATE_CONFIRMATION,
+                message = "finishTask已返回成功，等待海洋任务列表确认",
+                rpc = rpc,
+                raw = result.toString(),
+                detail = oceanTaskActionDetail(item, "finishTask"),
+                refreshAfterAction = true,
+            )
         }
         return oceanTaskActionFailureResult(
             item = item,
             response = result,
-            rpc = "AntOceanRpcCall.finishTask",
+            rpc = rpc,
             detail = oceanTaskActionDetail(item, "finishTask"),
         )
+    }
+
+    private fun oceanGamePlayContract(item: TaskFlowItem): GameCenterPlayRpcCall.Contract? {
+        val raw = item.raw ?: return null
+        val task = raw.optJSONObject("task") ?: return null
+        val contract =
+            GameCenterPlayRpcCall.resolveContract(task, raw, raw.optJSONObject("bizInfo"))
+                ?: return null
+        val reportTime = contract.playTime.toLong() + 1L
+        if (reportTime > Int.MAX_VALUE) {
+            Log.error(TAG, "海洋任务🌊[${item.title}]时长超出上报范围：${contract.playTime}")
+            return null
+        }
+        return contract.copy(playTime = reportTime.toInt())
     }
 
     private fun oceanTaskActionFailureResult(
@@ -2550,7 +2615,6 @@ class AntOcean : ModelTask() {
 
     private fun classifyOceanTaskFailure(response: JSONObject): TaskRpcFailureType {
         val code = extractOceanTaskFailureCode(response)
-        val message = extractOceanTaskFailureMessage(response)
         return when {
             code in
                 setOf(
@@ -2561,48 +2625,26 @@ class AntOcean : ModelTask() {
                     "TASK_HAS_FINISHED",
                     "REPEAT_FINISH",
                     "REPEAT_REWARD",
-                ) ||
-                containsAnyOcean(
-                    message,
-                    "已领取",
-                    "已经领取",
-                    "重复领取",
-                    "重复领奖",
-                    "重复完成",
-                    "已完成",
-                    "任务已完结",
-                    "任务已结束",
-                    "无状态转换处理",
                 ) -> {
                 TaskRpcFailureType.TERMINAL_DONE
             }
 
-            code == "CAMP_TRIGGER_ERROR" ||
-                code == "HELP_CLEAN_LIMIT" ||
-                code == "HELP_CLEAN_ALL_FRIEND_LIMIT" ||
-                code.contains("LIMIT", ignoreCase = true) ||
-                containsAnyOcean(
-                    message,
-                    "上限",
-                    "限制",
-                    "受限",
-                    "不可领取",
-                    "资格不足",
-                    "兑完",
-                    "能量不足",
-                    "风控",
-                    "风险",
+            code in
+                setOf(
+                    "CAMP_TRIGGER_ERROR",
+                    "HELP_CLEAN_LIMIT",
+                    "HELP_CLEAN_ALL_FRIEND_LIMIT",
+                    "RECEIVE_PIECE_LIMIT",
                 ) -> {
                 TaskRpcFailureType.BUSINESS_LIMIT
             }
 
-            code == "400000040" ||
-                containsAnyOcean(message, "不支持rpc调用", "不支持RPC完成") -> {
-                TaskRpcFailureType.UNSUPPORTED_NO_CLOSURE
+            code == "400000040" -> {
+                // 当前方法被拒绝，不能据此禁用任务的其他业务步骤。
+                TaskRpcFailureType.UNKNOWN_NEEDS_REVIEW
             }
 
-            code in setOf("20020012", "TASK_ID_INVALID", "ILLEGAL_ARGUMENT", "PROMISE_TEMPLATE_NOT_EXIST") ||
-                containsAnyOcean(message, "参数错误", "任务ID非法", "模板不存在") -> {
+            code in setOf("20020012", "TASK_ID_INVALID", "ILLEGAL_ARGUMENT", "PROMISE_TEMPLATE_NOT_EXIST") -> {
                 TaskRpcFailureType.NON_RETRYABLE_INVALID
             }
 
@@ -2618,20 +2660,6 @@ class AntOcean : ModelTask() {
                     "I07",
                     "USER_FREQUENTLY_LOCK",
                 ) ||
-                containsAnyOcean(
-                    message,
-                    "系统出错",
-                    "系统繁忙",
-                    "稍后",
-                    "繁忙",
-                    "频繁",
-                    "重试",
-                    "需要验证",
-                    "访问被拒绝",
-                    "任务未完成,无法领取",
-                    "任务未完成，无法领取",
-                    "任务未完成无法领取",
-                ) ||
                 isOceanFailureMarkedRetryable(response) -> {
                 TaskRpcFailureType.RETRYABLE_RPC
             }
@@ -2642,12 +2670,11 @@ class AntOcean : ModelTask() {
         }
     }
 
-    private fun isFriendPieceAlreadyGiven(response: JSONObject): Boolean {
-        val code = extractOceanTaskFailureCode(response)
-        val message = extractOceanTaskFailureMessage(response)
-        return code == "PIECE_HAVE_GAVE" ||
-            containsAnyOcean(message, "碎片已经成功送出啦")
-    }
+    private fun isFriendPieceAlreadyGiven(response: JSONObject): Boolean =
+        extractOceanTaskFailureCode(response) == "PIECE_HAVE_GAVE"
+
+    private fun isFriendPieceReceiveLimit(response: JSONObject): Boolean =
+        extractOceanTaskFailureCode(response) == "RECEIVE_PIECE_LIMIT"
 
     private fun extractOceanTaskFailureCode(response: JSONObject): String =
         response
@@ -2673,11 +2700,6 @@ class AntOcean : ModelTask() {
         }
     }
 
-    private fun containsAnyOcean(
-        text: String,
-        vararg keywords: String,
-    ): Boolean = keywords.any { keyword -> text.contains(keyword, ignoreCase = true) }
-
     private fun logOceanTaskOnce(message: String) {
         if (loggedMessages.add(message)) {
             Log.ocean(message)
@@ -2694,18 +2716,8 @@ class AntOcean : ModelTask() {
         taskStatus == TaskStatus.RECEIVED.name ||
             taskStatus == "HAS_RECEIVED"
 
-    private fun isOceanTaskRewardNotReady(jo: JSONObject): Boolean {
-        val code =
-            jo.optString("code").ifBlank {
-                jo.optString("errorCode").ifBlank { jo.optString("resultCode") }
-            }
-        val desc =
-            jo.optString("desc").ifBlank {
-                jo.optString("errorMsg").ifBlank { jo.optString("resultDesc") }
-            }
-        return code == "400000004" ||
-            containsAnyOcean(desc, "任务未完成,无法领取", "任务未完成，无法领取", "任务未完成无法领取")
-    }
+    private fun isOceanTaskRewardNotReady(jo: JSONObject): Boolean =
+        extractOceanTaskFailureCode(jo) == "400000004"
 
     private fun parseOceanTaskProgressInt(
         task: JSONObject,

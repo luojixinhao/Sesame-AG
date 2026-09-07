@@ -3,6 +3,8 @@ package io.github.aoguai.sesameag.hook.keepalive
 import android.content.Context
 import com.fasterxml.jackson.core.type.TypeReference
 import io.github.aoguai.sesameag.hook.AccountSessionCoordinator
+import io.github.aoguai.sesameag.hook.AccountSlotRegistry
+import io.github.aoguai.sesameag.hook.ApplicationHookCore
 import io.github.aoguai.sesameag.util.DataStore
 import io.github.aoguai.sesameag.util.Files
 import io.github.aoguai.sesameag.util.Log
@@ -16,6 +18,15 @@ object PersistentScheduleRegistry {
     private const val STORE_KEY = "persistentSchedules"
     private const val RETAIN_FINISHED_MS = 24 * 60 * 60 * 1000L
     private const val MAX_DEFERRED_ATTEMPTS = 3
+    private val activeModuleChildStates = setOf(
+        PersistentScheduleState.QUEUED,
+        PersistentScheduleState.RUNNING,
+    )
+    private val terminalScheduleStates = setOf(
+        PersistentScheduleState.FIRED,
+        PersistentScheduleState.FAILED,
+        PersistentScheduleState.EXPIRED,
+    )
 
     private val scheduleListType = object : TypeReference<MutableList<PersistentSchedule>>() {}
 
@@ -28,15 +39,6 @@ object PersistentScheduleRegistry {
     private var cache: MutableList<PersistentSchedule>? = null
     private val registryMutationLock = Any()
     private val registryLockDepth = ThreadLocal<Int>()
-    private val alarmEnsureLock = Any()
-    private val ensuredAlarmKeys = mutableSetOf<String>()
-
-    private enum class AlarmScheduleResult {
-        SCHEDULED,
-        ALREADY_CONFIRMED,
-        BLOCKED_BY_POLICY,
-        FAILED,
-    }
 
     data class ReconcileResult(
         val dueSchedules: List<PersistentSchedule>,
@@ -53,6 +55,9 @@ object PersistentScheduleRegistry {
         context: Context,
         schedule: PersistentSchedule,
     ): PersistentSchedule {
+        if (!AccountSlotRegistry.isExecutableUser(schedule.ownerUserId)) {
+            return schedule.withFailure("account_slot_inactive")
+        }
         if (!ensureStorage()) {
             return schedule.withFailure("persistent_storage_unavailable")
         }
@@ -75,7 +80,7 @@ object PersistentScheduleRegistry {
             if (removed.isNotEmpty()) {
                 schedules.removeAll(removed.toSet())
                 save(schedules)
-                // 注册表已更新后再重排，避免取消一个计划时误清空同会话的其它物理闹钟。
+                removed.forEach { SystemWakeScheduler.cancelLaunchConfirmationTimeout(it.id) }
                 SystemWakeScheduler.schedule(context, effectiveSchedule, silent = true)
             }
             Log.record(TAG, "持久调度已因禁止系统调度前台拉起目标应用而未注册[${effectiveSchedule.name}]")
@@ -91,6 +96,7 @@ object PersistentScheduleRegistry {
         schedules.removeAll(removed.toSet())
         schedules.add(effectiveSchedule)
         save(schedules)
+        removed.forEach { SystemWakeScheduler.cancelLaunchConfirmationTimeout(it.id) }
         if (SystemWakeScheduler.schedule(context, effectiveSchedule, silent = true)) {
             Log.runtime(TAG, "${if (removed.isEmpty()) "新增" else "替换"}持久调度[${effectiveSchedule.name}] 已重排物理闹钟")
             return effectiveSchedule
@@ -100,26 +106,6 @@ object PersistentScheduleRegistry {
         SystemWakeScheduler.schedule(context, effectiveSchedule, silent = true)
         Log.record(TAG, "持久调度注册失败，已恢复旧调度[${effectiveSchedule.name}]")
         return effectiveSchedule.withFailure("system_alarm_schedule_failed", now)
-    }
-
-    fun removeById(
-        context: Context?,
-        id: String,
-    ): Boolean = withRegistryLock { removeByIdUnlocked(context, id) }
-
-    private fun removeByIdUnlocked(
-        context: Context?,
-        id: String,
-    ): Boolean {
-        if (id.isBlank()) return false
-        if (!ensureStorage()) return false
-        val schedules = loadMutable()
-        val removed = schedules.filter { it.id == id }
-        if (removed.isEmpty()) return false
-        schedules.removeAll(removed.toSet())
-        save(schedules)
-        context?.let { ctx -> removed.forEach { cancelSystemAlarm(ctx, it) } }
-        return true
     }
 
     fun removeByDedupeKey(
@@ -138,7 +124,11 @@ object PersistentScheduleRegistry {
         if (removed.isEmpty()) return 0
         schedules.removeAll(removed.toSet())
         save(schedules)
-        context?.let { ctx -> removed.forEach { cancelSystemAlarm(ctx, it) } }
+        removed.forEach { SystemWakeScheduler.cancelLaunchConfirmationTimeout(it.id) }
+        context?.let { ctx -> SystemWakeScheduler.schedule(ctx, removed.first(), silent = true) }
+        if (removed.any { it.kind == PersistentScheduleKind.MODULE_CHILD }) {
+            ApplicationHookCore.dispatchIfNeeded()
+        }
         return removed.size
     }
 
@@ -158,7 +148,8 @@ object PersistentScheduleRegistry {
         if (removed.isEmpty()) return 0
         schedules.removeAll(removed.toSet())
         save(schedules)
-        context?.let { ctx -> removed.forEach { cancelSystemAlarm(ctx, it) } }
+        removed.forEach { SystemWakeScheduler.cancelLaunchConfirmationTimeout(it.id) }
+        context?.let { ctx -> SystemWakeScheduler.schedule(ctx, removed.first(), silent = true) }
         return removed.size
     }
 
@@ -182,7 +173,36 @@ object PersistentScheduleRegistry {
         if (removed.isEmpty()) return 0
         schedules.removeAll(removed.toSet())
         save(schedules)
-        context?.let { ctx -> removed.forEach { cancelSystemAlarm(ctx, it, silent = silent) } }
+        removed.forEach { SystemWakeScheduler.cancelLaunchConfirmationTimeout(it.id) }
+        context?.let { ctx -> SystemWakeScheduler.schedule(ctx, removed.first(), silent = silent) }
+        return removed.size
+    }
+
+    fun cancelByOwner(
+        context: Context?,
+        ownerUserId: String,
+    ): Int = withRegistryLock { cancelByOwnerUnlocked(context, ownerUserId) }
+
+    private fun cancelByOwnerUnlocked(
+        context: Context?,
+        ownerUserId: String,
+    ): Int {
+        val safeOwnerUserId = ownerUserId.trim()
+        if (safeOwnerUserId.isEmpty() || !ensureStorage()) return 0
+        val schedules = loadMutable()
+        val removed = schedules.filter { schedule ->
+            schedule.ownerUserId?.trim() == safeOwnerUserId
+        }
+        if (removed.isEmpty()) return 0
+        schedules.removeAll(removed.toSet())
+        save(schedules)
+        removed.forEach { SystemWakeScheduler.cancelLaunchConfirmationTimeout(it.id) }
+        context?.let { ctx ->
+            SystemWakeScheduler.schedule(ctx, schedules.firstOrNull() ?: PersistentSchedule(), silent = true)
+        }
+        if (removed.any { it.kind == PersistentScheduleKind.MODULE_CHILD }) {
+            ApplicationHookCore.dispatchIfNeeded()
+        }
         return removed.size
     }
 
@@ -195,6 +215,24 @@ object PersistentScheduleRegistry {
     fun list(): List<PersistentSchedule> {
         if (!ensureStorage()) return emptyList()
         return loadMutable().toList()
+    }
+
+    /**
+     * Checks only the current session identity and persisted execution state.  Task names and
+     * payload text are intentionally not part of the admission decision.
+     */
+    fun hasActiveModuleChild(
+        ownerUserId: String?,
+        sessionEpoch: Long,
+    ): Boolean {
+        val safeOwnerUserId = ownerUserId?.trim().orEmpty()
+        if (safeOwnerUserId.isEmpty() || sessionEpoch <= 0L || !ensureStorage()) return false
+        return loadMutable().any { schedule ->
+                schedule.kind == PersistentScheduleKind.MODULE_CHILD &&
+                schedule.ownerUserId?.trim() == safeOwnerUserId &&
+                schedule.sessionEpoch == sessionEpoch &&
+                schedule.state in activeModuleChildStates
+        }
     }
 
     /**
@@ -233,9 +271,8 @@ object PersistentScheduleRegistry {
         val schedules = loadMutable()
         if (schedules.isEmpty()) return
         save(emptyList())
-        context?.let { ctx ->
-            schedules.forEach { cancelSystemAlarm(ctx, it) }
-        }
+        schedules.forEach { SystemWakeScheduler.cancelLaunchConfirmationTimeout(it.id) }
+        context?.let { ctx -> SystemWakeScheduler.schedule(ctx, PersistentSchedule(), silent = true) }
     }
 
     fun activateSession(
@@ -253,7 +290,13 @@ object PersistentScheduleRegistry {
     ) {
         if (!ensureStorage()) return
         val safeOwnerUserId = ownerUserId.trim()
-        if (safeOwnerUserId.isEmpty() || sessionEpoch <= 0L) return
+        if (
+            safeOwnerUserId.isEmpty() ||
+            sessionEpoch <= 0L ||
+            !AccountSlotRegistry.isExecutableUser(safeOwnerUserId)
+        ) {
+            return
+        }
         val schedules = loadMutable()
         if (schedules.isEmpty()) return
         val retained = mutableListOf<PersistentSchedule>()
@@ -264,21 +307,20 @@ object PersistentScheduleRegistry {
                     scheduleOwnerUserId == safeOwnerUserId &&
                     schedule.sessionEpoch == sessionEpoch
             if (!isCurrentSessionSchedule) {
-                cancelSystemAlarm(context, schedule)
+                SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                 continue
             }
 
             if (schedule.state == PersistentScheduleState.SCHEDULED && schedule.triggerAtMs > now) {
                 val prepared = PersistentLaunchPolicy.prepareScheduleForRegistration(context, schedule)
                 if (prepared.blockedReason != null) {
-                    cancelSystemAlarm(context, schedule)
+                    SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                     Log.record(TAG, "持久调度已因禁止系统调度前台拉起目标应用而停用[${schedule.name}]")
                     continue
                 }
-                ensureSystemAlarm(context, prepared.schedule, "恢复持久调度", skipIfAlreadyEnsured = true)
                 retained.add(prepared.schedule)
             } else {
-                cancelSystemAlarm(context, schedule)
+                SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                 retained.add(schedule)
             }
         }
@@ -289,19 +331,29 @@ object PersistentScheduleRegistry {
     fun markFired(
         id: String,
         now: Long = System.currentTimeMillis(),
+        source: String = "registry",
     ) {
-        updateSchedule(id) { it.withFired(now) }
+        val schedule = get(id)
+        val shouldDispatch = schedule?.kind == PersistentScheduleKind.MODULE_CHILD &&
+            schedule.state !in terminalScheduleStates
+        updateSchedule(id, source) { current ->
+            if (current.state in terminalScheduleStates) current else current.withFired(now)
+        }
+        if (shouldDispatch) {
+            ApplicationHookCore.dispatchIfNeeded()
+        }
     }
 
     fun markFired(
         context: Context?,
         id: String,
         now: Long = System.currentTimeMillis(),
+        source: String = "registry",
     ) {
         val schedule = get(id)
-        markFired(id, now)
+        markFired(id, now, source)
         if (context != null && schedule != null) {
-            cancelSystemAlarm(context, schedule)
+            SystemWakeScheduler.schedule(context, schedule, silent = true)
         }
     }
 
@@ -309,20 +361,22 @@ object PersistentScheduleRegistry {
         context: Context?,
         id: String,
         now: Long = System.currentTimeMillis(),
+        source: String = "registry",
     ): Boolean {
         if (id.isBlank()) return false
         val schedule = get(id) ?: return false
         if (schedule.state != PersistentScheduleState.SCHEDULED) return false
-        updateSchedule(id) { it.withQueued(now) }
-        context?.let { cancelSystemAlarm(it, schedule) }
+        updateSchedule(id, source) { it.withQueued(now) }
+        context?.let { SystemWakeScheduler.schedule(it, schedule, silent = true) }
         return true
     }
 
     fun markRunning(
         id: String,
         now: Long = System.currentTimeMillis(),
+        source: String = "registry",
     ) {
-        updateSchedule(id) { schedule ->
+        updateSchedule(id, source) { schedule ->
             if (schedule.state == PersistentScheduleState.QUEUED || schedule.state == PersistentScheduleState.SCHEDULED) {
                 schedule.withRunning(now)
             } else {
@@ -401,8 +455,43 @@ object PersistentScheduleRegistry {
         id: String,
         error: String,
         now: Long = System.currentTimeMillis(),
+        source: String = "registry",
     ) {
-        updateSchedule(id) { it.withFailure(error, now) }
+        val schedule = get(id)
+        val shouldDispatch = schedule?.kind == PersistentScheduleKind.MODULE_CHILD &&
+            schedule.state !in terminalScheduleStates
+        updateSchedule(id, source) { current ->
+            if (current.state in terminalScheduleStates) current else current.withFailure(error, now)
+        }
+        if (shouldDispatch) {
+            ApplicationHookCore.dispatchIfNeeded()
+        }
+    }
+
+    fun markWorkerFailedIfActive(
+        context: Context?,
+        id: String,
+        error: String,
+        now: Long = System.currentTimeMillis(),
+        source: String = "worker_completion",
+    ): Boolean {
+        val schedule = get(id)
+        var changed = false
+        updateSchedule(id, source) { current ->
+            if (current.state in activeModuleChildStates) {
+                changed = true
+                current.withFailure(error, now)
+            } else {
+                current
+            }
+        }
+        if (changed) {
+            if (context != null && schedule != null) {
+                SystemWakeScheduler.schedule(context, schedule, silent = true)
+            }
+            ApplicationHookCore.dispatchIfNeeded()
+        }
+        return changed
     }
 
     fun markFailed(
@@ -410,11 +499,12 @@ object PersistentScheduleRegistry {
         id: String,
         error: String,
         now: Long = System.currentTimeMillis(),
+        source: String = "registry",
     ) {
         val schedule = get(id)
-        markFailed(id, error, now)
+        markFailed(id, error, now, source)
         if (context != null && schedule != null) {
-            cancelSystemAlarm(context, schedule)
+            SystemWakeScheduler.schedule(context, schedule, silent = true)
         }
     }
 
@@ -422,11 +512,19 @@ object PersistentScheduleRegistry {
         context: Context?,
         id: String,
         now: Long = System.currentTimeMillis(),
+        source: String = "registry",
     ) {
         val schedule = get(id)
-        updateSchedule(id) { it.withScheduleState(PersistentScheduleState.EXPIRED, now) }
+        val shouldDispatch = schedule?.kind == PersistentScheduleKind.MODULE_CHILD &&
+            schedule.state !in terminalScheduleStates
+        updateSchedule(id, source) { current ->
+            if (current.state in terminalScheduleStates) current else current.withScheduleState(PersistentScheduleState.EXPIRED, now)
+        }
         if (context != null && schedule != null) {
-            cancelSystemAlarm(context, schedule)
+            SystemWakeScheduler.schedule(context, schedule, silent = true)
+        }
+        if (shouldDispatch) {
+            ApplicationHookCore.dispatchIfNeeded()
         }
     }
 
@@ -466,6 +564,7 @@ object PersistentScheduleRegistry {
                     schedule.sessionEpoch == activeSession.sessionEpoch
 
             if (schedule.state != PersistentScheduleState.SCHEDULED) {
+                SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                 if (isCurrentSessionSchedule && now - schedule.updatedAtMs <= RETAIN_FINISHED_MS) {
                     retained.add(schedule)
                 }
@@ -473,7 +572,7 @@ object PersistentScheduleRegistry {
             }
 
             if (!isCurrentSessionSchedule) {
-                cancelSystemAlarm(context, schedule)
+                SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                 continue
             }
 
@@ -486,13 +585,13 @@ object PersistentScheduleRegistry {
                         Log.record(TAG, "发现到期持久任务[${schedule.name}] ${TimeUtil.getCommonDate(schedule.triggerAtMs)}")
                     } else {
                         expired++
-                        cancelSystemAlarm(context, schedule)
+                        SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                         retained.add(schedule.withScheduleState(PersistentScheduleState.EXPIRED, now))
                         Log.runtime(TAG, "恢复重排跳过已到期持久任务[${schedule.name}] ${TimeUtil.getCommonDate(schedule.triggerAtMs)}")
                     }
                 } else {
                     expired++
-                    cancelSystemAlarm(context, schedule)
+                    SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                     retained.add(schedule.withScheduleState(PersistentScheduleState.EXPIRED, now))
                     Log.record(TAG, "持久任务已过期[${schedule.name}] ${TimeUtil.getCommonDate(schedule.triggerAtMs)}")
                 }
@@ -501,24 +600,19 @@ object PersistentScheduleRegistry {
 
             val prepared = PersistentLaunchPolicy.prepareScheduleForRegistration(context, schedule)
             if (prepared.blockedReason != null) {
-                cancelSystemAlarm(context, schedule)
+                SystemWakeScheduler.cancelLaunchConfirmationTimeout(schedule.id)
                 Log.record(TAG, "持久调度已因禁止系统调度前台拉起目标应用而停用[${schedule.name}]")
                 continue
-            }
-
-            when (ensureSystemAlarm(context, prepared.schedule, "恢复持久调度", skipIfAlreadyEnsured = true)) {
-                AlarmScheduleResult.SCHEDULED -> rescheduled++
-
-                AlarmScheduleResult.ALREADY_CONFIRMED,
-                AlarmScheduleResult.BLOCKED_BY_POLICY,
-                AlarmScheduleResult.FAILED,
-                -> Unit
             }
             retained.add(prepared.schedule)
         }
 
         save(retained)
-        SystemWakeScheduler.schedule(context, retained.firstOrNull() ?: PersistentSchedule(), silent = true)
+        val replanSucceeded =
+            SystemWakeScheduler.schedule(context, retained.firstOrNull() ?: PersistentSchedule(), silent = true)
+        if (replanSucceeded && retained.any { it.state == PersistentScheduleState.SCHEDULED && it.triggerAtMs > now }) {
+            rescheduled = 1
+        }
         return ReconcileResult(
             dueSchedules = due,
             rescheduledCount = rescheduled,
@@ -540,68 +634,6 @@ object PersistentScheduleRegistry {
             canonicalPayloadJson(left.payloadJson) == canonicalPayloadJson(right.payloadJson) &&
             left.ownerUserId?.trim().orEmpty() == right.ownerUserId?.trim().orEmpty() &&
             left.sessionEpoch == right.sessionEpoch
-
-    private fun ensureSystemAlarm(
-        context: Context,
-        schedule: PersistentSchedule,
-        action: String,
-        skipIfAlreadyEnsured: Boolean,
-    ): AlarmScheduleResult {
-        val blockedReason = PersistentLaunchPolicy.prepareScheduleForRegistration(context, schedule).blockedReason
-        if (blockedReason != null) {
-            cancelSystemAlarm(context, schedule, silent = true)
-            return AlarmScheduleResult.BLOCKED_BY_POLICY
-        }
-        val key = alarmKey(schedule)
-        if (skipIfAlreadyEnsured && isAlarmEnsured(key)) {
-            return AlarmScheduleResult.ALREADY_CONFIRMED
-        }
-        if (!SystemWakeScheduler.schedule(context, schedule, silent = true)) {
-            return AlarmScheduleResult.FAILED
-        }
-        rememberAlarm(schedule)
-        Log.runtime(
-            TAG,
-            "$action[${schedule.name}] ${TimeUtil.getCommonDate(schedule.triggerAtMs)} dedupeKey=${schedule.dedupeKey}",
-        )
-        return AlarmScheduleResult.SCHEDULED
-    }
-
-    private fun cancelSystemAlarm(
-        context: Context,
-        schedule: PersistentSchedule,
-        silent: Boolean = false,
-    ) {
-        forgetAlarm(schedule)
-        SystemWakeScheduler.cancel(context, schedule, silent = silent)
-    }
-
-    private fun isAlarmEnsured(key: String): Boolean = synchronized(alarmEnsureLock) { ensuredAlarmKeys.contains(key) }
-
-    private fun rememberAlarm(schedule: PersistentSchedule) {
-        synchronized(alarmEnsureLock) {
-            ensuredAlarmKeys.add(alarmKey(schedule))
-        }
-    }
-
-    private fun forgetAlarm(schedule: PersistentSchedule) {
-        synchronized(alarmEnsureLock) {
-            ensuredAlarmKeys.remove(alarmKey(schedule))
-        }
-    }
-
-    private fun alarmKey(schedule: PersistentSchedule): String =
-        listOf(
-            schedule.id,
-            schedule.kind,
-            schedule.name,
-            schedule.triggerAtMs.toString(),
-            schedule.toleranceMs.toString(),
-            schedule.dedupeKey,
-            canonicalPayloadJson(schedule.payloadJson),
-            schedule.ownerUserId?.trim().orEmpty(),
-            schedule.sessionEpoch.toString(),
-        ).joinToString("|")
 
     private fun canonicalPayloadJson(payloadJson: String): String {
         val trimmed = payloadJson.trim().ifBlank { "{}" }
@@ -652,6 +684,7 @@ object PersistentScheduleRegistry {
 
     private fun updateSchedule(
         id: String,
+        source: String = "registry",
         updater: (PersistentSchedule) -> PersistentSchedule,
     ) {
         if (id.isBlank()) return
@@ -660,8 +693,22 @@ object PersistentScheduleRegistry {
             val schedules = loadMutable()
             val index = schedules.indexOfFirst { it.id == id }
             if (index < 0) return@withRegistryLock
-            schedules[index] = updater(schedules[index])
+            val previous = schedules[index]
+            val updated = updater(previous)
+            if (updated == previous) return@withRegistryLock
+            schedules[index] = updated
             save(schedules)
+            if (previous.state != updated.state) {
+                Log.record(
+                    TAG,
+                    "持久调度状态变更[id=${updated.id}] ${previous.state}->${updated.state} kind=${updated.kind} source=$source owner=${updated.ownerUserId} session=${updated.sessionEpoch}",
+                )
+            }
+            if (previous.state == PersistentScheduleState.SCHEDULED &&
+                (updated.state != PersistentScheduleState.SCHEDULED || updated.triggerAtMs != previous.triggerAtMs)
+            ) {
+                SystemWakeScheduler.cancelLaunchConfirmationTimeout(previous.id)
+            }
         }
     }
 
@@ -761,9 +808,6 @@ object PersistentScheduleRegistry {
     private fun invalidateCache() {
         synchronized(cacheLock) {
             cache = null
-        }
-        synchronized(alarmEnsureLock) {
-            ensuredAlarmKeys.clear()
         }
     }
 }
